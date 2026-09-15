@@ -1,0 +1,3 @@
+test:
+  service: Disk
+  root: <%= File.expand_path("../tmp/storage", __dir__) %>

@@ -1,0 +1,11 @@
+# Database config for the dummy app's test suite.
+#
+# Default is SQLite (zero setup). The Postgres leg sets DATABASE_URL, which
+# ActiveRecord merges over this file automatically — one env var drives the
+# whole database matrix.
+test:
+  adapter: sqlite3
+  database: <%= File.expand_path("../db/test.sqlite3", __dir__) %>
+  pool: 5
+  timeout: 5000
+  url: <%= ENV["DATABASE_URL"] %>

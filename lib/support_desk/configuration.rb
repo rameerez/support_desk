@@ -82,7 +82,11 @@ module SupportDesk
       # What requesters see as the counterpart in their inbox.
       def name = read(:name) || key.to_s.humanize
 
+      # nil un-sets the name, so the desk goes back to inheriting it (or to
+      # its humanized key). A blank string is a mistake, not an intention.
       def name=(value)
+        return @settings.delete(:name) if value.nil?
+
         @settings[:name] = ensure_present_string(value, "name")
       end
 

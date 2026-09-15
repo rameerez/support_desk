@@ -49,7 +49,10 @@ module SupportDesk
     belongs_to :closed_by, polymorphic: true, optional: true
 
     has_many :assignments, class_name: "SupportDesk::Assignment", inverse_of: :ticket, dependent: :destroy
-    has_many :events, class_name: "SupportDesk::Event", inverse_of: :ticket, dependent: :destroy
+    # :delete_all, not :destroy — an Event is readonly once written, and a
+    # readonly record refuses to be destroyed. Deleting a ticket is the one
+    # thing that takes its timeline with it, and it needs no callbacks.
+    has_many :events, class_name: "SupportDesk::Event", inverse_of: :ticket, dependent: :delete_all
     has_many :messages, through: :conversation, source: :messages
 
     # `ticket.topic` is a Topic, never a String — the tree is the thing that
@@ -149,8 +152,10 @@ module SupportDesk
       def open!(requester:, message: nil, about: nil, topic: nil, files: [], via: :in_app,
                 desk: nil, requester_role: nil, title: nil, metadata: {})
         desk ||= SupportDesk.desk
-        node = resolve_topic!(topic, about, desk)
+        # The subject is checked BEFORE the topic: "this isn't supportable" is
+        # the useful error, and an unsupportable record has no topic to find.
         validate_subject!(about, requester)
+        node = resolve_topic!(topic, about, desk)
 
         cardinality = cardinality_key_for(requester: requester, subject: about, topic: node)
         existing = open_ticket_for(requester: requester, desk: desk, cardinality_key: cardinality)
@@ -779,6 +784,11 @@ module SupportDesk
     end
 
     def apply_reply_policy!(actor, request: nil)
+      # A closed case has no seat to take: an agent adding one last word
+      # posts it and the case stays closed. (A REQUESTER writing is what
+      # reopens it — see #register!.)
+      return if closed?
+
       policy = desk_config.reply_policy
 
       if unassigned?

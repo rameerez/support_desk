@@ -64,18 +64,19 @@ module SupportDesk
       !!@configured
     end
 
-    # Reset all global state: configuration, subscribers, registries and the
-    # memoised desks. The test suite calls it between examples; it's also
-    # handy in a console when experimenting.
+    # Reset the global state a test can dirty: configuration, subscribers,
+    # and the memoised desks. Handy in a console too.
+    #
+    # The class registries are deliberately NOT cleared: they are a property
+    # of the code that is loaded (the macros register at class definition
+    # time), not of the configuration, and a host test suite shouldn't have
+    # to re-declare its own models between examples.
     def reset!
       @config = Configuration.new
       @configured = false
       @subscribers = nil
       @desks = nil
       @chats_subscribed = false
-      @requester_class_names = nil
-      @supportable_class_names = nil
-      @agent_class_names = nil
       self
     end
 

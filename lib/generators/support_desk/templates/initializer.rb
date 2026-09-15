@@ -127,6 +127,13 @@ SupportDesk.configure do |config|
   # is notified, the first take wins) and ->(ticket) { agent } procs.
   #
   # config.routing = :manual
+  #
+  # The email channel's two settings, ahead of support_desk 0.2: whether an
+  # agent's reply is also emailed to the requester, and whether a case that
+  # has been waiting on the requester closes itself.
+  #
+  # config.mirror_replies_by_email = :when_away   # :always | :when_away | :never
+  # config.auto_close_after = nil                 # e.g. 7.days
 
   # ==========================================================================
   # MORE THAN ONE DESK

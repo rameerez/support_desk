@@ -5,8 +5,8 @@ require_relative "lib/support_desk/version"
 Gem::Specification.new do |spec|
   spec.name = "support_desk"
   spec.version = SupportDesk::VERSION
-  spec.authors = ["rameerez"]
-  spec.email = ["rubygems@rameerez.com"]
+  spec.authors = [ "rameerez" ]
+  spec.email = [ "rubygems@rameerez.com" ]
 
   spec.summary = "Add customer support (tickets that are conversations) to your Rails app"
   spec.description = "support_desk adds a customer support desk to any Rails app: tickets that are conversations. A requester asks for help about something in your app (a ride, an order, a withdrawal) or about nothing in particular, your desk answers, humans or bots sign the answers, and your team works a queue. It is a product gem on the `chats` kernel: chats owns the transcript, realtime, attachments, read state and moderation; support_desk owns cases, topics, assignment, routing and the console API. One macro makes a model ask for help (`has_support_tickets`), one makes a domain record something to ask about (`supportable`), one makes a person answer (`acts_as_support_agent`). Topics are a tree defined in code that drives the wizard, the picker, routing and metrics; assignment is a history, not a column; every transition writes an append-only event row and emits an error-isolated event your app can subscribe to. Batteries included on the user side (a mountable engine with ejectable views), bring-your-own-UI on the agent side (query objects, presenters, a controller concern and a console generator), with no runtime dependency on any admin framework."
@@ -30,7 +30,7 @@ Gem::Specification.new do |spec|
   end
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
-  spec.require_paths = ["lib"]
+  spec.require_paths = [ "lib" ]
 
   # Runtime dependencies. `chats` is the kernel this gem is a product on: it
   # owns the transcript (conversations, messages, read state, realtime,

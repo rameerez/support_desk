@@ -31,7 +31,7 @@ module SupportDesk
     def initialize(key:, parent: nil, **options)
       @key = key.to_sym
       @parent = parent
-      @path = [parent&.path, @key].compact.join("/")
+      @path = [ parent&.path, @key ].compact.join("/")
       @options = options.freeze
       @children = []
     end
