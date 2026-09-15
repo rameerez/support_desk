@@ -21,5 +21,5 @@ SimpleCov.configure do
 
   # Thresholds sit just under the current floor so the gate catches a real
   # regression without failing on the existing baseline; raise as it grows.
-  minimum_coverage line: 85, branch: 60
+  minimum_coverage line: 94, branch: 74
 end
