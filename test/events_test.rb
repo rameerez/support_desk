@@ -111,6 +111,42 @@ class EventsTest < ActiveSupport::TestCase
     assert_equal [ "vamos" ], replies
   end
 
+  test "opening a ticket reaches the audit hook" do
+    alice = create_user
+    order = create_order(user: alice)
+    audited = []
+    SupportDesk.on(:ticket_transitioned) do |ticket, kind, by:, request:, payload:|
+      audited << [ kind, by, payload ]
+    end
+
+    ticket = alice.ask_support!("hola", about: order)
+
+    kind, by, payload = audited.first
+
+    assert_equal :opened, kind, "ticket_transitioned is the audit mirror: opening a case can't skip it"
+    assert_equal alice, by
+    assert_equal "order", payload["topic"]
+    assert_equal "in_app", payload["via"]
+    assert_equal 1, ticket.events.of_kind(:opened).count
+  end
+
+  test "a reply that reopens a closed ticket reaches the audit hook" do
+    alice = create_user
+    lucia = create_agent
+    ticket = ticket_for(alice)
+    ticket.close!(by: lucia)
+    audited = []
+    SupportDesk.on(:ticket_transitioned) do |_ticket, kind, by:, request:, payload:|
+      audited << [ kind, by, payload ]
+    end
+
+    alice.message!(ticket.conversation, "sigo con el problema")
+
+    assert_equal [ :reopened ], audited.map(&:first)
+    assert_equal alice, audited.first[1]
+    assert_equal "requester_reply", audited.first[2]["via"]
+  end
+
   test "the catalogue documents every event the gem can emit" do
     assert_includes SupportDesk::Events::CATALOGUE.keys, :ticket_transitioned
     assert_equal "ticket, message", SupportDesk::Events::CATALOGUE[:requester_replied]

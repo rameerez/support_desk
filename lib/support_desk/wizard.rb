@@ -206,10 +206,16 @@ module SupportDesk
 
     def resolve_topic
       path = params[:topic].presence
-      return tree.find(path.to_s) if path
+      chosen = path ? nil : resolve_subject
+      node = if path
+               tree.find(path.to_s)
+      elsif chosen
+               tree.find(chosen.support_topic.to_s)
+      end
 
-      chosen = resolve_subject
-      chosen ? tree.find(chosen.support_topic.to_s) : nil
+      # A deep link is a list of one: a topic this requester would never be
+      # offered is not one they may walk into by typing its path.
+      node if node&.visible_for?(requester)
     end
 
     def resolve_subject

@@ -230,6 +230,24 @@ module SupportDesk
       assert_unassigned @ticket
     end
 
+    test "reopen! restarts the waiting clock, so the SLA scopes can see it again" do
+      @ticket.reply!("vamos", by: @lucia)
+      @alice.message!(@ticket.conversation, "sigo esperando")
+      # Push both clocks back, keeping the requester's the later one: the
+      # desk owes the next word and has owed it for 30 hours.
+      @ticket.reload.update_columns(last_agent_message_at: 31.hours.ago,
+                                    last_requester_message_at: 30.hours.ago)
+      @ticket.close!(by: @lucia)
+
+      @ticket.reopen!(by: @alice)
+
+      assert_equal "agent", @ticket.reload.awaiting
+      assert_not_nil @ticket.waiting_since, "a reopened case with nothing on its clock is invisible to the SLA"
+      assert_includes Ticket.waiting_over(24.hours), @ticket
+      assert_includes Ticket.overdue, @ticket
+      assert_predicate @ticket, :overdue?
+    end
+
     test "reopen! on an open ticket writes nothing" do
       assert_no_difference -> { @ticket.events.count } do
         assert_equal @ticket, @ticket.reopen!(by: @alice)
@@ -302,6 +320,60 @@ module SupportDesk
 
       assert_equal order, free.reload.subject
       assert_ticket_event free, :subject_attached
+    end
+
+    test "attach_subject! claims the cardinality of the thing it now says it's about" do
+      another_order = create_order(user: @alice, number: "SO2")
+      free = ticket_for(@alice, topic: :account)
+
+      free.attach_subject!(another_order, by: @lucia)
+
+      # The case IS the open case about that order now, so asking about the
+      # order again lands in it rather than opening a second one.
+      assert_equal free.id, @alice.ask_support!("otra vez", about: another_order).id
+      assert_equal 1, Ticket.where(requester: @alice, subject: another_order).count
+    end
+
+    test "change_topic! frees the topic it vacated" do
+      free = ticket_for(@alice, topic: :account)
+
+      free.change_topic!(to: :other, by: @lucia)
+
+      reopened_topic = @alice.ask_support!("una cosa nueva de mi cuenta", topic: :account)
+
+      assert_not_equal free.id, reopened_topic.id
+      assert_equal "account", reopened_topic.topic.path
+    end
+
+    test "refiling onto something the requester already has an open case about is refused" do
+      about_order = ticket_for(@alice, about: @order)
+      free = ticket_for(@alice, topic: :account)
+
+      error = assert_raises(InvalidTransition) { free.attach_subject!(@order, by: @lucia) }
+
+      assert_match(/already has an open ticket about that/, error.message)
+      assert_match(about_order.reference, error.message)
+      assert_nil free.reload.subject
+    end
+
+    test "change_topic! is an agent's job" do
+      error = assert_raises(NotAnAgent) { @ticket.change_topic!(to: :account, by: @alice) }
+
+      assert_match(/acts_as_support_agent/, error.message)
+      assert_equal "order", @ticket.reload.topic.path
+    end
+
+    test "an agent may file onto a topic no requester is offered" do
+      SupportDesk.config.topics do
+        topic :order, about: "Order"
+        topic :safety, priority: :urgent, only: ->(_requester) { false }
+        other
+      end
+
+      @ticket.change_topic!(to: :safety, by: @lucia)
+
+      assert_equal "safety", @ticket.reload.topic.path
+      assert_equal 2, @ticket.priority
     end
 
     test "attach_subject! refuses a record that isn't supportable" do

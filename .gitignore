@@ -3,13 +3,13 @@
 
 /.bundle/
 /doc/
-/log/*.log
+/log/
 /pkg/
 /tmp/
 /coverage/
 /test/dummy/db/*.sqlite3
 /test/dummy/db/*.sqlite3-*
-/test/dummy/log/*.log
+/test/dummy/log/
 /test/dummy/storage/
 /test/dummy/tmp/
 *.gem

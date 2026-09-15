@@ -150,6 +150,14 @@ module SupportDesk
     def subject_required? = subject_mode == :required
     def free_form? = subject_mode == :none
 
+    # Whether this node is the tree's declared way out — what `other`
+    # builds, or any leaf a host declared `free_form: true`.
+    #
+    # Deliberately NOT the same question as #free_form?: plenty of topics
+    # take no subject ("app feedback", "safety") without being the place a
+    # ticket should land when nobody picked anything.
+    def catch_all? = !!options[:free_form]
+
     # The picker's candidate records for +requester+: the topic's
     # `candidates:` proc, else each `about:` class's own
     # `.support_candidates_for`.

@@ -75,7 +75,7 @@ class DoctorTest < ActiveSupport::TestCase
     assert_match(/no open assignment/, SupportDesk.doctor.failures.map(&:message).join)
   end
 
-  test "two open assignments on one ticket are impossible on Postgres and caught everywhere else" do
+  test "two open assignments on one ticket are impossible where partial indexes exist" do
     ticket = ticket_for(create_user)
     lucia = create_agent
     pedro = create_agent
@@ -85,7 +85,7 @@ class DoctorTest < ActiveSupport::TestCase
       SupportDesk::Assignment.create!(ticket: ticket, agent: pedro, reason: "assigned", assigned_at: Time.current)
     end
 
-    if postgres?
+    if partial_indexes?
       # The partial unique index is the belt; the doctor is the braces.
       assert_raises(ActiveRecord::RecordNotUnique) { second.call }
     else

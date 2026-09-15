@@ -69,6 +69,7 @@ class ReadmeTest < ActiveSupport::TestCase
     @alice.message!(ticket.conversation, "¿alguna noticia?")
     ticket.close!(by: @lucia)
 
-    assert_equal %i[opened replied transitioned], seen.map(&:first)
+    # Opening is a transition too, so the audit hook sees it first.
+    assert_equal %i[transitioned opened replied transitioned], seen.map(&:first)
   end
 end

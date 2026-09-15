@@ -31,9 +31,14 @@ class InstallGeneratorTest < Rails::Generators::TestCase
 
       # The cardinality guarantee, and the PostgreSQL-only partial indexes.
       assert_match(/t\.string :cardinality_key, null: false/, migration)
-      assert_match(/if postgres\?/, migration)
+      # Enforced on every adapter that has partial indexes (that is, all but
+      # MySQL) — NOT on PostgreSQL alone, which would leave the default
+      # SQLite install enforcing nothing.
+      assert_match(/if partial_indexes\?/, migration)
+      assert_match(/!connection\.adapter_name\.match\?\(\/mysql\/i\)/, migration)
       assert_match(/unique: true, where: "status <> 'closed'"/, migration)
       assert_match(/unique: true, where: "released_at IS NULL"/, migration)
+      assert_no_match(/if postgres\?/, migration)
 
       # Events are append-only: created_at, and no updated_at.
       assert_match(/t\.datetime :created_at, null: false/, migration)

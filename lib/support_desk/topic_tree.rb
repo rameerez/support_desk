@@ -76,15 +76,20 @@ module SupportDesk
       nodes.select { |node| node.visible_for?(requester) }
     end
 
-    # True when the tree has somewhere to put "something else" — a visible
-    # leaf that needs no subject.
+    # True when the tree has somewhere to put "something else": a leaf
+    # DECLARED as the way out, with `other` or `free_form: true`.
+    #
+    # Not "any leaf that takes no subject" — a tree can be full of
+    # subject-less topics ("safety", "feedback") and still have no honest
+    # answer to "none of the above", which is the failure this guards.
     def free_form?
-      leaves.any? { |leaf| leaf.free_form? && !leaf.retired? }
+      !free_form_leaf.nil?
     end
 
     # The leaf a ticket lands on when nobody picked a topic.
     def free_form_leaf
-      find(OTHER_KEY.to_s) || leaves.find { |leaf| leaf.free_form? && !leaf.retired? }
+      candidates = leaves.select { |leaf| leaf.catch_all? && !leaf.retired? }
+      candidates.find { |leaf| leaf.key == OTHER_KEY } || candidates.first
     end
 
     # Every `about:` class name mentioned anywhere in the tree — what boot
@@ -140,17 +145,19 @@ module SupportDesk
       end
 
       # The free-form leaf ("Otra cosa"). `other false` removes it — the gem
-      # warns at boot when a tree ends up without one.
+      # warns at boot when a tree ends up without one. A host that wants a
+      # differently named way out declares that leaf `free_form: true`.
       def other(enabled = true, **options)
         return @tree.remove(TopicTree::OTHER_KEY.to_s) unless enabled
 
-        topic(TopicTree::OTHER_KEY, subject: :none, **options)
+        topic(TopicTree::OTHER_KEY, subject: :none, free_form: true, **options)
       end
 
       private
 
       KNOWN_OPTIONS = %i[
         label about ask candidates subject prefill placeholder only priority route_to desk retired icon
+        free_form
       ].freeze
 
       def validate!(key, options)

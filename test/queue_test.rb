@@ -81,6 +81,37 @@ class QueueTest < ActiveSupport::TestCase
     assert_equal @mine, @queue.next
   end
 
+  test "next is the most urgent, not the newest" do
+    # The urgent one is also the OLDEST, so an ordering that starts with
+    # "newest first" would quietly hand out the wrong ticket — and a test
+    # whose urgent ticket happened to be newest would never notice.
+    urgent = @unclaimed
+    urgent.update!(priority: 2, opened_at: 3.days.ago)
+    newest = ticket_for(create_user)
+    newest.update!(priority: 0, opened_at: 1.minute.ago)
+
+    assert_equal urgent, @queue.next
+    assert_equal urgent, @queue.unassigned.first
+    assert_equal urgent, @queue.awaiting.first
+    assert_equal urgent, @queue.open.first
+  end
+
+  test "each tab states its own order, so the base scope can't overrule it" do
+    # Opened first, touched last: the two orders disagree on purpose, so a
+    # tab whose own order was a dead tiebreaker answers wrongly.
+    long_running = @done
+    long_running.update_columns(opened_at: 3.days.ago, updated_at: Time.current)
+    recently_opened = ticket_for(create_user)
+    recently_opened.close!(by: @lucia)
+    recently_opened.update_columns(opened_at: 1.minute.ago, updated_at: 2.days.ago)
+
+    assert_equal long_running, @queue.closed.first, "closed is most recently touched first"
+
+    listed = @queue.all.to_a
+
+    assert_operator listed.index(recently_opened), :<, listed.index(long_running), "all is newest first"
+  end
+
   test "next never offers somebody else's ticket" do
     assert_not_equal @theirs, @queue.next
   end

@@ -65,10 +65,19 @@ module ActiveSupport
       end
     end
 
-    # True when the suite is running its PostgreSQL leg, where the partial
-    # unique indexes exist and the database enforces what the model promises.
-    def postgres?
-      ActiveRecord::Base.connection.adapter_name.match?(/postg/i)
+    # Whether this adapter enforces the partial unique indexes — everything
+    # but MySQL — so a test can tell "the database refused it" from "only
+    # the model would have".
+    def partial_indexes?
+      !ActiveRecord::Base.connection.adapter_name.match?(/mysql/i)
+    end
+
+    # Tests that assert the DATABASE refuses something call this first. It
+    # fails rather than skips: the suite's own legs (SQLite, PostgreSQL)
+    # both have partial indexes, so reaching this on them is a real problem.
+    def skip_unless_partial_indexes
+      assert partial_indexes?,
+             "this adapter has no partial indexes, so the cardinality guarantee is model-only here"
     end
 
     # --- Data helpers -----------------------------------------------------------

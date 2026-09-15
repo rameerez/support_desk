@@ -37,6 +37,30 @@ class WizardTest < ActiveSupport::TestCase
     assert_equal %w[billing/invoice], w.choices.map(&:path)
   end
 
+  test "a topic the requester may not use leaves them at the first step" do
+    # A deep link is a list of one: `only:` has to decide whether a topic
+    # may be USED, not merely whether it appears in a menu.
+    fresh = create_user(onboarded: false)
+    w = SupportDesk::Wizard.new(fresh, { topic: "account" })
+
+    assert_nil w.topic
+    assert_equal :topic, w.step
+    assert_not_includes w.choices.map(&:path), "account"
+  end
+
+  test "a hidden topic can't be reached through a signed subject either" do
+    SupportDesk.config.topics do
+      topic :order, about: "Order", only: ->(requester) { requester.onboarded? }
+      other
+    end
+    fresh = create_user(onboarded: false)
+    their_order = create_order(user: fresh)
+    w = SupportDesk::Wizard.new(fresh, { subject: SupportDesk::Wizard.sign_subject(their_order) })
+
+    assert_nil w.topic
+    assert_equal :topic, w.step
+  end
+
   test "an unknown topic path leaves the requester at the first step" do
     w = wizard(topic: "nope")
 

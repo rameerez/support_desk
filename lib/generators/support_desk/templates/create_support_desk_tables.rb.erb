@@ -99,9 +99,13 @@ class CreateSupportDeskTables < ActiveRecord::Migration<%= migration_version %>
     # THE cardinality guarantee: one open ticket per requester per thing.
     # A partial unique index is what makes concurrent opens race-safe
     # without advisory locks — the second INSERT loses and Ticket.open!
-    # hands back the first one's ticket. PostgreSQL only; elsewhere the
-    # model's find-then-create is the whole story and this is just an index.
-    if postgres?
+    # hands back the first one's ticket.
+    #
+    # PostgreSQL AND SQLite both support partial indexes, so both get real
+    # enforcement. MySQL doesn't, so there the model's find-then-create is
+    # the whole story and this is a plain lookup index: a host on MySQL that
+    # cares about the race should serialize opens itself.
+    if partial_indexes?
       add_index :support_desk_tickets, [ :requester_type, :requester_id, :desk_id, :cardinality_key ],
                 unique: true, where: "status <> 'closed'",
                 name: "index_support_desk_tickets_on_open_cardinality"
@@ -138,8 +142,9 @@ class CreateSupportDeskTables < ActiveRecord::Migration<%= migration_version %>
               name: "index_support_desk_assignments_on_agent"
 
     # At most one open assignment per ticket — the invariant behind
-    # `ticket.assignee`.
-    if postgres?
+    # `ticket.assignee`. Same story: enforced everywhere partial indexes
+    # exist, checked by `SupportDesk.doctor` everywhere else.
+    if partial_indexes?
       add_index :support_desk_assignments, :ticket_id, unique: true, where: "released_at IS NULL",
                 name: "index_support_desk_assignments_on_open_ticket"
     end
@@ -187,8 +192,10 @@ class CreateSupportDeskTables < ActiveRecord::Migration<%= migration_version %>
     [ primary_key_type, foreign_key_type ]
   end
 
-  def postgres?
-    connection.adapter_name.match?(/postg/i)
+  # Whether this adapter can enforce a rule over SOME rows ("one open ticket
+  # per thing", "one open assignment per ticket"). Everything but MySQL can.
+  def partial_indexes?
+    !connection.adapter_name.match?(/mysql/i)
   end
 
   def json_column_type

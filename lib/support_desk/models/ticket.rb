@@ -155,7 +155,7 @@ module SupportDesk
         # The subject is checked BEFORE the topic: "this isn't supportable" is
         # the useful error, and an unsupportable record has no topic to find.
         validate_subject!(about, requester)
-        node = resolve_topic!(topic, about, desk)
+        node = resolve_topic!(topic, about, desk, requester)
 
         cardinality = cardinality_key_for(requester: requester, subject: about, topic: node)
         existing = open_ticket_for(requester: requester, desk: desk, cardinality_key: cardinality)
@@ -203,7 +203,15 @@ module SupportDesk
 
       private
 
-      def resolve_topic!(topic, about, desk)
+      def resolve_topic!(topic, about, desk, requester)
+        node = locate_topic!(topic, about, desk)
+        return node if node.visible_for?(requester)
+
+        raise NotAllowed, "#{requester.class}##{requester.id} may not open a ticket under topic " \
+                          "#{node.path.inspect} (its only: condition says no)"
+      end
+
+      def locate_topic!(topic, about, desk)
         tree = desk.config.topics
 
         if topic
@@ -270,7 +278,7 @@ module SupportDesk
         attempts = 0
         begin
           attempts += 1
-          transaction do
+          ticket, opened = transaction do
             ticket = create!(
               desk: desk, requester: requester, requester_role: requester_role, subject: about,
               topic: node, title: title.presence, reference: unique_reference, status: "open",
@@ -279,10 +287,16 @@ module SupportDesk
             )
             conversation = Chats::Conversation.direct_between!(requester, desk, about: ticket)
             ticket.update!(conversation_id: conversation.id, waiting_since: ticket.opened_at)
-            Event.record!(ticket: ticket, kind: "opened", actor: requester,
-                          payload: { "topic" => node.path, "via" => via.to_s })
-            ticket
+            # Through the same writer every other transition uses (`send`
+            # because it is private and we are the class, not the record),
+            # so opening a ticket reaches `ticket_transitioned` too.
+            opened = ticket.send(:record_transition!, :opened, actor: requester) do
+              { "topic" => node.path, "via" => via.to_s }
+            end
+            [ ticket, opened ]
           end
+          ticket.send(:publish_transition, opened, :opened, requester, nil)
+          ticket
         rescue ActiveRecord::RecordNotUnique
           existing = open_ticket_for(requester: requester, desk: desk, cardinality_key: cardinality_key)
           return existing if existing
@@ -541,8 +555,14 @@ module SupportDesk
       event = write_transition!(:reopened, actor: actor, request: request) do
         next false unless closed?
 
-        update!(status: "open", closed_at: nil, closed_by: nil, reopen_count: reopen_count.to_i + 1,
-                awaiting: awaiting_from_clocks, waiting_since: waiting_since_from_clocks)
+        # Order matters: waiting_since is DERIVED from awaiting, so awaiting
+        # has to be the reopened value before it is read. Computing both in
+        # one update! hash reads the closed ticket's "none" and stores nil —
+        # a reopened case that no SLA scope can see.
+        assign_attributes(status: "open", closed_at: nil, closed_by: nil,
+                          reopen_count: reopen_count.to_i + 1, awaiting: awaiting_from_clocks)
+        self.waiting_since = waiting_since_from_clocks
+        save!
         restore_assignment!(by: actor)
         { "reopen_count" => reopen_count }
       end
@@ -556,6 +576,9 @@ module SupportDesk
     # tree, and people describe problems in their own words.
     def change_topic!(to:, by: nil, request: nil)
       actor = resolve_actor(by)
+      # Agents may file onto any topic in the tree, including ones no
+      # requester is offered (`only:`); requesters may not file at all.
+      ensure_agent!(actor)
       node = desk_config.topics.find(to.to_s) ||
              raise(UnknownTopic, "no topic #{to.inspect} on desk #{desk.key}")
 
@@ -563,7 +586,8 @@ module SupportDesk
       event = write_transition!(:topic_changed, actor: actor, request: request) do
         next false if topic == node
 
-        update!(topic: node, priority: [ priority.to_i, node.priority ].max)
+        update!(topic: node, priority: [ priority.to_i, node.priority ].max,
+                cardinality_key: recomputed_cardinality_key(subject: subject, topic: node))
         { "from" => from&.path, "to" => node.path }
       end
       return self unless event
@@ -582,7 +606,8 @@ module SupportDesk
       event = write_transition!(:subject_attached, actor: actor, request: request) do
         next false if about?(record)
 
-        update!(subject: record)
+        update!(subject: record,
+                cardinality_key: recomputed_cardinality_key(subject: record, topic: topic))
         { "subject" => SupportDesk.actor_key(record) }
       end
       return self unless event
@@ -605,6 +630,7 @@ module SupportDesk
       opening = false
       reopened = false
       applied = false
+      reopen_event = nil
 
       with_lock do
         # Re-check under the lock: the same message can reach us twice (a
@@ -638,11 +664,11 @@ module SupportDesk
 
         if reopened
           restore_assignment!(by: :system)
-          Event.record!(ticket: self, kind: "reopened", actor: requester,
-                        payload: { "via" => "requester_reply" })
+          reopen_event = record_transition!(:reopened, actor: requester) { { "via" => "requester_reply" } }
         end
       end
 
+      publish_transition(reopen_event, :reopened, requester, nil) if reopen_event
       announce_registration(message, role: role, opening: opening, reopened: reopened) if applied
       self
     end
@@ -816,22 +842,35 @@ module SupportDesk
     # Run a transition under the row lock: yield, write exactly one event
     # row, and (once everything has committed) broadcast and emit. The block
     # returns the event payload, or false when there is nothing to do.
-    def write_transition!(kind, actor:, request: nil)
+    def write_transition!(kind, actor:, request: nil, &block)
       event = nil
+      with_lock { event = record_transition!(kind, actor: actor, &block) }
+      publish_transition(event, kind, actor, request) if event
+      event
+    end
 
-      with_lock do
-        payload = yield
-        next if payload == false || payload.nil?
+    # The half that writes, for callers who ALREADY hold the row (the
+    # reopen inside #register!) or who are still inside the transaction that
+    # created the ticket (the `opened` event). Returns the Event, or nil
+    # when the block says there was nothing to do.
+    def record_transition!(kind, actor:) # :nodoc:
+      payload = yield
+      return nil if payload == false || payload.nil?
 
-        event = Event.record!(ticket: self, kind: kind, actor: actor, payload: payload.compact)
-      end
+      Event.record!(ticket: self, kind: kind, actor: actor, payload: payload.compact)
+    end
 
-      if event
-        broadcast_change
-        SupportDesk.emit_after_commit(:ticket_transitioned, self, kind.to_sym, by: actor,
-                                                                              request: request || Current.request,
-                                                                              payload: event.payload)
-      end
+    # The half that tells the world, once the write is durable. Every
+    # transition goes through here — `ticket_transitioned` is the audit-log
+    # hook, so a transition that skipped it would be a hole in the host's
+    # audit trail, not a missing nicety.
+    def publish_transition(event, kind, actor, request) # :nodoc:
+      return nil if event.nil?
+
+      broadcast_change
+      SupportDesk.emit_after_commit(:ticket_transitioned, self, kind.to_sym, by: actor,
+                                                                            request: request || Current.request,
+                                                                            payload: event.payload)
       event
     end
 
@@ -868,6 +907,24 @@ module SupportDesk
       return false if record.nil? || type.nil?
 
       type == record.class.polymorphic_name && id.to_s == record.id.to_s
+    end
+
+    # What "one open ticket about this" means for this ticket, recomputed
+    # because the case now says it is about something else. Refusing a
+    # collision here is the point: silently keeping the old key leaves the
+    # thing it used to be about blocked, and the thing it IS about free for
+    # a second ticket.
+    def recomputed_cardinality_key(subject:, topic:)
+      key = self.class.cardinality_key_for(requester: requester, subject: subject, topic: topic)
+      conflict = self.class.not_closed.where(requester: requester, desk: desk, cardinality_key: key)
+                     .where.not(id: id).first
+      if conflict
+        raise InvalidTransition,
+              "#{requester.class}##{requester.id} already has an open ticket about that " \
+              "(#{conflict.reference}) — close or merge it first"
+      end
+
+      key
     end
 
     # Reopening restores the last holder's seat (reason "reopened") when

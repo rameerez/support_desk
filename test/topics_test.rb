@@ -154,6 +154,71 @@ class TopicsTest < ActiveSupport::TestCase
     assert_nil without.free_form_leaf
   end
 
+  test "a subject-less topic is not the way out" do
+    # A tree can be full of topics that take no subject and still have no
+    # honest answer to "none of the above".
+    tree = SupportDesk::TopicTree.build do
+      topic :order, about: "Order"
+      topic :safety
+      topic :feedback, subject: :none
+    end
+
+    assert_not_predicate tree, :free_form?
+    assert_nil tree.free_form_leaf
+    assert_predicate tree.find("feedback"), :free_form?
+    assert_not_predicate tree.find("feedback"), :catch_all?
+  end
+
+  test "other is the declared way out" do
+    assert_predicate @tree, :free_form?
+    assert_predicate @tree.find("other"), :catch_all?
+    assert_equal "other", @tree.free_form_leaf.path
+  end
+
+  test "a host may name its own way out" do
+    tree = SupportDesk::TopicTree.build do
+      topic :order, about: "Order"
+      topic :anything_else, subject: :none, free_form: true
+    end
+
+    assert_predicate tree, :free_form?
+    assert_equal "anything_else", tree.free_form_leaf.path
+  end
+
+  test "a retired way out doesn't count" do
+    tree = SupportDesk::TopicTree.build do
+      topic :order, about: "Order"
+      other retired: true
+    end
+
+    assert_not_predicate tree, :free_form?
+  end
+
+  test "asking for support with no topic fails loudly when the tree has no way out" do
+    SupportDesk.config.topics do
+      topic :order, about: "Order"
+      topic :feedback, subject: :none
+    end
+    alice = create_user
+
+    error = assert_raises(SupportDesk::UnknownTopic) { alice.ask_support!("una duda") }
+
+    assert_match(/no free-form topic/, error.message)
+    assert_match(/Add `other`/, error.message)
+  end
+
+  test "a tree whose only subject-less leaf isn't the way out is warned about at boot" do
+    SupportDesk.config.topics do
+      topic :order, about: "Order"
+      topic :feedback, subject: :none
+    end
+
+    SupportDesk.config.validate_classes!
+
+    assert_match(/no free-form topic/, SupportDesk.config.warnings.join)
+    assert_match(/no free-form topic/, SupportDesk.doctor.warnings.map(&:message).join)
+  end
+
   # --- DSL validation ----------------------------------------------------------
 
   test "an unknown topic option fails at build time with the known options" do

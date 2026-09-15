@@ -32,35 +32,40 @@ module SupportDesk
     end
 
     # --- Relations ---------------------------------------------------------------
+    #
+    # Every tab states its OWN order, and the base scope states none. An
+    # order baked into the base would win and every later `.order` would be
+    # a dead tiebreaker — which is how a queue quietly starts handing out
+    # the newest ticket when it promised the most urgent one.
 
-    # Every ticket on this desk, newest first.
+    # Every ticket on this desk, newest first — the unfiltered list.
     def all
-      Ticket.where(desk: desk).newest_first
+      scoped.newest_first
     end
 
-    # Open and held by this agent.
+    # Open and held by this agent, most urgent first.
     def mine
-      all.open.assigned_to(agent)
+      scoped.open.assigned_to(agent).most_urgent_first
     end
 
-    # Open and held by nobody.
+    # Open and held by nobody, most urgent first.
     def unassigned
-      all.open.unassigned
+      scoped.open.unassigned.most_urgent_first
     end
 
     # Open and waiting on the desk — the tab that means "work".
     def awaiting
-      all.open.awaiting_reply
+      scoped.open.awaiting_reply.most_urgent_first
     end
 
-    # Put aside until a date (0.2).
-    def snoozed = all.snoozed
+    # Put aside until a date, the soonest to wake first (0.2).
+    def snoozed = scoped.snoozed.order(:snoozed_until)
 
-    # Every live case on this desk, held or not.
-    def open = all.open
+    # Every live case on this desk, held or not, most urgent first.
+    def open = scoped.open.most_urgent_first
 
     # Done, most recently touched first.
-    def closed = all.closed.recent_activity_first
+    def closed = scoped.closed.recent_activity_first
 
     # --- Numbers -----------------------------------------------------------------
 
@@ -68,7 +73,7 @@ module SupportDesk
     # (status, awaiting, assignee) and adding up in Ruby costs one round
     # trip; six `.count` calls cost six.
     def counts
-      rows = Ticket.where(desk: desk).group(:status, :awaiting, :assignee_type, :assignee_id).count
+      rows = scoped.group(:status, :awaiting, :assignee_type, :assignee_id).count
 
       counts = TABS.index_with(0)
       rows.each do |(status, awaiting, assignee_type, assignee_id), count|
@@ -123,8 +128,14 @@ module SupportDesk
 
     private
 
+    # The base scope: this desk's tickets, in no particular order, so the
+    # caller's order is the one that counts.
+    def scoped
+      Ticket.where(desk: desk)
+    end
+
     def mine_or_unassigned
-      all.open.where(
+      scoped.open.where(
         Ticket.arel_table[:assignee_id].eq(nil).or(
           Ticket.arel_table[:assignee_type].eq(agent.class.polymorphic_name)
                 .and(Ticket.arel_table[:assignee_id].eq(agent.id))

@@ -101,17 +101,62 @@ module SupportDesk
       end
     end
 
-    test "a concurrent open loses the race and reads the winner's ticket" do
-      winner = @alice.ask_support!("primera", about: @order)
+    test "the database refuses a second open ticket about the same thing" do
+      skip_unless_partial_indexes
 
-      # Simulate the other request having committed between our check and our
-      # INSERT: the unique index (PostgreSQL) or the pre-check (elsewhere)
-      # hands us the ticket that already exists.
-      Ticket.stub(:open_ticket_for, ->(**) { nil }) do
-        Ticket.stub(:insert_ticket!, ->(**) { winner }) do
-          assert_equal winner.id, @alice.ask_support!("segunda", about: @order).id
-        end
+      first = ticket_for(@alice, about: @order)
+      duplicate = Ticket.new(first.attributes.except("id", "reference", "conversation_id", "created_at",
+                                                     "updated_at"))
+      duplicate.reference = Ticket.generate_reference
+
+      assert_raises(ActiveRecord::RecordNotUnique) { duplicate.save!(validate: false) }
+    end
+
+    test "a closed ticket is exempt from the cardinality index" do
+      skip_unless_partial_indexes
+
+      first = ticket_for(@alice, about: @order)
+      first.close!(by: @lucia)
+
+      assert_nothing_raised { @alice.ask_support!("otra vez", about: @order) }
+    end
+
+    test "a concurrent open loses the race and reads the winner's ticket" do
+      winner = ticket_for(@alice, about: @order)
+
+      # The real race: the other request's row wasn't visible when our
+      # pre-check ran, so the INSERT is what has to catch it. Calling the
+      # private inserter directly is exactly that state, with no stubs to
+      # make it pass for the wrong reason.
+      loser = Ticket.send(
+        :insert_ticket!,
+        requester: @alice, desk: SupportDesk.desk, node: SupportDesk.find_topic("order"), about: @order,
+        via: :in_app, requester_role: nil, title: nil, metadata: {},
+        cardinality_key: winner.cardinality_key
+      )
+
+      assert_equal winner.id, loser.id
+      assert_equal 1, Ticket.where(requester: @alice, subject: @order).count
+    end
+
+    test "a deep link into a topic the requester may not use is refused" do
+      fresh = create_user(onboarded: false)
+
+      error = assert_raises(NotAllowed) { fresh.ask_support!("hola", topic: :account) }
+
+      assert_match(/only:/, error.message)
+      assert_nothing_raised { @alice.ask_support!("hola", topic: :account) }
+    end
+
+    test "a hidden topic can't be reached through a supportable's own topic either" do
+      SupportDesk.config.topics do
+        topic :order, about: "Order", only: ->(requester) { requester.onboarded? }
+        other
       end
+      fresh = create_user(onboarded: false)
+      their_order = create_order(user: fresh)
+
+      assert_raises(NotAllowed) { fresh.ask_support!("hola", about: their_order) }
     end
 
     test "the open rate limit is per requester and says what it counted" do
