@@ -72,6 +72,19 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     assert_equal 1, migrations.size
   end
 
+  test "the dummy app migrates a copy of chats' template too" do
+    template = File.read(File.expand_path(
+      "../../../chats/lib/generators/chats/templates/create_chats_tables.rb.erb", __dir__
+    ))
+    copy = File.read(File.expand_path("../dummy/db/migrate/20260101000001_create_chats_tables.rb", __dir__))
+    body = ->(source) { source[/def change.*/m] }
+
+    # The author columns (chats 0.2 S3) are what `ticket.reply!` signs with.
+    assert_match(/t\.references :author, polymorphic: true/, copy)
+    assert_equal body.call(template), body.call(copy),
+                 "test/dummy's chats migration has drifted from chats' install template — re-copy it"
+  end
+
   test "the dummy app migrates a copy of the template, so they can't drift" do
     template = File.read(File.expand_path(
       "../../lib/generators/support_desk/templates/create_support_desk_tables.rb.erb", __dir__
