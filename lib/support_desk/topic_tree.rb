@@ -57,12 +57,16 @@ module SupportDesk
                                         "(known: #{@index.keys.sort.join(", ")})")
     end
 
+    # Whether the tree has a node at +path+.
     def include?(path) = !find(path).nil?
 
+    # Every node a ticket can actually be filed under.
     def leaves = select(&:leaf?)
 
+    # A desk with no topics at all: every ticket lands free-form.
     def empty? = @roots.empty?
 
+    # How many nodes, branches included.
     def size = count
 
     # The nodes a requester may see at a given level: pass nothing for the

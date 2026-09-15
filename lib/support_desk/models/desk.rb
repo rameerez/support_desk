@@ -81,6 +81,7 @@ module SupportDesk
       record.respond_to?(:support_agent?) && record.support_agent?
     end
 
+    # A desk prints as its name — it's a counterpart, not a row.
     def to_s = name
 
     def inspect

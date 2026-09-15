@@ -38,6 +38,7 @@ module SupportDesk
 
     # --- Tree shape -----------------------------------------------------------
 
+    # Top level, nothing below it, or something below it.
     def root? = parent.nil?
     def leaf? = children.empty?
     def branch? = !leaf?
@@ -127,6 +128,7 @@ module SupportDesk
       Array(inherited_or_own(:about)).map { |klass| klass.is_a?(String) ? klass.constantize : klass }
     end
 
+    # Whether this topic attaches +klass+ (or an instance of it).
     def about?(klass)
       about.any? { |candidate| klass.is_a?(Class) ? klass <= candidate : klass.class <= candidate }
     end
@@ -144,6 +146,7 @@ module SupportDesk
       options.fetch(:subject) { about.any? ? :optional : :none }.to_sym
     end
 
+    # Whether the wizard insists on a subject, or asks for none at all.
     def subject_required? = subject_mode == :required
     def free_form? = subject_mode == :none
 

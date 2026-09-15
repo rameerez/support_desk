@@ -54,6 +54,7 @@ module SupportDesk
       end
     end
 
+    # Whether this is the seat somebody is sitting in right now.
     def open? = released_at.nil?
     def released? = !open?
 

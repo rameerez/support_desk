@@ -39,6 +39,7 @@ module SupportDesk
                        message || "expected #{ticket.reference} to be waiting on the desk, was #{ticket.awaiting}"
     end
 
+    # The desk answered and the ball is in the requester's court.
     def assert_awaiting_requester(ticket, message = nil)
       ticket.reload
       assert_predicate ticket, :awaiting_requester?,
@@ -46,6 +47,7 @@ module SupportDesk
                                   "was #{ticket.awaiting}"
     end
 
+    # The case is done, or still live.
     def assert_closed(ticket, message = nil)
       ticket.reload
       assert_predicate ticket, :closed?, message || "expected #{ticket.reference} to be closed, was #{ticket.status}"
@@ -56,6 +58,7 @@ module SupportDesk
       assert_predicate ticket, :open?, message || "expected #{ticket.reference} to be open, was #{ticket.status}"
     end
 
+    # Who is holding the case, or that nobody is.
     def assert_assigned_to(ticket, agent, message = nil)
       ticket.reload
       assert ticket.assigned_to?(agent),
@@ -84,6 +87,7 @@ module SupportDesk
       events.first
     end
 
+    # Assert the case's timeline has NO event of this kind.
     def refute_ticket_event(ticket, kind)
       assert_empty ticket.events.of_kind(kind).to_a,
                    "expected no #{kind} event on #{ticket.reference}"

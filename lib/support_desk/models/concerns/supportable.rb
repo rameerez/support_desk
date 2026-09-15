@@ -52,6 +52,7 @@ module SupportDesk
       def one_open_support_ticket? = support_desk_supportable_options[:one_open_ticket]
     end
 
+    # True — this record can be asked about.
     def supportable? = true
 
     # The topic a ticket opened about this record lands on.

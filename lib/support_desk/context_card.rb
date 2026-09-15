@@ -21,6 +21,7 @@ module SupportDesk
       @ticket = ticket
     end
 
+    # What the case is about, and what to call it.
     def subject = ticket.subject
 
     def title = ticket.label
@@ -40,6 +41,7 @@ module SupportDesk
 
     def topic_label = ticket.topic&.full_label
 
+    # Who is asking, as the console should show them.
     def requester = ticket.requester
 
     def requester_name
@@ -58,6 +60,7 @@ module SupportDesk
       Ticket.not_closed.where(requester: requester).count
     end
 
+    # The same card as a Hash, for a JSON console.
     def to_h
       {
         title: title,

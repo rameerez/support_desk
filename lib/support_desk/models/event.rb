@@ -54,6 +54,7 @@ module SupportDesk
       actor || payload["by"]&.to_sym
     end
 
+    # The text of an internal note, for kind "note".
     def note = payload["note"]
 
     def inspect

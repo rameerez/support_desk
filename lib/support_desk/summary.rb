@@ -13,6 +13,7 @@ module SupportDesk
       @ticket = ticket
     end
 
+    # The pieces, for hosts that want to lay them out themselves.
     def reference = ticket.reference
     def label = ticket.label
 
@@ -33,6 +34,7 @@ module SupportDesk
       I18n.t("support_desk.summary.open")
     end
 
+    # How long the current wait has been going on, as words ("12 minutes").
     def waiting
       duration = ticket.waiting_for
       return nil if duration.nil?

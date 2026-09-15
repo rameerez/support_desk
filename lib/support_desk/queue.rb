@@ -53,8 +53,13 @@ module SupportDesk
       all.open.awaiting_reply
     end
 
+    # Put aside until a date (0.2).
     def snoozed = all.snoozed
+
+    # Every live case on this desk, held or not.
     def open = all.open
+
+    # Done, most recently touched first.
     def closed = all.closed.recent_activity_first
 
     # --- Numbers -----------------------------------------------------------------

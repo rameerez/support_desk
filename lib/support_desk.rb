@@ -50,6 +50,9 @@ module SupportDesk
 
     alias configuration config
 
+    # The one block a host writes, in an initializer. Validates what it
+    # can right away; the checks that need the app's own classes run at
+    # the first prepare.
     def configure
       yield config if block_given?
       config.validate!
@@ -129,16 +132,20 @@ module SupportDesk
     # reloading in development (a reloaded class is a brand new object; its
     # name is stable).
 
+    # Called by the macros. Returns the class, so it composes.
     def register_requester(klass) = register(requester_class_names, klass)
     def register_supportable(klass) = register(supportable_class_names, klass)
     def register_agent(klass) = register(agent_class_names, klass)
 
+    # The registered class names, as Sets of Strings.
     def requester_class_names = @requester_class_names ||= Set.new
     def supportable_class_names = @supportable_class_names ||= Set.new
     def agent_class_names = @agent_class_names ||= Set.new
 
     # Whether +klass+ (a Class, an instance, or a class name) is supportable.
     def supportable_class?(klass) = registered?(supportable_class_names, klass)
+    # Whether +klass+ asks for support / answers it. Ancestor-aware, so an
+    # STI subclass of a registered class counts.
     def requester_class?(klass) = registered?(requester_class_names, klass)
     def agent_class?(klass) = registered?(agent_class_names, klass)
 

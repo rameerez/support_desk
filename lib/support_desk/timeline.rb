@@ -22,6 +22,7 @@ module SupportDesk
         @event = event
       end
 
+      # Which of the two this moment is.
       def message? = !message.nil?
       def event? = !event.nil?
 
@@ -38,6 +39,7 @@ module SupportDesk
         message.try(:author) || message.sender
       end
 
+      # What was said, or what a note said. Nil for the rest.
       def body
         message? ? message.try(:visible_body) : event.note
       end
@@ -62,10 +64,12 @@ module SupportDesk
       self
     end
 
+    # Every moment, oldest first.
     def entries
       @entries ||= (message_entries + event_entries).sort_by { |entry| [ entry.at || Time.at(0), entry.kind.to_s ] }
     end
 
+    # How many moments the case has had, and the latest one.
     def size = entries.size
     def last = entries.last
 

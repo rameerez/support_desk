@@ -14,6 +14,7 @@ module SupportDesk
     # (support is not working right now).
     Check = Struct.new(:name, :status, :message, keyword_init: true) do
       def ok? = status == :ok
+      # Worth fixing, and actually broken.
       def warn? = status == :warn
       def fail? = status == :fail
 
@@ -34,6 +35,7 @@ module SupportDesk
       # True when nothing failed. Warnings don't fail a build.
       def ok? = failures.empty?
 
+      # The checks worth acting on: failures break support, warnings don't.
       def failures = checks.select(&:fail?)
       def warnings = checks.select(&:warn?)
 
