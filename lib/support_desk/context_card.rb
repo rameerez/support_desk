@@ -1,0 +1,79 @@
+# frozen_string_literal: true
+
+module SupportDesk
+  # Everything an agent needs next to the transcript, as plain Ruby: what
+  # the case is about, what state that thing is in, who is asking, and
+  # where to go to do something about it.
+  #
+  #   card = ticket.context_card
+  #   card.title          # "Viaje Sevilla → Granada · 20 sep"
+  #   card.status         # "Completado"
+  #   card.pairs          # { "Conductor" => "Lucía G.", "Plazas" => 3 }
+  #   card.subject_url    # "/madmin/rides/…"
+  #   card.requester_name # "Alice"
+  #
+  # No view dependency at all — render it in ERB, a JSON API, or a Telegram
+  # message.
+  class ContextCard
+    attr_reader :ticket
+
+    def initialize(ticket)
+      @ticket = ticket
+    end
+
+    def subject = ticket.subject
+
+    def title = ticket.label
+
+    # The subject's own status pill, when it has one.
+    def status = subject&.support_status
+
+    # Key/value pairs the host chose to show agents.
+    def pairs
+      subject&.support_context || {}
+    end
+
+    # Where to open the subject in the host's admin, or nil.
+    def subject_url = subject&.support_url
+
+    def topic = ticket.topic
+
+    def topic_label = ticket.topic&.full_label
+
+    def requester = ticket.requester
+
+    def requester_name
+      Chats.display_name_for(requester)
+    end
+
+    def requester_avatar
+      Chats.avatar_for(requester)
+    end
+
+    # When this requester joined — context for "is this a new user?".
+    def requester_since = requester.try(:created_at)
+
+    # How many open cases this requester has right now, this one included.
+    def requester_open_tickets
+      Ticket.not_closed.where(requester: requester).count
+    end
+
+    def to_h
+      {
+        title: title,
+        status: status,
+        topic: topic&.path,
+        topic_label: topic_label,
+        pairs: pairs,
+        subject_url: subject_url,
+        requester: {
+          name: requester_name,
+          since: requester_since,
+          open_tickets: requester_open_tickets
+        }
+      }
+    end
+
+    def inspect = "#<SupportDesk::ContextCard #{title.inspect}>"
+  end
+end

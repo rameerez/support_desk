@@ -1,0 +1,40 @@
+es:
+  support_desk:
+    # The system message the requester sees when a human picks up their case.
+    system:
+      assigned: "%{agent} se ocupa de tu consulta"
+      reassigned: "%{agent} se ocupa ahora de tu consulta"
+    thread:
+      closed_notice: "Esta conversación está cerrada. Abre una nueva si necesitas algo más."
+      reopened_notice: "Hemos vuelto a abrir esta conversación."
+      promise: "Normalmente respondemos en menos de %{time}"
+    notifications:
+      # Generic on purpose: una pantalla de bloqueo no debe contar de qué va
+      # el caso de nadie. El detalle va en el cuerpo.
+      title: "%{desk} · nuevo mensaje"
+    queue:
+      tabs:
+        awaiting: "Pendientes"
+        mine: "Mi cola"
+        unassigned: "Sin asignar"
+        open: "Abiertos"
+        snoozed: "Pospuestos"
+        closed: "Cerrados"
+    summary:
+      awaiting_reply: "esperando respuesta"
+      awaiting_requester: "esperando al cliente"
+      open: "abierto"
+      closed: "cerrado"
+    status:
+      open: "Abierto"
+      snoozed: "Pospuesto"
+      closed: "Cerrado"
+    channels:
+      in_app: "en la app"
+      email: "correo"
+      intercom: "Intercom"
+      api: "API"
+    topics:
+      other:
+        label: "Otra cosa"
+        ask: "¿De qué se trata?"

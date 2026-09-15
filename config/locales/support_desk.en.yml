@@ -1,0 +1,37 @@
+en:
+  support_desk:
+    system:
+      assigned: "%{agent} is taking care of your request"
+      reassigned: "%{agent} is now taking care of your request"
+    thread:
+      closed_notice: "This conversation is closed. Start a new one if you need anything else."
+      reopened_notice: "We reopened this conversation."
+      promise: "We usually reply in under %{time}"
+    notifications:
+      title: "%{desk} · new message"
+    queue:
+      tabs:
+        awaiting: "Needs a reply"
+        mine: "Mine"
+        unassigned: "Unassigned"
+        open: "Open"
+        snoozed: "Snoozed"
+        closed: "Closed"
+    summary:
+      awaiting_reply: "awaiting reply"
+      awaiting_requester: "awaiting requester"
+      open: "open"
+      closed: "closed"
+    status:
+      open: "Open"
+      snoozed: "Snoozed"
+      closed: "Closed"
+    channels:
+      in_app: "in app"
+      email: "email"
+      intercom: "Intercom"
+      api: "API"
+    topics:
+      other:
+        label: "Something else"
+        ask: "What is it about?"
