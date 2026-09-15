@@ -1,0 +1,18 @@
+<%# chats' `locked_composer` slot (seam S5). It replaces the BODY of the
+    locked composer, so it renders the notice itself in both branches — a
+    conversation locked by something that isn't a ticket must look exactly
+    like chats' own default.
+
+    Only a desk configured `closed_tickets: :locked` ever gets here: the
+    default (:reopen_on_reply) leaves the composer in place and writing
+    reopens the case. When it IS locked, the way forward is a new
+    conversation, prefilled with the same topic, because a closed door with
+    no other door next to it is where support tickets go to die. %>
+<p class="chats-composer__locked-notice"><%= notice %></p>
+
+<% if (ticket = SupportDesk::Ticket.for_conversation(conversation)) %>
+  <%= support_desk_styles %>
+  <%= link_to t("support_desk.doors.new_conversation"),
+              support_desk_routes.new_ticket_path(topic: ticket.topic&.path),
+              class: "support-desk-button" %>
+<% end %>

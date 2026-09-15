@@ -1,0 +1,31 @@
+<%# chats' `inbox_top` slot, shipped by this engine (seam S5).
+
+    The desk's own inbox row comes from chats, from `acts_as_messager inbox:
+    :grouped` — this is NOT that row. This is the door that stands in its
+    place BEFORE the requester has ever written: a support entry that only
+    appears once you already have a ticket is undiscoverable, which is the
+    whole reason `config.inbox_entry` defaults to :always.
+
+    Locals come from chats' inbox (viewer:, inbox:). Renders nothing under
+    :when_tickets or :never, and nothing once there is a real row to show. %>
+<% if support_inbox_door?(viewer) %>
+  <%= support_desk_styles %>
+  <ul class="chats-inbox__list support-desk-inbox-door">
+    <li class="chats-row">
+      <%= link_to support_desk_routes.root_path, class: "chats-row__link" do %>
+        <%= support_desk_avatar(viewer.class.try(:support_desk_key) || :default) %>
+
+        <span class="chats-row__body">
+          <span class="chats-row__top">
+            <span class="chats-row__title">
+              <%= SupportDesk.config.desk(viewer.class.try(:support_desk_key) || :default).name %>
+            </span>
+          </span>
+          <span class="chats-row__bottom">
+            <span class="chats-row__preview"><%= t("support_desk.inbox.empty_hint") %></span>
+          </span>
+        </span>
+      <% end %>
+    </li>
+  </ul>
+<% end %>
