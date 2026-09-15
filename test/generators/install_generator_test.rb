@@ -73,8 +73,11 @@ class InstallGeneratorTest < Rails::Generators::TestCase
   end
 
   test "the dummy app migrates a copy of chats' template too" do
-    template = File.read(File.expand_path(
-      "../../../chats/lib/generators/chats/templates/create_chats_tables.rb.erb", __dir__
+    # Locate chats through its loaded gem, never a path relative to this
+    # checkout: the suite also runs from git worktrees, where "../chats" is
+    # a directory that does not exist.
+    template = File.read(Chats::Engine.root.join(
+      "lib/generators/chats/templates/create_chats_tables.rb.erb"
     ))
     copy = File.read(File.expand_path("../dummy/db/migrate/20260101000001_create_chats_tables.rb", __dir__))
     body = ->(source) { source[/def change.*/m] }
