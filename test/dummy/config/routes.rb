@@ -10,5 +10,9 @@ Rails.application.routes.draw do
   # without dragging a real auth framework into the dummy.
   post "/test_login", to: "sessions#create", as: :test_login
 
+  # A host page that renders the requester-facing view helpers, so they are
+  # exercised where hosts really call them.
+  get "/doors(/:order_id)", to: "doors#show", as: :door
+
   root to: "sessions#home"
 end

@@ -73,6 +73,15 @@ module SupportDesk
       end
     end
 
+    # Serve the bundled stylesheet the requester-facing views link (propshaft
+    # or sprockets — both honour config.assets.paths). A host that ejects and
+    # restyles the views simply stops rendering `support_desk_styles`.
+    initializer "support_desk.assets" do |app|
+      if app.config.respond_to?(:assets)
+        app.config.assets.paths << root.join("app/assets/stylesheets")
+      end
+    end
+
     # Ship the gem's locale files (en, es). Host locale files with the same
     # keys override these automatically (I18n's load order puts the app last).
     initializer "support_desk.locales" do |app|

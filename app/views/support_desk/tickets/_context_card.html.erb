@@ -1,0 +1,14 @@
+<%# What the case is about, above the composer, so nobody has to describe in
+    words which order they mean.
+
+    Deliberately only the label and the status pill. `support_context` is
+    documented on SupportDesk::Supportable as "rendered to agents only — you
+    decide what belongs there", and hosts fill it with things they chose for
+    an agent's eyes (internal state, risk flags, an admin URL). A requester
+    screen must not be the place that quietly publishes them. %>
+<div class="support-desk-card">
+  <span class="support-desk-card__label"><%= subject.support_label %></span>
+  <% if subject.support_status.present? %>
+    <span class="support-desk-card__status"><%= subject.support_status %></span>
+  <% end %>
+</div>

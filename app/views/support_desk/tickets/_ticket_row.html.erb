@@ -1,0 +1,31 @@
+<%# One case in the requester's list, shaped exactly like a chats inbox row:
+    the desk's avatar, what the case is about, the last thing said in it, and
+    the unread badge. Tapping it opens the conversation itself — the engine's
+    own /tickets/:id URL exists for links from outside (an email, a push),
+    and there is no reason to pay for its redirect here. %>
+<% unread = unread_counts.fetch(ticket.conversation_id, 0) %>
+<li class="chats-row <%= "chats-row--unread" if unread.positive? %>">
+  <%= link_to support_thread_path(ticket), class: "chats-row__link" do %>
+    <%= chats_messager_avatar(ticket.desk) %>
+
+    <span class="chats-row__body">
+      <span class="chats-row__top">
+        <span class="chats-row__title"><%= ticket.label %></span>
+        <time class="chats-row__time" datetime="<%= (ticket.conversation&.last_message_at || ticket.opened_at)&.iso8601 %>">
+          <%= chats_timestamp(ticket.conversation&.last_message_at || ticket.opened_at) %>
+        </time>
+      </span>
+
+      <span class="chats-row__subject"><%= support_ticket_state(ticket) %></span>
+
+      <span class="chats-row__bottom">
+        <span class="chats-row__preview">
+          <%= ticket.conversation ? chats_preview_for(ticket.conversation, current_requester) : "" %>
+        </span>
+        <% if unread.positive? %>
+          <span class="chats-badge"><%= unread > 99 ? "99+" : unread %></span>
+        <% end %>
+      </span>
+    </span>
+  <% end %>
+</li>

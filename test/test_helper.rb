@@ -120,5 +120,18 @@ module ActionDispatch
       post "/test_login", params: { user_id: user.id }
       assert_response :no_content
     end
+
+    # Let an exception out of the request instead of rendering an error page,
+    # so a test can assert on what a misconfiguration actually raises. The
+    # dummy has no config/environments/test.rb, so it runs with the framework
+    # default (`show_exceptions = :all`) and renders everything.
+    def without_exception_handling
+      key = "action_dispatch.show_exceptions"
+      original = Rails.application.env_config[key]
+      Rails.application.env_config[key] = :none
+      yield
+    ensure
+      Rails.application.env_config[key] = original
+    end
   end
 end

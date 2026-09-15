@@ -1,0 +1,47 @@
+<%# Step 2 — "¿Sobre cuál?" The records this topic attaches, each with its
+    own label and status pill.
+
+    Something they already have an open case about is MARKED, never hidden:
+    hiding it would leave them hunting for a conversation they can't find,
+    so the row links straight into it instead. %>
+<%= render "support_desk/tickets/wizard_header", wizard: wizard, error: error %>
+
+<% if wizard.choices.any? %>
+  <ul class="support-desk-choices">
+    <% wizard.choices.each do |record| %>
+      <% open_ticket = wizard.open_ticket_about(record) %>
+      <li>
+        <% if open_ticket %>
+          <%= link_to support_thread_path(open_ticket),
+                      class: "support-desk-choice support-desk-choice--taken",
+                      data: { turbo_frame: "_top" } do %>
+            <span class="support-desk-choice__label"><%= record.support_label %></span>
+            <span class="support-desk-choice__hint"><%= t("support_desk.wizard.already_open") %> ›</span>
+          <% end %>
+        <% else %>
+          <%= link_to support_desk_routes.new_ticket_path(topic: wizard.topic.path,
+                                                          about: SupportDesk::Wizard.sign_subject(record)),
+                      class: "support-desk-choice" do %>
+            <span class="support-desk-choice__label"><%= record.support_label %></span>
+            <% if record.support_status.present? %>
+              <span class="support-desk-choice__status"><%= record.support_status %></span>
+            <% end %>
+            <span class="support-desk-choice__chevron" aria-hidden="true">›</span>
+          <% end %>
+        <% end %>
+      </li>
+    <% end %>
+  </ul>
+<% else %>
+  <%# `subject: :required` with nothing to require. The wizard skips this
+      step entirely when the topic is happy without a subject, so reaching
+      here means the topic insists — and the honest answer is that there is
+      nothing to pick. %>
+  <p class="support-desk-empty"><%= t("support_desk.wizard.nothing_to_pick") %></p>
+<% end %>
+
+<% if wizard.subject_optional? %>
+  <%= link_to t("support_desk.wizard.none_of_these"),
+              support_desk_routes.new_ticket_path(topic: wizard.topic.path, no_subject: 1),
+              class: "support-desk-choice support-desk-choice--none" %>
+<% end %>

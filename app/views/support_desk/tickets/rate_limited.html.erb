@@ -1,0 +1,28 @@
+<%# The wall, when somebody is at the cap or has opened too many cases too
+    fast. It is a WALL WITH A DOOR IN IT: the cases they already have, so
+    "you have too many open conversations" always comes with the place to go
+    and write. Never a 500, never a silent failure. %>
+<%= chats_styles %>
+<%= support_desk_styles %>
+
+<div class="chats chats-inbox support-desk">
+  <header class="chats-inbox__header">
+    <h1 class="chats-inbox__title"><%= t("support_desk.limits.title") %></h1>
+  </header>
+
+  <p class="support-desk-notice__title">
+    <%= t("support_desk.limits.#{@limit_reason}", count: @open_tickets.size) %>
+  </p>
+
+  <% if @open_tickets.any? %>
+    <ul class="chats-inbox__list">
+      <%= render partial: "support_desk/tickets/ticket_row",
+                 collection: @open_tickets,
+                 as: :ticket,
+                 locals: { unread_counts: @unread_counts } %>
+    </ul>
+  <% end %>
+
+  <%= link_to t("support_desk.wizard.back_to_list"), support_desk_routes.root_path,
+              class: "support-desk-button" %>
+</div>
