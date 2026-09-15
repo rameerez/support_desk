@@ -205,6 +205,44 @@ module SupportDesk
       nil
     end
 
+    # The Hotwire Native path-configuration rules for the requester-facing
+    # engine, ready to splat into a host's own `rules` array:
+    #
+    #   rules: [ *SupportDesk.native_path_rules, *my_own_rules ]
+    #
+    # Both surfaces are ordinary PUSHED screens (`context: "default"`), never
+    # modals: the wizard is three real URLs and a modal would break the back
+    # gesture between them. The thread itself is deliberately absent — it is
+    # a chats conversation, and it stays under the host's chats rule.
+    #
+    # +mount+ defaults to wherever the engine is mounted and +title+ to the
+    # desk's name.
+    def native_path_rules(mount: nil, title: nil)
+      mount = (mount || root_path)&.to_s&.chomp("/")
+      if mount.blank?
+        raise ConfigurationError,
+              "SupportDesk.native_path_rules can't tell where the engine is mounted. " \
+              "Mount it (`mount SupportDesk::Engine => \"/support\"`) or pass mount: \"/support\"."
+      end
+
+      title ||= config.name
+      prefix = Regexp.escape(mount)
+
+      [
+        {
+          patterns: [ "^#{prefix}/?(?:\\?.*)?$" ],
+          properties: { context: "default", title: title, pull_to_refresh_enabled: true },
+          comment: "The requester's support list: a pushed screen, pull to refresh like any other list."
+        },
+        {
+          patterns: [ "^#{prefix}/new(?:\\?.*)?$" ],
+          properties: { context: "default", title: title, pull_to_refresh_enabled: false },
+          comment: "The wizard: every step is a real URL, so it pushes and the back gesture works. " \
+                   "Pull to refresh is off — it would throw away what the requester has typed."
+        }
+      ]
+    end
+
     # A stable, URL-safe key for an actor (agent, requester, desk), used in
     # cache keys and event payloads. GlobalID params already encode class +
     # id, so two classes can never collide.

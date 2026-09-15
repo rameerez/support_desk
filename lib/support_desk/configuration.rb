@@ -405,6 +405,12 @@ module SupportDesk
     # How the console finds the person answering.
     attr_accessor :current_agent_method
 
+    # The host's own authentication filter, run before every requester-facing
+    # screen so a logged-out visitor meets the host's login flow rather than
+    # this gem's idea of one (`:authenticate_user!` is Devise's, and chats'
+    # default too).
+    attr_accessor :authenticate_method
+
     # A fresh configuration: one `:default` desk, every setting at the
     # documented default.
     def initialize
@@ -413,6 +419,7 @@ module SupportDesk
       @console_parent_controller = "::ApplicationController"
       @current_requester_method = :current_user
       @current_agent_method = :current_user
+      @authenticate_method = :authenticate_user!
 
       @desks = { default: DeskConfiguration.new(:default) }
       @warnings = []
