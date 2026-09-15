@@ -1,0 +1,206 @@
+# frozen_string_literal: true
+
+class CreateSupportDeskTables < ActiveRecord::Migration<%= migration_version %>
+  def change
+    primary_key_type, foreign_key_type = primary_and_foreign_key_types
+
+    # ---------------------------------------------------------------------------
+    # support_desk_desks
+    #
+    # Who answers. A desk IS a chats messager (headless: no notifications of
+    # its own, not blockable, grouped inbox row), so its rows are tiny — the
+    # name, avatar and email live in your initializer; `settings` is the
+    # runtime override for hosts that let staff rename a desk from a console.
+    # ---------------------------------------------------------------------------
+    create_table :support_desk_desks, id: primary_key_type do |t|
+      t.string :key, null: false
+      t.send(json_column_type, :settings, default: json_column_default)
+
+      t.timestamps
+    end
+
+    add_index :support_desk_desks, :key, unique: true, name: "index_support_desk_desks_on_key"
+
+    # ---------------------------------------------------------------------------
+    # support_desk_tickets
+    #
+    # A case. One ticket ⇔ one chats conversation: `conversation_id` is
+    # always set (by Ticket.open!, inside the same transaction as the row),
+    # which is why the column is nullable — the conversation is *about* the
+    # ticket, so the ticket has to exist first. `SupportDesk.doctor` checks
+    # that no ticket is ever left without one.
+    #
+    # The denormalized columns are all answers to "what does the queue need
+    # without a join?": awaiting (who owes the next word), waiting_since
+    # (how long), assignee (who holds it), and the SLA clocks.
+    # ---------------------------------------------------------------------------
+    create_table :support_desk_tickets, id: primary_key_type do |t|
+      t.references :desk, null: false, type: foreign_key_type,
+                          foreign_key: { to_table: :support_desk_desks }, index: false
+
+      t.references :requester, polymorphic: true, null: false, type: foreign_key_type, index: false
+      t.string :requester_role
+      t.references :subject, polymorphic: true, null: true, type: foreign_key_type, index: false
+      t.references :assignee, polymorphic: true, null: true, type: foreign_key_type, index: false
+      t.references :closed_by, polymorphic: true, null: true, type: foreign_key_type, index: false
+
+      # The topic path ("payments/withdrawal"), stable across tree edits.
+      t.string :topic, null: false
+      # Set by email (the mail subject) and by the API; never by the wizard.
+      t.string :title
+      # "T-AB12CD" — Crockford base32, for email subjects and phone calls.
+      t.string :reference, null: false
+
+      t.string :status, null: false, default: "open"
+      t.string :awaiting, null: false, default: "agent"
+      t.integer :priority, null: false, default: 0
+      t.string :opened_via, null: false, default: "in_app"
+
+      t.column :conversation_id, foreign_key_type
+      # The message id #register! last folded in — what makes a redelivered
+      # chats event idempotent instead of double-counting an SLA clock.
+      t.column :last_registered_message_id, foreign_key_type
+
+      t.datetime :opened_at, null: false
+      t.datetime :first_agent_reply_at
+      t.datetime :last_requester_message_at
+      t.datetime :last_agent_message_at
+      # Maintained by the model (NOT a generated column): the same
+      # expression has to work on SQLite and MySQL, and a plain column is
+      # one indexable answer on every adapter.
+      t.datetime :waiting_since
+      t.datetime :snoozed_until
+      t.datetime :closed_at
+
+      t.integer :reopen_count, null: false, default: 0
+      t.string :external_ref
+      # What "one open ticket about this" means for this row: the subject,
+      # the topic, or a unique value when the supportable allows several.
+      t.string :cardinality_key, null: false
+      t.send(json_column_type, :metadata, default: json_column_default)
+
+      t.timestamps
+    end
+
+    add_index :support_desk_tickets, :reference, unique: true, name: "index_support_desk_tickets_on_reference"
+    add_index :support_desk_tickets, [ :requester_type, :requester_id, :status ],
+              name: "index_support_desk_tickets_on_requester"
+    add_index :support_desk_tickets, [ :desk_id, :status, :awaiting, :waiting_since ],
+              name: "index_support_desk_tickets_on_queue"
+    add_index :support_desk_tickets, [ :assignee_type, :assignee_id, :status ],
+              name: "index_support_desk_tickets_on_assignee"
+    add_index :support_desk_tickets, [ :subject_type, :subject_id ],
+              name: "index_support_desk_tickets_on_subject"
+    add_index :support_desk_tickets, :conversation_id, unique: true,
+              name: "index_support_desk_tickets_on_conversation_id"
+    add_index :support_desk_tickets, [ :desk_id, :external_ref ], unique: true,
+              name: "index_support_desk_tickets_on_external_ref"
+
+    # THE cardinality guarantee: one open ticket per requester per thing.
+    # A partial unique index is what makes concurrent opens race-safe
+    # without advisory locks — the second INSERT loses and Ticket.open!
+    # hands back the first one's ticket. PostgreSQL only; elsewhere the
+    # model's find-then-create is the whole story and this is just an index.
+    if postgres?
+      add_index :support_desk_tickets, [ :requester_type, :requester_id, :desk_id, :cardinality_key ],
+                unique: true, where: "status <> 'closed'",
+                name: "index_support_desk_tickets_on_open_cardinality"
+    else
+      add_index :support_desk_tickets, [ :requester_type, :requester_id, :desk_id, :cardinality_key ],
+                name: "index_support_desk_tickets_on_open_cardinality"
+    end
+
+    # ---------------------------------------------------------------------------
+    # support_desk_assignments
+    #
+    # Who held the ticket, when, and why they stopped. Assignment is a
+    # history, not a column: hand-offs, drop-in take-overs, shift releases
+    # and "time per agent" are unanswerable from a single assignee_id.
+    # ---------------------------------------------------------------------------
+    create_table :support_desk_assignments, id: primary_key_type do |t|
+      t.references :ticket, null: false, type: foreign_key_type,
+                            foreign_key: { to_table: :support_desk_tickets }, index: false
+      t.references :agent, polymorphic: true, null: false, type: foreign_key_type, index: false
+      t.references :assigned_by, polymorphic: true, null: true, type: foreign_key_type, index: false
+
+      t.string :reason, null: false
+      t.text :note
+      t.datetime :assigned_at, null: false
+      t.datetime :released_at
+      t.string :release_reason
+
+      t.timestamps
+    end
+
+    add_index :support_desk_assignments, [ :ticket_id, :assigned_at ],
+              name: "index_support_desk_assignments_on_ticket"
+    add_index :support_desk_assignments, [ :agent_type, :agent_id, :released_at ],
+              name: "index_support_desk_assignments_on_agent"
+
+    # At most one open assignment per ticket — the invariant behind
+    # `ticket.assignee`.
+    if postgres?
+      add_index :support_desk_assignments, :ticket_id, unique: true, where: "released_at IS NULL",
+                name: "index_support_desk_assignments_on_open_ticket"
+    end
+
+    # ---------------------------------------------------------------------------
+    # support_desk_events
+    #
+    # Append-only: everything that happened to a case and wasn't a message.
+    # No updated_at, because there is no update path — the model is readonly
+    # once written. Internal notes are events (kind "note"), never messages,
+    # so they are searchable and in the timeline but never in the
+    # conversation and never mirrored to any channel.
+    # ---------------------------------------------------------------------------
+    create_table :support_desk_events, id: primary_key_type do |t|
+      t.references :ticket, null: false, type: foreign_key_type,
+                            foreign_key: { to_table: :support_desk_tickets }, index: false
+      t.references :actor, polymorphic: true, null: true, type: foreign_key_type, index: false
+
+      t.string :kind, null: false
+      t.send(json_column_type, :payload, default: json_column_default)
+
+      t.datetime :created_at, null: false
+    end
+
+    add_index :support_desk_events, [ :ticket_id, :created_at ], name: "index_support_desk_events_on_ticket"
+    add_index :support_desk_events, [ :ticket_id, :kind ], name: "index_support_desk_events_on_kind"
+
+    # NOTE: value-list vocabularies (status, awaiting, kind, reason) are
+    # validated in the MODELS (frozen constants + inclusion validations),
+    # NOT by DB check constraints — so the gem can grow its taxonomy without
+    # shipping a migration to widen a CHECK.
+  end
+
+  private
+
+  # Honor the host's configured primary key type (uuid vs bigint). Reads the
+  # same setting `rails g model` uses, so an app generated with
+  # `config.generators { |g| g.orm :active_record, primary_key_type: :uuid }`
+  # gets uuid support_desk tables and uuid foreign keys, automatically.
+  def primary_and_foreign_key_types
+    config = Rails.configuration.generators
+    setting = config.options[config.orm][:primary_key_type]
+    primary_key_type = setting || :primary_key
+    foreign_key_type = setting || :bigint
+    [ primary_key_type, foreign_key_type ]
+  end
+
+  def postgres?
+    connection.adapter_name.match?(/postg/i)
+  end
+
+  def json_column_type
+    return :jsonb if connection.adapter_name.downcase.include?("postgresql")
+
+    :json
+  end
+
+  # MySQL 8+ doesn't allow default values on JSON columns.
+  def json_column_default
+    return nil if connection.adapter_name.downcase.include?("mysql")
+
+    {}
+  end
+end
