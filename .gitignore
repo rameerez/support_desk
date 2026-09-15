@@ -1,0 +1,18 @@
+# Internal planning docs — never published with the gem
+/docs/
+
+/.bundle/
+/doc/
+/log/*.log
+/pkg/
+/tmp/
+/coverage/
+/test/dummy/db/*.sqlite3
+/test/dummy/db/*.sqlite3-*
+/test/dummy/log/*.log
+/test/dummy/storage/
+/test/dummy/tmp/
+*.gem
+Gemfile.lock
+gemfiles/*.lock
+.DS_Store

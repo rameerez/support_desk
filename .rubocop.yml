@@ -1,0 +1,25 @@
+# rubocop-rails-omakase is the house style across the gem ecosystem: Rails'
+# own defaults, which means generated code (migrations, initializers) stays
+# clean in a stock Rails app without us reformatting it.
+inherit_gem:
+  rubocop-rails-omakase: rubocop.yml
+
+# MERGE our excludes with rubocop's defaults (vendor/, node_modules/, …) —
+# a bare Exclude key would REPLACE them.
+inherit_mode:
+  merge:
+    - Exclude
+
+AllCops:
+  TargetRubyVersion: 3.2
+  Exclude:
+    # The dummy host app mirrors GENERATED code (its migration is a copy of
+    # the install template) — don't lint it against the gem's own style.
+    - test/dummy/db/**/*
+    # Appraisal-generated Gemfiles.
+    - gemfiles/*
+
+Layout/LineLength:
+  Max: 120
+  Exclude:
+    - support_desk.gemspec # the long-form rubygems description is one line by design
