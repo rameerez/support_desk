@@ -31,6 +31,12 @@ en:
       email: "email"
       intercom: "Intercom"
       api: "API"
+    wizard:
+      ask_topic: "What do you need help with?"
+      ask_subject: "Which one?"
+      placeholder: "Tell us what happened"
+      none_of_these: "None of these"
+      already_open: "You already have a conversation open about this"
     topics:
       other:
         label: "Something else"

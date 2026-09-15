@@ -39,7 +39,12 @@ First release: the whole core of a support desk, on top of `chats` 0.2.
 - **Reply policies**: `:anyone` (the first agent to answer an unheld ticket
   takes it; a drop-in on someone else's is recorded), `:take_over`,
   `:assignee_only`.
-- **Queues and presenters** — `Queue#counts` in one grouped query, a badge
+- **`SupportDesk::Wizard`** — the three-step "what do you need help with?"
+  machine as a PORO, so the views are replaceable and a native app or an API
+  can drive the same steps. Subjects travel as signed GlobalIDs and are
+  re-checked against `supportable_by?` anyway.
+- **Queues and presenters**
+ — `Queue#counts` in one grouped query, a badge
   cached 30s per agent, `ContextCard`, `Summary`, `Timeline` and
   `actions_for(agent)`, all with no view dependency.
 - **Events out, policy in.** `SupportDesk.on(:ticket_opened) { … }`,

@@ -172,6 +172,25 @@ ticket.timeline          # messages ⨉ events merged by time; .print in a conso
 ticket.actions_for(lucia) # exactly the buttons to render
 ```
 
+## The wizard
+
+"What do you need help with?" is a plain object, not a controller, so a host
+that ejects the views, a native app or a JSON API can all drive the same
+three steps: pick a topic, pick the thing it's about, write.
+
+```ruby
+wizard = SupportDesk::Wizard.new(current_user, params)
+wizard.step        # :topic | :subject | :compose
+wizard.choices     # the topics to offer, or the records to pick from
+wizard.ask         # the prompt above them
+wizard.existing_ticket   # "you already have a conversation open about this"
+wizard.open!(params[:message])
+```
+
+Subjects travel as **signed GlobalIDs** and are re-checked against
+`supportable_by?` anyway — a wizard that trusted a raw id would let anybody
+open a ticket about anybody's order.
+
 ## Events
 
 The gem emits; your app delivers. Multi-subscriber, error-isolated, after commit, and mirrored on `ActiveSupport::Notifications` as `"<event>.support_desk"`:

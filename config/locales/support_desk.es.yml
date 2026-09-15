@@ -34,6 +34,12 @@ es:
       email: "correo"
       intercom: "Intercom"
       api: "API"
+    wizard:
+      ask_topic: "¿Con qué necesitas ayuda?"
+      ask_subject: "¿Sobre cuál?"
+      placeholder: "Cuéntanos qué ha pasado"
+      none_of_these: "Ninguno de estos"
+      already_open: "Ya tienes una conversación abierta"
     topics:
       other:
         label: "Otra cosa"
