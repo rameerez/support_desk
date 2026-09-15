@@ -9,6 +9,7 @@ Rails.application.routes.draw do
   # Test-only session endpoint so integration tests can act as a user
   # without dragging a real auth framework into the dummy.
   post "/test_login", to: "sessions#create", as: :test_login
+  get "/test_login/:user_id", to: "sessions#create"
 
   # A host page that renders the requester-facing view helpers, so they are
   # exercised where hosts really call them.

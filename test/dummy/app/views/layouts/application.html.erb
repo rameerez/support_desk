@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Dummy</title>
+    <%= csrf_meta_tags %>
+    <%# Turbo, for real: a <turbo-frame> is only a frame in a browser that
+        has Turbo loaded, so the system tests need this to be testing
+        anything at all. %>
+    <%= javascript_importmap_tags %>
+  </head>
+  <body>
+    <%= yield %>
+  </body>
+</html>
