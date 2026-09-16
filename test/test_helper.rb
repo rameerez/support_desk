@@ -123,8 +123,9 @@ module ActionDispatch
 
     # Let an exception out of the request instead of rendering an error page,
     # so a test can assert on what a misconfiguration actually raises. The
-    # dummy has no config/environments/test.rb, so it runs with the framework
-    # default (`show_exceptions = :all`) and renders everything.
+    # dummy's test environment already raises everything it can't rescue;
+    # this also covers the rescuable ones, and says at the call site which
+    # kind of test this is.
     def without_exception_handling
       key = "action_dispatch.show_exceptions"
       original = Rails.application.env_config[key]
