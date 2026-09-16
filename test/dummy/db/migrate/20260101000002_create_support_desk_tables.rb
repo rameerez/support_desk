@@ -210,7 +210,7 @@ class CreateSupportDeskTables < ActiveRecord::Migration[7.2]
   # jsonb on every PostgreSQL adapter — matched by prefix because PostGIS
   # (activerecord-postgis-adapter) answers "PostGIS", not "PostgreSQL", and
   # an `include?("postgresql")` check silently sent such hosts down the plain
-  # json path. Found by the CarHey integration, whose database is PostGIS.
+  # json path. Surfaced while integrating with a PostGIS host.
   def json_column_type
     return :jsonb if connection.adapter_name.match?(/\Apostg/i)
 
