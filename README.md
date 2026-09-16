@@ -250,6 +250,105 @@ where they shadow the gem's copies — the Devise move. Delete your copy and
 the default comes back; upgrade the gem and your copy is untouched. Every
 view helper the templates use stays available afterwards, so an ejected copy
 keeps working.
+## The agent console
+
+Three layers. Stop at whichever one you like — they are the same code, with
+more of it written for you each time.
+
+### Layer 1 — objects
+
+The queue and presenters above. They have no view dependency at all, so a
+console, a rake task, a Slack command and a JSON API all render from them.
+
+### Layer 2 — two concerns
+
+One word in your routes file draws every verb an agent needs:
+
+```ruby
+# config/routes.rb
+namespace :madmin do
+  resources :support_tickets, only: %i[index show], concerns: :support_console
+end
+```
+
+That adds member `reply take assign hand_off release close reopen note
+change_topic` and collection `next`. Then:
+
+```ruby
+class Madmin::SupportTicketsController < Madmin::ApplicationController
+  include SupportDesk::Console          # the verbs
+  include SupportDesk::Console::Index   # optional: @queue, @scope, @tickets from params
+
+  def current_agent = current_user      # or rely on config.current_agent_method
+end
+```
+
+`index` and `show` stay yours — those are the UI, and Layer 1 is everything
+they need. What the concern owns is the half that is easy to get wrong:
+
+- `current_agent` has to be an eligible agent, or it's a **403**.
+- Tickets are found through `config.visible_desks_for`, so a desk this agent
+  may not work is a plain **404** — never a 403 that confirms the case exists.
+- `config.authorize_console` is consulted before every action, `index`
+  included, for hosts with Pundit or CanCan.
+- Every refusal the domain can raise — a drop-in under `:assignee_only`, a
+  hand-off by somebody who doesn't hold the ticket, a reply into a locked
+  case — becomes `flash[:alert]`. A console that 500s on a policy is a
+  console nobody trusts.
+- Each verb answers an HTML redirect or a Turbo Stream page refresh.
+  Override `after_transition_path(ticket)` to land somewhere else.
+
+```ruby
+SupportDesk.configure do |config|
+  config.current_agent_method = :current_user
+  config.visible_desks_for    = ->(agent) { agent.billing? ? [ :billing ] : SupportDesk::Desk.all }
+  config.authorize_console    = ->(agent, ticket, action) { AdminPolicy.new(agent).support?(action) }
+end
+```
+
+Realtime is two lines, and the gem broadcasts to both on every message and
+every transition:
+
+```erb
+<%= turbo_stream_from @ticket, :console %>          <%# the case %>
+<%= turbo_stream_from SupportDesk.desk, :queue %>   <%# the queue %>
+```
+
+### Layer 3 — a generated console
+
+```bash
+rails generate support_desk:console madmin
+```
+
+Writes a controller that includes both concerns, a madmin resource so the
+nav and search know tickets exist, and the whole view set (Tailwind, all
+copy from locales) into `app/views/madmin/support_tickets/`. Everything it
+writes is yours to edit; re-running it leaves your edits alone unless you
+pass `--force`.
+
+The views are copied out of `SupportDesk::ConsoleEngine` — the same
+templates the mounted console renders, so there is one source of truth
+rather than two sets that drift. They reference nothing private: tabs come
+from `queue.tabs`, buttons from `actions_for`, and paths from the concern's
+`console_ticket_path`, which reads *your* controller's route. That is why
+the same file renders under `/admin/support` and under `/madmin`.
+
+Add the badge to your admin nav:
+
+```erb
+<%= render "madmin/support_tickets/nav_badge", agent: current_user %>
+```
+
+### Layer 4 — no admin framework at all
+
+```ruby
+mount SupportDesk::ConsoleEngine => "/admin/support"
+```
+
+Layer 2 with the views already filled in. It takes its layout and
+authentication from `config.console_parent_controller`, the way the
+requester engine takes `config.parent_controller`. Mounting it grants
+nothing: the agent check and `authorize_console` still run.
 
 ## The wizard
 

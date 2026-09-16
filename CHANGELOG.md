@@ -69,12 +69,35 @@ First release: the whole core of a support desk, on top of `chats` 0.2.
  — `Queue#counts` in one grouped query, a badge
   cached 30s per agent, `ContextCard`, `Summary`, `Timeline` and
   `actions_for(agent)`, all with no view dependency.
+- **The agent console, in three layers** — the query objects above, then a
+  routing concern and a controller concern, then a generator. The generated
+  madmin console and the turnkey `SupportDesk::ConsoleEngine` use nothing
+  the concerns don't expose, which is what makes "bring your own UI" a
+  promise rather than a hope.
+  - `concerns: :support_console` in any route set draws member `reply`,
+    `take`, `assign`, `hand_off`, `release`, `close`, `reopen`, `note` and
+    `change_topic`, plus collection `next`.
+  - `SupportDesk::Console` finds the ticket inside
+    `config.visible_desks_for` (a desk you may not work is a **404**, not a
+    403), asks `config.authorize_console` before every action, sets
+    `SupportDesk::Current.actor`, and turns every domain refusal into a
+    flash — a policy never 500s. `SupportDesk::Console::Index` is the
+    optional `@queue` / `@scope` / `@tickets`.
+  - `rails g support_desk:console madmin` writes a host-owned controller, a
+    madmin resource, and the view set: queue tabs, waiting chips coloured by
+    `at_risk_after` / `reply_within`, context card, transcript, timeline,
+    a "Reply"/"Internal note" composer, the hand-off picker, and a nav badge.
+    Idempotent, `--force` to take new defaults.
+  - `mount SupportDesk::ConsoleEngine => "/admin/support"` for hosts with no
+    admin framework, rendering those same views through
+    `config.console_parent_controller`.
 - **Events out, policy in.** `SupportDesk.on(:ticket_opened) { … }`,
   multi-subscriber, isolated with `Rails.error.report`, mirrored on
   `ActiveSupport::Notifications`.
 - **Multi-desk configuration** where every desk inherits what it doesn't
   state, with setters that validate on assignment and boot-time
-  `ConfigurationError`s that carry the fix.
+  `ConfigurationError`s that carry the fix. `config.visible_desks_for` and
+  `config.authorize_console` are the console's two hooks into it.
 - **`SupportDesk.doctor`** — configuration, the chats seams, and the data
   invariants, with an `ok?` for CI.
 - **`SupportDesk::TestHelper`** for host suites.
