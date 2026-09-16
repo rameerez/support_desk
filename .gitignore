@@ -10,9 +10,13 @@
 /test/tmp/
 /test/dummy/db/*.sqlite3
 /test/dummy/db/*.sqlite3-*
-# `rake db:migrate` dumps one, and it is SQLite-shaped — committing it would
-# hand the other two adapters a schema they can't load. The dummy migrates
-# from test/dummy/db/migrate, never from a dump.
+# The dummy sets dump_schema_after_migration = false, but `db:migrate:reset`
+# — the command the README and CI give for the PostgreSQL leg — is
+# hardwired to db:drop, db:create, db:schema:dump, db:migrate, and that dump
+# ignores the setting. So a routine Postgres run leaves an untracked,
+# SQLite-shaped schema.rb sitting in `git status`, one `git add .` away from
+# a schema the other two adapters cannot load. The dummy migrates from
+# test/dummy/db/migrate, never from a dump.
 /test/dummy/db/schema.rb
 /test/dummy/log/
 /test/dummy/storage/
