@@ -3,9 +3,14 @@
 # Default is SQLite (zero setup). The Postgres leg sets DATABASE_URL, which
 # ActiveRecord merges over this file automatically — one env var drives the
 # whole database matrix.
+#
+# The file name carries the Rails version because the appraisal legs share
+# this directory. A database migrated under one Rails version and then reused
+# under another fails with a wall of NOT NULL violations that look like
+# product bugs and are not; a file per leg makes the matrix order-independent.
 test:
   adapter: sqlite3
-  database: <%= File.expand_path("../db/test.sqlite3", __dir__) %>
+  database: <%= File.expand_path("../db/test-rails-#{Rails::VERSION::STRING.split('.').first(2).join('-')}.sqlite3", __dir__) %>
   pool: 5
   timeout: 5000
   url: <%= ENV["DATABASE_URL"] %>
