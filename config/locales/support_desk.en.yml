@@ -51,6 +51,9 @@ en:
       empty_hint: "Need help? Write to us"
     limits:
       title: "You already have conversations open"
+      too_many_open_title: "You already have conversations open"
+      too_fast_title: "That was quick"
+      your_message: "What you wrote, so you can copy it:"
       too_many_open:
         one: "You already have a conversation open. Write there and we'll keep going in it."
         other: "You already have %{count} conversations open. Write in one of them and we'll keep going there."

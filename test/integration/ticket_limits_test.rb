@@ -48,6 +48,43 @@ class TicketLimitsTest < ActionDispatch::IntegrationTest
     assert_redirected_to "/messages/#{existing.conversation.id}"
   end
 
+  # Both walls, in both languages, render real copy.
+  #
+  # The heading key is built from the reason (limits.<reason>_title), so a
+  # missing one renders Rails' "translation missing" span instead of raising —
+  # and every assertion here looked at the notice BODY, which is how both
+  # headings and the draft label shipped undefined in BOTH locales. Assert on
+  # the absence of that span, not on one key: the next dynamic key will not be
+  # one anybody remembered to list either.
+  %w[es en].each do |locale|
+    test "the open-ticket wall says something real in #{locale}" do
+      I18n.with_locale(locale) do
+        SupportDesk.config.max_open_tickets = 1
+        ticket_for(@alice, topic: :other, message: "La primera")
+
+        post "/messages/support/tickets", params: { topic: "order", no_subject: "1", message: "La segunda" }
+
+        assert_response :too_many_requests
+        assert_no_missing_translations
+        assert_select "h1", text: I18n.t("support_desk.limits.too_many_open_title")
+      end
+    end
+
+    test "the too-fast wall says something real in #{locale}" do
+      I18n.with_locale(locale) do
+        SupportDesk.config.max_open_tickets = nil
+        SupportDesk.config.open_rate_limit = { to: 1, within: 1.hour }
+        ticket_for(@alice, topic: :other, message: "La primera")
+
+        post "/messages/support/tickets", params: { topic: "order", no_subject: "1", message: "La segunda" }
+
+        assert_response :too_many_requests
+        assert_no_missing_translations
+        assert_select "h1", text: I18n.t("support_desk.limits.too_fast_title")
+      end
+    end
+  end
+
   test "a limit is never a 500" do
     SupportDesk.config.max_open_tickets = 1
     ticket_for(@alice, topic: :other)

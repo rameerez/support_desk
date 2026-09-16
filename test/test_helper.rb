@@ -130,6 +130,19 @@ end
 
 module ActionDispatch
   class IntegrationTest
+    # Fail when the rendered page carries Rails' "translation missing" span.
+    #
+    # I18n#t does not raise on a missing key in a view: it renders a span and
+    # the page still looks like a success, so a test asserting on some OTHER
+    # element passes while the heading reads "Too Many Open Title". Keys built
+    # at runtime (`t("...#{reason}_title")`) are invisible to a static locale
+    # check too, so this is the only guard that sees them.
+    def assert_no_missing_translations(body = response.body)
+      missing = body.scan(/translation missing: ([a-z.\-_]+)/i).flatten.uniq
+      assert missing.empty?,
+             "rendered page is missing #{missing.size} translation(s): #{missing.join(", ")}"
+    end
+
     # Act as +user+ for subsequent requests (see the dummy SessionsController).
     def login_as(user)
       post "/test_login", params: { user_id: user.id }

@@ -56,6 +56,9 @@ es:
       empty_hint: "¿Necesitas ayuda? Escríbenos"
     limits:
       title: "Ya tienes conversaciones abiertas"
+      too_many_open_title: "Ya tienes conversaciones abiertas"
+      too_fast_title: "Vas muy rápido"
+      your_message: "Lo que has escrito, para que puedas copiarlo:"
       too_many_open:
         one: "Ya tienes una conversación abierta. Escríbenos ahí y seguimos en la misma."
         other: "Ya tienes %{count} conversaciones abiertas. Escríbenos en una de ellas y seguimos ahí."
