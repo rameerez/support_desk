@@ -204,7 +204,13 @@
   }
   .chats-row--group .chats-row__title { letter-spacing: -0.02em; }
   .chats-row--group .chats-row__subject { color: var(--pb-brand-dark); }
-  .chats-verified { margin-left: 0.1rem; }
+  /* chats sizes the rosette from the text it sits beside (the glyph is 1em),
+     which lands it at 14px here — a shade over the title's cap height, and
+     tight enough that the tick knocked out of it starts to close up. A fifth
+     bigger is still proportional to the name, and it is the tick that has to
+     survive: a rosette without a readable tick is the blob 0.3.1 replaced.
+     Host CSS, not the gem's default. */
+  .chats-verified { margin-left: 0.15rem; font-size: 1.2em; }
 
   .chats-empty { padding: 2.25rem 1.5rem; }
   .chats-empty__title { font-size: 1.05rem; }
