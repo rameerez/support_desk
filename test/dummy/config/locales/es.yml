@@ -1,0 +1,18 @@
+# Rails' own Spanish time phrases, which a real host gets from rails-i18n.
+#
+# The gem ships Spanish for ITS strings, but durations render through
+# ActionView's distance_of_time_in_words, which reads these keys. Without
+# them the dummy silently falls back to English and a localisation test
+# passes for the wrong reason. Only the keys the suite exercises are here.
+es:
+  datetime:
+    distance_in_words:
+      x_minutes:
+        one: "1 minuto"
+        other: "%{count} minutos"
+      x_days:
+        one: "1 día"
+        other: "%{count} días"
+      about_x_hours:
+        one: "alrededor de 1 hora"
+        other: "alrededor de %{count} horas"

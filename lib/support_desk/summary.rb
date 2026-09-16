@@ -42,7 +42,11 @@ module SupportDesk
       duration = ticket.waiting_for
       return nil if duration.nil?
 
-      ActiveSupport::Duration.build(duration.to_i).inspect
+      # Through the same helper the wizard uses for its promise line, so
+      # this speaks the reader's language. Duration#inspect is English
+      # whatever the locale, which left one untranslatable string in an
+      # otherwise Spanish console.
+      Wizard.humanize_duration(duration)
     end
 
     # The whole line.

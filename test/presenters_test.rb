@@ -104,4 +104,15 @@ class PresentersTest < ActiveSupport::TestCase
     assert_equal 2, @ticket.timeline.to_a.size
     assert_kind_of SupportDesk::Timeline::Entry, @ticket.timeline.last
   end
+  # The console is rendered in the reader's language, so the waiting time has
+  # to be too. Duration#inspect is English whatever the locale, which left
+  # "Esperando respuesta · 27 seconds" in an otherwise Spanish console.
+  test "the waiting time speaks the reader's language" do
+    ticket = @alice.ask_support!("hola", topic: :other)
+    ticket.update_columns(awaiting: "agent", waiting_since: 27.minutes.ago)
+
+    I18n.with_locale(:es) { assert_equal "27 minutos", ticket.summary.waiting }
+    I18n.with_locale(:en) { assert_equal "27 minutes", ticket.summary.waiting }
+  end
+
 end
