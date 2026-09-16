@@ -14,6 +14,7 @@ module SupportDesk
     CLOSED_TICKETS_SHOWN = 20
 
     before_action :set_wizard, only: %i[new create]
+    include Chats::SendRateLimited
 
     # Their cases: open ones as rows, closed ones folded away, and the door
     # to open another.
@@ -45,6 +46,9 @@ module SupportDesk
 
       ticket = @wizard.open!(message, files: files)
       redirect_to conversation_path_for(ticket)
+    rescue ActiveRecord::RecordInvalid => e
+      @error = e.record.errors.full_messages.to_sentence
+      render :new, status: :unprocessable_entity
     rescue SupportDesk::RateLimited, SupportDesk::TooManyOpenTickets => e
       render_limit_wall(e)
     rescue SupportDesk::InvalidTransition
@@ -65,6 +69,8 @@ module SupportDesk
     end
 
     private
+
+    def chat_rate_limit_messager = current_requester
 
     def set_wizard
       @wizard = SupportDesk::Wizard.new(current_requester, params)

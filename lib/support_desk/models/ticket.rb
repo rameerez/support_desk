@@ -55,10 +55,17 @@ module SupportDesk
     has_many :events, class_name: "SupportDesk::Event", inverse_of: :ticket, dependent: :delete_all
     has_many :messages, through: :conversation, source: :messages
 
-    # `ticket.topic` is a Topic, never a String — the tree is the thing that
-    # carries behaviour, so the column casts both ways.
+    # Persist only the path. Resolving behavior needs this ticket's desk;
+    # an attribute caster has no record context and cannot choose the tree.
     attribute :topic, Topic::Type.new
     attribute :metadata, default: -> { {} }
+
+    def topic
+      path = self[:topic]
+      return if path.nil?
+
+      desk_config.topics.find(path) || Topic::Unknown.new(path)
+    end
 
     validates :status, inclusion: { in: STATUSES }
     validates :awaiting, inclusion: { in: AWAITING_STATES }
@@ -166,24 +173,22 @@ module SupportDesk
         node = resolve_topic!(topic, about, desk, requester, about)
 
         cardinality = cardinality_key_for(requester: requester, subject: about, topic: node)
-        existing = open_ticket_for(requester: requester, desk: desk, cardinality_key: cardinality)
+        existing = existing_for(requester: requester, desk: desk, subject: about, topic: node)
         return post_opening_message(existing, message, files) if existing
 
         enforce_rate_limit!(requester, desk)
         enforce_open_ticket_cap!(requester, desk)
 
-        ticket, inserted = insert_ticket!(
-          requester: requester, desk: desk, node: node, about: about, via: via,
-          requester_role: requester_role, title: title, metadata: metadata, cardinality_key: cardinality
-        )
-        ticket = post_opening_message(ticket, message, files)
-
-        # ONLY the request that actually inserted announces the ticket. Under
-        # the insert race the loser is holding somebody else's ticket, and a
-        # subscriber that pages every agent, or writes a row into a
-        # hash-chained audit log, must not do it twice for one case.
-        SupportDesk.emit_after_commit(:ticket_opened, ticket) if inserted
-        ticket
+        ticket = transaction do
+          created, inserted = insert_ticket!(
+            requester: requester, desk: desk, node: node, about: about, via: via,
+            requester_role: requester_role, title: title, metadata: metadata, cardinality_key: cardinality
+          )
+          post_opening_message(created, message, files)
+          SupportDesk.emit_after_commit(:ticket_opened, created) if inserted
+          created
+        end
+        ticket.reload
       end
 
       # A human-friendly, unguessable-enough reference: "T-AB12CD".
@@ -216,6 +221,16 @@ module SupportDesk
         else
           "topic:#{topic.path}"
         end
+      end
+
+      # New submissions reuse an open case, including a reopened history.
+      # Reopening itself never merges or discards a different conversation.
+      def existing_for(requester:, desk:, subject:, topic:)
+        return if subject && !subject.class.one_open_support_ticket?
+
+        scope = not_closed.where(requester: requester, desk: desk, subject: subject)
+        scope = scope.where(topic: topic.to_s) unless subject
+        scope.newest_first.first
       end
 
       private
@@ -325,7 +340,9 @@ module SupportDesk
         attempts = 0
         begin
           attempts += 1
-          ticket, opened = transaction do
+          # A unique-index loser must roll back a savepoint before querying
+          # the winner; PostgreSQL forbids reads in an aborted transaction.
+          ticket, opened = transaction(requires_new: true) do
             ticket = create!(
               desk: desk, requester: requester, requester_role: requester_role, subject: about,
               topic: node, title: title.presence, reference: unique_reference, status: "open",
@@ -491,14 +508,14 @@ module SupportDesk
     def reply!(body = nil, by: nil, files: [], request: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      ensure_writable!
 
       # One transaction, because taking the ticket and announcing it are
       # part of answering: a reply that raises (an empty body, a locked
       # conversation, a rate limit) must not leave the agent holding a case
       # they never answered, or "Lucía se ocupa de tu consulta" sitting in
       # the requester's thread with no reply under it.
-      transaction do
+      with_lock do
+        ensure_writable!
         apply_reply_policy!(actor, request: request)
         desk.message!(conversation, body, files: files, author: actor)
       end
@@ -521,13 +538,14 @@ module SupportDesk
     # handed it. Repeating an assignment to the current holder does nothing.
     def assign!(to:, by: nil, reason: nil, note: nil, request: nil)
       actor = resolve_actor(by)
+      ensure_agent!(actor)
       ensure_assignable!(to)
-      raise InvalidTransition, "can't assign a closed ticket — reopen it first" if closed?
 
       reason ||= to == actor ? :taken : :assigned
       assignment = nil
 
       event = write_transition!(:assigned, actor: actor, request: request) do
+        raise InvalidTransition, "can't assign a closed ticket — reopen it first" if closed?
         next false if assigned_to?(to)
 
         assignment = Assignment.open!(ticket: self, agent: to, by: actor, reason: reason, note: note)
@@ -545,18 +563,19 @@ module SupportDesk
     # whoever picks it up. Hand-off notes are always internal.
     def hand_off!(to:, note: nil, by: nil, request: nil)
       actor = resolve_actor(by)
-      unless assigned_to?(actor)
-        raise NotTheAssignee, "#{describe_actor(actor)} doesn't hold ticket #{reference} " \
-                              "(#{assignee ? describe_actor(assignee) : "nobody"} does) — use assign! to override"
-      end
+      ensure_agent!(actor)
       ensure_assignable!(to)
-      raise InvalidTransition, "can't hand off a closed ticket" if closed?
-
-      from = assignee
+      from = nil
       assignment = nil
       event = write_transition!(:handed_off, actor: actor, request: request) do
+        unless assigned_to?(actor)
+          raise NotTheAssignee, "#{describe_actor(actor)} doesn't hold ticket #{reference} " \
+                                "(#{assignee ? describe_actor(assignee) : "nobody"} does) — use assign! to override"
+        end
+        raise InvalidTransition, "can't hand off a closed ticket" if closed?
         next false if assigned_to?(to)
 
+        from = assignee
         assignment = Assignment.open!(ticket: self, agent: to, by: actor, reason: :handed_off, note: note,
                                       release_reason: :handed_off)
         update!(assignee: to)
@@ -573,12 +592,12 @@ module SupportDesk
     def release!(by: nil, reason: :released, request: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      raise InvalidTransition, "can't release a closed ticket" if closed?
-
-      from = assignee
+      from = nil
       event = write_transition!(:released, actor: actor, request: request) do
+        raise InvalidTransition, "can't release a closed ticket" if closed?
         next false if unassigned?
 
+        from = assignee
         assignments.open.each { |assignment| assignment.release!(reason: reason) }
         update!(assignee: nil)
         { "from" => SupportDesk.actor_key(from), "reason" => reason.to_s }
@@ -625,7 +644,8 @@ module SupportDesk
         # one update! hash reads the closed ticket's "none" and stores nil —
         # a reopened case that no SLA scope can see.
         assign_attributes(status: "open", closed_at: nil, closed_by: nil,
-                          reopen_count: reopen_count.to_i + 1, awaiting: awaiting_from_clocks)
+                          reopen_count: reopen_count.to_i + 1, awaiting: awaiting_from_clocks,
+                          cardinality_key: "reopened:#{id}")
         self.waiting_since = waiting_since_from_clocks
         save!
         restore_assignment!(by: actor)
@@ -711,11 +731,10 @@ module SupportDesk
         attributes = { last_registered_message_id: message.id }
         case role
         when :requester
-          attributes[:awaiting] = "agent"
           attributes[:last_requester_message_at] = message.created_at
-          if closed? && desk_config.closed_tickets == :reopen_on_reply
+          if closed? && message.created_at > closed_at && desk_config.closed_tickets == :reopen_on_reply
             attributes.merge!(status: "open", closed_at: nil, closed_by: nil,
-                              reopen_count: reopen_count.to_i + 1)
+                              reopen_count: reopen_count.to_i + 1, cardinality_key: "reopened:#{id}")
             reopened = true
           end
         when :agent
@@ -724,10 +743,10 @@ module SupportDesk
           # A closed case owes nobody anything. An agent adding one last
           # word keeps the clocks honest without putting the case back in a
           # queue that `close!` just took it out of.
-          attributes[:awaiting] = "requester" unless closed?
         end
 
         assign_attributes(attributes)
+        self.awaiting = closed? ? "none" : awaiting_from_clocks
         self.waiting_since = waiting_since_from_clocks
         save!
 
@@ -825,7 +844,7 @@ module SupportDesk
       I18n.t("support_desk.notifications.title", desk: desk.name)
     end
 
-    # The detail, for the body — visible after unlock.
+    # Case detail for an authenticated feed. Do not use for push previews.
     def notification_body = label
 
     # A GDPR-friendly dump of the case as the requester experienced it:

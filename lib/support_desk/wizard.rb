@@ -84,7 +84,7 @@ module SupportDesk
     # requester's desk, and a #desk that depended on the topic would ask the
     # tree for the topic to find out which tree to ask.
     def target_desk
-      key = topic&.desk_key
+      key = topic&.desk_override
       return desk if key.nil? || key == desk.key
 
       SupportDesk.desk(key) || desk
@@ -186,7 +186,7 @@ module SupportDesk
     end
 
     # The promise as a Duration, for hosts that want to phrase it themselves.
-    def promise_within = desk.config.reply_within
+    def promise_within = target_desk.config.reply_within
 
     # "1 day", "4 horas" — through ActionView's date helper so it speaks the
     # requester's language, falling back to Duration#inspect in the (rare)
@@ -207,10 +207,7 @@ module SupportDesk
     def existing_ticket
       return nil if topic.nil? || topic.branch?
 
-      key = Ticket.cardinality_key_for(requester: requester, subject: subject, topic: topic)
-      return nil if key.start_with?("free:")
-
-      Ticket.not_closed.find_by(requester: requester, desk: target_desk, cardinality_key: key)
+      Ticket.existing_for(requester: requester, desk: target_desk, subject: subject, topic: topic)
     end
 
     # Which records in +choices+ the requester already has an open case
@@ -270,15 +267,9 @@ module SupportDesk
         raise InvalidTransition, "the wizard is still on the #{step} step — pick one before submitting"
       end
 
-      # `ask_support!` files under the REQUESTER's desk, which is right
-      # until a topic says otherwise; then the redirect is spelled out.
-      if target_desk == desk
-        requester.ask_support!(message, about: subject, topic: topic.path, files: files)
-      else
-        Ticket.open!(requester: requester, message: message, about: subject, topic: topic.path,
-                     files: files, desk: target_desk,
-                     requester_role: requester.class.support_desk_requester_options[:as])
-      end
+      Ticket.open!(requester: requester, message: message, about: subject, topic: topic.path,
+                   files: files, desk: target_desk,
+                   requester_role: requester.class.support_desk_requester_options[:as])
     end
 
     # A signed token for the currently chosen subject, to round-trip through

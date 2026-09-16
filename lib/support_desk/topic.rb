@@ -192,8 +192,11 @@ module SupportDesk
 
     # The desk key tickets under this topic belong to.
     def desk_key
-      (inherited_or_own(:desk) || :default).to_sym
+      desk_override || :default
     end
+
+    # nil means inherit the wizard's desk, not route to the default desk.
+    def desk_override = inherited_or_own(:desk)&.to_sym
 
     # Hidden from the wizard; the label still resolves for historic tickets.
     def retired? = !!inherited_or_own(:retired)
@@ -257,34 +260,10 @@ module SupportDesk
       def inspect = "#<SupportDesk::Topic::Unknown #{path}>"
     end
 
-    # The ActiveModel attribute type behind `attribute :topic`: casts
-    # Symbol | String | Topic on the way in, hands back a Topic on the way
-    # out, and serializes to the path — so `where(topic: :ride)` works and a
-    # view never sees a bare string.
-    class Type < ActiveModel::Type::Value
-      def type = :string
-
-      def cast(value)
-        case value
-        when nil then nil
-        when Topic then value
-        else SupportDesk.find_topic(value.to_s)
-        end
-      end
-
-      def serialize(value)
-        case value
-        when nil then nil
-        when Topic then value.path
-        else value.to_s
-        end
-      end
-
-      def deserialize(value) = cast(value)
-
-      def changed_in_place?(raw_old_value, new_value)
-        raw_old_value != serialize(new_value)
-      end
+    # Casting must not consult a global topic tree: the same path may mean
+    # different things on two desks. Ticket#topic resolves the stored path.
+    class Type < ActiveModel::Type::String
+      def cast(value) = value&.to_s
     end
   end
 end
