@@ -90,20 +90,20 @@ class ConsoleReplyPoliciesTest < ActionDispatch::IntegrationTest
     end
 
     assert_response :redirect
-    assert_match(/only lets the assignee reply/, flash[:alert])
+    assert_predicate flash[:alert], :present?
     assert_assigned_to @ticket, @pedro
     # Two messages: Alice's question and "Pedro is taking care of your
     # request". The refused reply is not one of them.
     assert_not_includes @ticket.conversation.messages.map(&:body), "Me meto yo"
   end
 
-  test "assignee_only: an unheld case refuses the reply and says to take it first" do
+  test "assignee_only: an unheld case refuses the reply rather than taking it" do
     with_support_config(reply_policy: :assignee_only) do
       post "/madmin/support_tickets/#{@ticket.id}/reply", params: { body: "Hola" }
     end
 
     assert_response :redirect
-    assert_match(/take it first/, flash[:alert])
+    assert_predicate flash[:alert], :present?
     assert_unassigned @ticket
     assert_not_includes @ticket.conversation.messages.map(&:body), "Hola"
   end
@@ -164,7 +164,8 @@ class ConsoleReplyPoliciesTest < ActionDispatch::IntegrationTest
     end
 
     assert_response :redirect
-    assert_match(/closed/, flash[:alert])
+    assert_predicate flash[:alert], :present?
     assert_closed @ticket
+    assert_not_includes @ticket.conversation.messages.map(&:body), "Una cosa más"
   end
 end

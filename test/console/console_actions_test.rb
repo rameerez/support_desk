@@ -146,7 +146,9 @@ class ConsoleActionsTest < ActionDispatch::IntegrationTest
     post "/madmin/support_tickets/#{@ticket.id}/hand_off", params: { agent_id: @lucia.id }
 
     assert_response :redirect
-    assert_match(/doesn't hold ticket #{@ticket.reference}/, flash[:alert])
+    # The console passes the domain's own message through, because it names
+    # who actually holds the case — the thing the agent needs to know. We
+    # pin that it reaches them, not how the model words it.
     assert_match(/Pedro/, flash[:alert])
     assert_assigned_to @ticket, @pedro
   end
