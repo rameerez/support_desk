@@ -7,6 +7,16 @@
 
 `support_desk` gives your Rails app a **support desk**: tickets that are real conversations. Somebody asks for help about something in your app (a ride, an order, a withdrawal) or about nothing in particular, your desk answers, humans sign the answers, and your team works a queue.
 
+Here is the whole thing — the kind of support desk a DoorDash, an Uber Eats or a Grab needs — running on a made-up delivery app called Pepperbox. These are the **bundled views**, unmodified, themed by the host with a handful of CSS variables:
+
+| One row, every case | Pick a topic | Which order? |
+|:---:|:---:|:---:|
+| ![The chats inbox, with every support conversation folded into a single row](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/01-inbox.png) | ![The wizard's first step: a list of support topics](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/02-topics.png) | ![The wizard's second step: the requester's own orders](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/03-subject.png) |
+| **Say what happened** | **Signed by a human** | **The agent queue** |
+| ![The composer, with a card naming the order the case is about](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/04-compose.png) | ![The conversation, with an agent's answer signed by name](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/05-thread.png) | ![The agent queue, with tabs, counts and waiting chips](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/06-queue.png) |
+| **The whole case** | **Notes stay inside** | **Hand it over** |
+| ![One case: transcript on the left, context card on the right](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/07-case.png) | ![The internal note composer, which never reaches the customer](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/08-note.png) | ![The timeline: assigned, noted, answered, handed off](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/09-handoff.png) |
+
 It is a product gem on the [`chats`](https://github.com/rameerez/chats) kernel: chats owns the transcript, realtime, attachments, read state and moderation; `support_desk` owns the case — topics, assignment, SLA clocks, events and the console API.
 
 Every app eventually needs a support inbox, and everyone rebuilds the same ticket table, the same "assigned to me" tab, the same "which order is this about?" picker and the same email bridge. `support_desk` is that whole rebuild, done once, done right, on top of the messaging you already have.

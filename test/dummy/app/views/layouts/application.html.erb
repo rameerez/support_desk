@@ -10,7 +10,17 @@
     <%# Where engine stylesheets land (support_desk_styles, and any host's own). %>
     <%= yield :head %>
   </head>
-  <body>
+  <body class="<%= "pb-console" if request.path.start_with?("/admin/support", "/madmin/support_tickets") %>">
+    <div class="pb-bar">
+      <span class="pb-bar__mark" aria-hidden="true">P</span>
+      <span class="pb-bar__word">pepper<em>box</em></span>
+      <span class="pb-bar__tag"><%= request.path.start_with?("/admin/support", "/madmin/support_tickets") ? "Support desk" : "Food, fast" %></span>
+    </div>
     <%= yield %>
+    <%# Demo-only: the Pepperbox theme the README screenshots are taken in.
+        LAST, after the yield, because chats 0.2.0 renders its own stylesheet
+        <link> inline in the body — a host theme in <head> would lose to it on
+        document order for every rule of equal specificity. %>
+    <%= render "layouts/demo_chrome" %>
   </body>
 </html>
