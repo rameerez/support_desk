@@ -16,8 +16,16 @@ require_relative "support_desk/topic_tree"
 require_relative "support_desk/configuration"
 require_relative "support_desk/current"
 require_relative "support_desk/macros"
+# The console's Layer 2. Spine rather than autoloaded, because the engine
+# isolates SupportDesk::Console as its namespace and a namespace has to
+# exist before an engine can isolate it.
+require_relative "support_desk/console"
+require_relative "support_desk/console_routes"
 
-require_relative "support_desk/engine" if defined?(::Rails::Engine)
+if defined?(::Rails::Engine)
+  require_relative "support_desk/engine"
+  require_relative "support_desk/console_engine"
+end
 
 # == SupportDesk
 #

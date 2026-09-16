@@ -1,0 +1,44 @@
+# frozen_string_literal: true
+
+# Tells madmin that support tickets exist: the nav entry, the search index
+# and the record links other resources make when they point at a ticket.
+#
+# The console itself is NOT this resource's index and show — those are
+# <%= module_name %>::SupportTicketsController, which is a real support
+# screen rather than a table of columns. The path overrides below are what
+# send madmin's own links there.
+class SupportTicketResource < Madmin::Resource
+  model SupportDesk::Ticket
+
+  attribute :reference, index: true, form: false
+  attribute :title, index: true, form: false
+  attribute :topic, index: true, form: false
+  attribute :status, index: true, form: false
+  attribute :awaiting, index: true, form: false
+  attribute :requester, :polymorphic, index: true, form: false
+  attribute :assignee, :polymorphic, index: true, form: false
+  attribute :subject, :polymorphic, index: false, form: false
+  attribute :opened_via, index: false, form: false
+  attribute :waiting_since, index: true, form: false
+  attribute :opened_at, index: false, form: false
+  attribute :closed_at, index: false, form: false
+
+  scope :open
+  scope :closed
+  scope :unassigned
+  scope :awaiting_reply
+
+  menu label: "Support"
+
+  # "T-AB12CD · Order SO1" reads better than "Ticket #42" everywhere madmin
+  # prints a record: breadcrumbs, search results, association links.
+  def self.display_name(record) = "#{record.reference} · #{record.label}"
+
+  def self.index_path(options = {}) = url_helpers.<%= target %>_support_tickets_path(options)
+  def self.show_path(record) = url_helpers.<%= target %>_support_ticket_path(record)
+  def self.new_path = index_path
+  def self.edit_path(record) = show_path(record)
+
+  def self.default_sort_column = "waiting_since"
+  def self.default_sort_direction = "asc"
+end

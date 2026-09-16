@@ -119,9 +119,19 @@ class QueueTest < ActiveSupport::TestCase
   test "tabs come with i18n labels, in display order" do
     tabs = @queue.tabs
 
-    assert_equal SupportDesk::Queue::TABS, tabs.map(&:first)
+    assert_equal SupportDesk::Queue::VISIBLE_TABS, tabs.map(&:first)
     assert_equal "Needs a reply", tabs.first[1]
     assert_equal 3, tabs.first[2]
+  end
+
+  test "a tab whose feature hasn't shipped isn't offered, but still answers" do
+    # Snoozing is 0.2. Until then the tab would be a permanent zero, so
+    # nothing renders it — while `scope` and `counts` still cover it, so a
+    # host that gets snoozed rows from elsewhere isn't locked out.
+    assert_not_includes @queue.tabs.map(&:first), :snoozed
+    assert_includes SupportDesk::Queue::TABS, :snoozed
+    assert_includes @queue.counts.keys, :snoozed
+    assert_equal @queue.snoozed.to_a, @queue.scope(:snoozed).to_a
   end
 
   test "scope routes a params[:tab] without a case statement" do

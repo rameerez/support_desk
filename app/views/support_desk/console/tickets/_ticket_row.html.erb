@@ -1,0 +1,56 @@
+<%# One queue row: who is asking, what about, what was said last, how long
+    they have been waiting, who holds it, and where it came in through.
+
+    The waiting chip is coloured by the desk's OWN thresholds — the ticket
+    answers `at_risk?` and `overdue?` against `config.at_risk_after` and
+    `config.reply_within`, so a desk that promises an answer in an hour goes
+    red in an hour without anybody restyling this file.
+
+    Nothing here queries: the index preloads requester, assignee, desk and
+    the last message with its sender and author. %>
+<li>
+  <%= link_to console_ticket_path(ticket), class: "flex flex-wrap items-start gap-x-4 gap-y-2 px-4 py-3 hover:bg-slate-50" do %>
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="font-medium"><%= ticket.label %></span>
+
+        <% pill = ticket.closed? ? "bg-slate-100 text-slate-600" : ticket.snoozed? ? "bg-indigo-50 text-indigo-700" : "bg-emerald-50 text-emerald-700" %>
+        <span class="rounded-full <%= pill %> px-2 py-0.5 text-xs font-medium">
+          <%= t("support_desk.status.#{ticket.status}") %>
+        </span>
+
+        <span class="font-mono text-xs text-slate-400"><%= ticket.reference %></span>
+      </div>
+
+      <p class="mt-0.5 text-sm text-slate-500">
+        <%= Chats.display_name_for(ticket.requester) %> · <%= ticket.topic&.full_label %>
+      </p>
+
+      <%# Speaker prefix in one expression: an agent's answer is SENT by the
+          desk and AUTHORED by the human, so `author` is the agent when there
+          is one and nil when the requester wrote it. %>
+      <% preview = ticket.conversation&.last_message %>
+      <% if preview && !preview.system? && preview.visible_body.present? %>
+        <p class="mt-1 truncate text-sm text-slate-600">
+          <span class="font-medium text-slate-700"><%= preview.author&.try(:support_agent_name) || Chats.display_name_for(preview.sender) %>:</span>
+          <%= truncate(preview.visible_body, length: 90) %>
+        </p>
+      <% end %>
+    </div>
+
+    <div class="flex shrink-0 flex-col items-end gap-1 text-xs">
+      <% if ticket.waiting_for %>
+        <% chip = ticket.overdue? ? "bg-red-50 text-red-700" : ticket.at_risk? ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-600" %>
+        <span class="rounded-full <%= chip %> px-2 py-0.5 font-medium">
+          <%= t("support_desk.console.row.waiting", duration: ticket.summary.waiting) %>
+        </span>
+      <% end %>
+
+      <span class="text-slate-500">
+        <%= ticket.assignee&.support_agent_name || t("support_desk.console.row.unassigned") %>
+      </span>
+
+      <span class="text-slate-400"><%= ticket.channels_summary %></span>
+    </div>
+  <% end %>
+</li>

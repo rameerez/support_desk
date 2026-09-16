@@ -1,0 +1,28 @@
+<%# One case, the dummy host's way. Every reader it prints is Layer 1, and
+    every path it links is the console concern's — which is what proves
+    those helpers resolve against a HOST's routes as well as the engine's. %>
+<%= turbo_stream_from @ticket, :console %>
+
+<h1><%= @ticket.label %></h1>
+
+<p id="reference"><%= @ticket.reference %></p>
+<p id="status"><%= @ticket.status %></p>
+<p id="awaiting"><%= @ticket.awaiting %></p>
+<p id="assignee"><%= @ticket.assignee&.support_agent_name || "-" %></p>
+<p id="actions"><%= @actions.join(" ") %></p>
+<p id="context"><%= @context_card.title %> · <%= @context_card.requester_name %></p>
+
+<ul id="transcript">
+  <% support_transcript(@ticket).each do |message| %>
+    <li><%= message.visible_body %></li>
+  <% end %>
+</ul>
+
+<ul id="timeline">
+  <% @ticket.timeline.each do |entry| %>
+    <li><%= entry.kind %></li>
+  <% end %>
+</ul>
+
+<%= button_to "Tomar", console_ticket_path(@ticket, :take), method: :post, id: "take" %>
+<%= link_to "Volver", console_tickets_path, id: "back" %>

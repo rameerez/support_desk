@@ -34,6 +34,7 @@ module SupportDesk
 
     ZEITWERK_IGNORED = %w[
       version.rb errors.rb events.rb topic.rb topic_tree.rb configuration.rb current.rb macros.rb engine.rb
+      console.rb console_routes.rb console_engine.rb
     ].freeze
 
     initializer "support_desk.autoload", before: :set_autoload_paths do

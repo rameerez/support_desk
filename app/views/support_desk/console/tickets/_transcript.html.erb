@@ -1,0 +1,26 @@
+<%# The conversation, exactly as the requester has it — this IS their thread,
+    not a copy of it.
+
+    We lay the bubbles out here rather than rendering chats' own
+    `chats/messages/_message`: that partial is built for the requester's
+    thread (its CSS, its long-press menu, its reaction buttons, its Stimulus
+    controller), and none of that belongs in an admin console. What we DO
+    reuse is chats' view API — `chats_messager_avatar` and
+    `chats_message_signature` are mixed into every host's ActionView — so
+    avatars and signatures look the same on both sides of the desk. %>
+<section class="rounded-lg border border-slate-200 bg-white">
+  <h2 class="border-b border-slate-200 px-4 py-3 text-sm font-semibold">
+    <%= t("support_desk.console.transcript.title") %>
+  </h2>
+
+  <div class="max-h-[32rem] space-y-3 overflow-y-auto p-4">
+    <% messages = support_transcript(ticket) %>
+    <% if messages.empty? %>
+      <p class="text-sm text-slate-500"><%= t("support_desk.console.transcript.empty") %></p>
+    <% else %>
+      <% messages.each do |message| %>
+        <%= render "message", message: message, ticket: ticket %>
+      <% end %>
+    <% end %>
+  </div>
+</section>

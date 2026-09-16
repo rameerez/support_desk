@@ -1,0 +1,48 @@
+<%# One message, from the desk's side of the glass: the requester on the
+    left, our answers on the right.
+
+    Who wrote it is a real question here. An agent's answer is SENT by the
+    desk and AUTHORED by the human (chats' S3 seam), which is what lets the
+    requester see one counterpart while the console still names the person —
+    so `sender` decides the side and `author` decides the signature. A reply
+    from an agent who isn't the assignee is a drop-in: the timeline records
+    it, and the signature is what makes it visible here. %>
+<% from_requester = message.sender_type == ticket.requester_type && message.sender_id.to_s == ticket.requester_id.to_s %>
+
+<% if message.system? %>
+  <p class="text-center text-xs text-slate-400"><%= message.visible_body %></p>
+<% else %>
+  <div class="flex gap-2 <%= "flex-row-reverse" unless from_requester %>">
+    <%= chats_messager_avatar(message.sender, css_class: "h-8 w-8 shrink-0 rounded-full") %>
+
+    <div class="max-w-[80%] rounded-lg px-3 py-2 text-sm <%= from_requester ? "bg-slate-100 text-slate-900" : "bg-slate-900 text-white" %>">
+      <% if message.deleted? %>
+        <em class="opacity-70"><%= message.visible_body %></em>
+      <% else %>
+        <% if message.body.present? %>
+          <%# Escaped text with pre-wrap, never simple_format: chat semantics
+              are literal, and every newline somebody typed is one they meant. %>
+          <div class="whitespace-pre-wrap break-words"><%= message.body %></div>
+        <% end %>
+
+        <% if message.attachments? %>
+          <ul class="mt-1 space-y-0.5">
+            <% message.files.each do |file| %>
+              <li>
+                <%= link_to file.filename.to_s, console_file_path(file),
+                      target: "_blank", rel: "noopener", class: "underline underline-offset-2" %>
+              </li>
+            <% end %>
+          </ul>
+        <% end %>
+      <% end %>
+
+      <div class="mt-1 flex items-center gap-2 text-[11px] <%= from_requester ? "text-slate-500" : "text-white/60" %>">
+        <% if (signature = chats_message_signature(message)) %>
+          <span><%= signature %></span>
+        <% end %>
+        <time datetime="<%= message.created_at.iso8601 %>"><%= l(message.created_at, format: :short) %></time>
+      </div>
+    </div>
+  </div>
+<% end %>

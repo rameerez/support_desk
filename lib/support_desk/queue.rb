@@ -12,8 +12,20 @@ module SupportDesk
   #   q.next              # the ticket to open now
   #   q.tabs              # [[:awaiting, "Pendientes", 4], …]
   class Queue
-    # The tabs a console renders, in display order.
+    # Every tab a queue can answer for, in display order. `scope` and
+    # `counts` both cover all of them.
     TABS = %i[awaiting mine unassigned open snoozed closed].freeze
+
+    # Tabs whose FEATURE hasn't shipped yet. Snoozing lands in 0.2: until a
+    # ticket can actually be snoozed, the tab is a permanent column of
+    # zeros, and a control that never does anything is how a console starts
+    # teaching people not to read it. The relation and the count stay — a
+    # host importing snoozed tickets from elsewhere can still ask for them
+    # by name — but nothing offers the tab.
+    UNRELEASED_TABS = %i[snoozed].freeze
+
+    # The tabs a console should render, in display order.
+    VISIBLE_TABS = (TABS - UNRELEASED_TABS).freeze
 
     # How long a nav badge may lie. Long enough that a busy console isn't
     # counting rows on every request, short enough that nobody notices.
@@ -112,7 +124,7 @@ module SupportDesk
     # ready to render.
     def tabs
       numbers = counts
-      TABS.map { |tab| [ tab, I18n.t("support_desk.queue.tabs.#{tab}"), numbers[tab] ] }
+      VISIBLE_TABS.map { |tab| [ tab, I18n.t("support_desk.queue.tabs.#{tab}"), numbers[tab] ] }
     end
 
     # The relation behind a tab name, so a console can route `params[:tab]`

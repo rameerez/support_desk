@@ -54,7 +54,7 @@ class ReadmeTest < ActiveSupport::TestCase
     assert_kind_of Hash, q.counts
     assert_kind_of Integer, q.badge
     assert_kind_of SupportDesk::Ticket, q.next
-    assert_equal 6, q.tabs.size
+    assert_equal 5, q.tabs.size
   end
 
   test "the README's event wiring works as written" do
