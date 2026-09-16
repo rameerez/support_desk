@@ -251,10 +251,13 @@ class WizardTest < ActiveSupport::TestCase
   test "durations are humanized through i18n, and never as Translation missing" do
     assert_equal "1 day", SupportDesk::Wizard.humanize_duration(24.hours)
 
-    # The dummy has no rails-i18n, so Spanish has no date translations: the
-    # requester gets a plain duration rather than "Translation missing".
+    # The dummy carries Rails' Spanish time phrases (test/dummy/config/locales/
+    # es.yml) the way a real host gets them from rails-i18n, so a Spanish
+    # requester reads the promise in Spanish. A host with no time phrases for
+    # its locale gets a plain English duration, never "Translation missing" —
+    # that fallback lives in humanize_duration itself.
     I18n.with_locale(:es) do
-      assert_equal "24 hours", SupportDesk::Wizard.humanize_duration(24.hours)
+      assert_equal "1 día", SupportDesk::Wizard.humanize_duration(24.hours)
     end
   end
 

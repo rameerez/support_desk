@@ -114,5 +114,4 @@ class PresentersTest < ActiveSupport::TestCase
     I18n.with_locale(:es) { assert_equal "27 minutos", ticket.summary.waiting }
     I18n.with_locale(:en) { assert_equal "27 minutes", ticket.summary.waiting }
   end
-
 end
