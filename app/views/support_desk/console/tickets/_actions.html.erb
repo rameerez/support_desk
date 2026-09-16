@@ -1,0 +1,29 @@
+<%# Close, reopen, and refile — the header buttons.
+
+    Nothing here decides what an agent may do: `ticket.actions_for(agent)`
+    already filtered the list by policy, status and duty, so this file
+    renders exactly what it was handed. Adding a button that isn't in
+    `actions` would render something the server refuses, which is how
+    consoles end up teaching people to ignore errors. %>
+<div class="flex flex-wrap items-center gap-2">
+  <% if actions.include?(:change_topic) %>
+    <%= form_with url: console_ticket_path(ticket, :change_topic), method: :post, class: "flex items-center gap-2" do %>
+      <%= select_tag :topic,
+            options_for_select(ticket.desk_config.topics.leaves.map { |topic| [ topic.full_label, topic.path ] },
+                               ticket.topic&.path),
+            class: "rounded-md border border-slate-300 px-2 py-1.5 text-sm" %>
+      <%= submit_tag t("support_desk.console.actions.change_topic"),
+            class: "rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50" %>
+    <% end %>
+  <% end %>
+
+  <% if actions.include?(:close) %>
+    <%= button_to t("support_desk.console.actions.close"), console_ticket_path(ticket, :close), method: :post,
+          class: "rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50" %>
+  <% end %>
+
+  <% if actions.include?(:reopen) %>
+    <%= button_to t("support_desk.console.actions.reopen"), console_ticket_path(ticket, :reopen), method: :post,
+          class: "rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700" %>
+  <% end %>
+</div>

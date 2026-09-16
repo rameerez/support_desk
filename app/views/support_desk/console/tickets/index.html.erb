@@ -1,0 +1,37 @@
+<%# The queue.
+
+    Everything here comes from Layer 1 (SupportDesk::Queue) and the path
+    helpers the console concern derives from THIS controller's own route —
+    which is why the same file renders under the mounted ConsoleEngine and
+    under a host's /madmin namespace without a line changing.
+
+    `turbo_stream_from ..., :queue` is half of the realtime contract: the
+    gem broadcasts a Turbo 8 refresh to this stream on every message and
+    every transition, so the counts and the rows re-render themselves. %>
+<%= turbo_stream_from support_desk_record, :queue %>
+
+<div class="mx-auto max-w-6xl px-4 py-6 text-slate-900">
+  <header class="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-semibold"><%= t("support_desk.console.queue.title") %></h1>
+      <p class="text-sm text-slate-500"><%= support_desk_record.name %></p>
+    </div>
+
+    <%= link_to t("support_desk.console.actions.next"), console_tickets_path(:next),
+          class: "inline-flex items-center rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700" %>
+  </header>
+
+  <%= render "tabs", queue: @queue, scope: @scope %>
+
+  <% if @tickets.empty? %>
+    <p class="rounded-lg border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">
+      <%= t("support_desk.console.queue.empty") %>
+    </p>
+  <% else %>
+    <ul class="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <% @tickets.each do |ticket| %>
+        <%= render "ticket_row", ticket: ticket %>
+      <% end %>
+    </ul>
+  <% end %>
+</div>

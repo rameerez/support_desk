@@ -1,0 +1,15 @@
+<%# The queue tabs, straight from `queue.tabs` — [[:awaiting, "Pendientes", 4], …]
+    with the labels already translated, in the order an agent works them.
+    The selected tab travels in the URL (`?tab=`), so a tab is a link
+    anybody can bookmark, send to a colleague, or reload. %>
+<nav class="mb-4 flex flex-wrap gap-1" aria-label="<%= t("support_desk.console.queue.tabs_label") %>">
+  <% queue.tabs.each do |tab, label, count| %>
+    <% current = tab == scope %>
+    <%= link_to console_tickets_path(:index, tab: tab),
+          "aria-current": ("page" if current),
+          class: "inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium #{current ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}" do %>
+      <%= label %>
+      <span class="rounded-full <%= current ? "bg-white/20" : "bg-slate-200 text-slate-700" %> px-1.5 text-xs tabular-nums"><%= count %></span>
+    <% end %>
+  <% end %>
+</nav>

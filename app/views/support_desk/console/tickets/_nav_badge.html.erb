@@ -1,0 +1,19 @@
+<%# The nav badge: how many cases this agent should feel responsible for —
+    their own, plus everything nobody has picked up.
+
+    Drop it into your admin nav, passing whoever is logged in:
+
+      render "madmin/support_tickets/nav_badge", agent: current_user
+
+    `Queue#badge` is one COUNT cached 30 seconds per agent, so putting it in
+    a layout that renders on every admin page costs nothing. Renders nothing
+    at all for somebody who isn't an agent, so it is safe in a shared nav. %>
+<% if agent.respond_to?(:support_agent?) && agent.support_agent? %>
+  <% count = SupportDesk::Queue.for(agent).badge %>
+  <span class="inline-flex items-center gap-2">
+    <%= t("support_desk.console.nav.title") %>
+    <% if count.positive? %>
+      <span class="rounded-full bg-red-600 px-1.5 text-xs font-medium tabular-nums text-white"><%= count %></span>
+    <% end %>
+  </span>
+<% end %>

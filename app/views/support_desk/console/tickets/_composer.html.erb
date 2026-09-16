@@ -1,0 +1,58 @@
+<%# Two ways to write, and they are not the same thing: a REPLY goes to the
+    requester and moves the SLA clock, a NOTE never leaves the desk. Mixing
+    them up is the classic support-tool accident, so they are two tabs and
+    two buttons, never one box with a checkbox.
+
+    The tab lives in the URL (`?compose=note`) rather than in a Stimulus
+    controller: no JavaScript to ship, a state you can link to, and a
+    composer that still works on the day the bundle fails to build. %>
+<% composing_note = params[:compose].to_s == "note" %>
+<% may_reply = actions.include?(:reply) %>
+
+<section class="rounded-lg border border-slate-200 bg-white">
+  <nav class="flex gap-1 border-b border-slate-200 px-2 pt-2">
+    <% [ [ :reply, !composing_note ], [ :note, composing_note ] ].each do |tab, current| %>
+      <%= link_to console_ticket_path(ticket, :show, compose: tab),
+            "aria-current": ("page" if current),
+            class: "rounded-t-md px-3 py-2 text-sm font-medium #{current ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-900"}" do %>
+        <%= t("support_desk.console.composer.#{tab}") %>
+      <% end %>
+    <% end %>
+  </nav>
+
+  <div class="p-4">
+    <% if composing_note %>
+      <%= form_with url: console_ticket_path(ticket, :note), method: :post do %>
+        <%= text_area_tag :body, nil, rows: 3, required: true,
+              placeholder: t("support_desk.console.composer.note_placeholder"),
+              class: "w-full rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-slate-900" %>
+        <div class="mt-2 flex items-center justify-between gap-3">
+          <p class="text-xs text-slate-500"><%= t("support_desk.console.composer.note_hint") %></p>
+          <%= submit_tag t("support_desk.console.actions.note"),
+                class: "rounded-md bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600" %>
+        </div>
+      <% end %>
+
+    <% elsif may_reply %>
+      <%= form_with url: console_ticket_path(ticket, :reply), method: :post do %>
+        <%= text_area_tag :body, nil, rows: 3,
+              placeholder: t("support_desk.console.composer.reply_placeholder"),
+              class: "w-full rounded-md border border-slate-300 p-2 text-sm" %>
+        <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <%= file_field_tag "files[]", multiple: true, class: "text-xs text-slate-500" %>
+          <%= submit_tag t("support_desk.console.actions.reply"),
+                class: "rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700" %>
+        </div>
+      <% end %>
+
+    <% else %>
+      <%# `actions_for` already decided this agent may not answer — because
+          the desk is :assignee_only and somebody else holds the case, or
+          because it is closed. Say which, and offer the way out rather than
+          a box that would only 422. %>
+      <p class="text-sm text-slate-500">
+        <%= ticket.closed? ? t("support_desk.console.composer.closed") : t("support_desk.console.composer.assignee_only", agent: ticket.assignee&.support_agent_name) %>
+      </p>
+    <% end %>
+  </div>
+</section>
