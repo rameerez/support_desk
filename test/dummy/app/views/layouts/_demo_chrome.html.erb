@@ -418,7 +418,7 @@
   .gap-1 { gap: 0.25rem; }
   .gap-2 { gap: 0.5rem; }
   .gap-3 { gap: 0.75rem; }
-  .gap-6 { gap: 1.5rem; }
+  .gap-6 { gap: 1rem; }
   .gap-x-4 { column-gap: 1rem; }
   .gap-y-2 { row-gap: 0.5rem; }
   .space-y-0\.5 > * + * { margin-top: 0.125rem; }
@@ -427,7 +427,7 @@
   .space-y-4 > * + * { margin-top: 1rem; }
 
   .mb-4 { margin-bottom: 1rem; }
-  .mb-5 { margin-bottom: 1.25rem; }
+  .mb-5 { margin-bottom: 0.85rem; }
   .mt-0\.5 { margin-top: 0.125rem; }
   .mt-1 { margin-top: 0.25rem; }
   .mt-2 { margin-top: 0.5rem; }
@@ -442,14 +442,14 @@
   .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
   .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
   .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
-  .py-6 { padding-top: 1.25rem; padding-bottom: 1.25rem; }
+  .py-6 { padding-top: 0.9rem; padding-bottom: 0.9rem; }
   .py-10 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
   .pt-2 { padding-top: 0.5rem; }
 
   .text-xs { font-size: 0.78rem; line-height: 1.35; }
   .text-\[11px\] { font-size: 0.72rem; }
   .text-sm { font-size: 0.9rem; line-height: 1.45; }
-  .text-xl { font-size: 1.42rem; line-height: 1.2; }
+  .text-xl { font-size: 1.28rem; line-height: 1.2; }
 
   .rounded-md { border-radius: 0.6rem; }
   .rounded-t-md { border-top-left-radius: 0.6rem; border-top-right-radius: 0.6rem; }
@@ -535,6 +535,23 @@
   .pb-console input[type="submit"].bg-amber-500 { background-color: #E8A32B; color: #3A2600; }
   .pb-console input[type="submit"].bg-amber-500:hover { background-color: #D9911A; }
   .pb-console h2 { font-size: 0.95rem; letter-spacing: -0.01em; }
+.pb-console dl.space-y-2 > * + * { margin-top: 0.35rem; }
+
+/* The queue's five tabs, with their live counts, ARE that screen: a
+   "Closed" that drops to a line of its own reads as a broken toolbar
+   rather than as responsive behaviour. They are tightened here and not in
+   the gem, so a host with room to spare keeps the roomier default. The
+   tab row is the only <nav> the console labels, which is what makes this
+   selector safe. `screenshots/capture.rb` asserts the row is one line. */
+.pb-console nav[aria-label] { gap: 0.12rem; }
+.pb-console nav[aria-label] a { padding: 0.3rem 0.45rem; font-size: 0.78rem; gap: 0.3rem; }
+.pb-console nav[aria-label] a > span { padding-left: 0.3rem; padding-right: 0.3rem; font-size: 0.7rem; }
+
+/* The refile picker sizes itself to its longest topic ("Payments and
+   refunds › A charge I don't recognise"), which at phone width pushes
+   Close onto a second row and costs the case screen a bubble. Capped, so
+   the three header actions stay one line. */
+.pb-console select[name="topic"] { max-width: 9.5rem; }
   .pb-console form { margin: 0; }
   .pb-console input[type="file"] { font-size: 0.78rem; color: var(--pb-muted); }
   .pb-console input[type="file"]::file-selector-button {

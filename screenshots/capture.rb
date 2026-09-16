@@ -87,12 +87,16 @@ class Order
   # courier thread in the inbox shot.
   def chat_subject_label = "#{details[:restaurant]} · #{reference}"
 
+  # Two pairs, not four. The gem puts five rows of its own above these
+  # (requester, open cases, member since, topic, status), and the case screen
+  # has to show the CONVERSATION beside what it is about — a card long enough
+  # to fill a portrait frame on its own turns "the whole case" into a
+  # metadata table. Courier and Placed were filling a table; an agent
+  # answering this needs the money and the kitchen.
   def support_context
     {
       "Order total" => format("EUR %.2f", total),
-      "Restaurant" => details[:restaurant],
-      "Courier" => details[:courier],
-      "Placed" => created_at.strftime("%b %-d, %H:%M")
+      "Restaurant" => details[:restaurant]
     }
   end
 end
@@ -440,6 +444,25 @@ def flush_to!(session, selector)
   raise "#{selector} sits #{top}px from the top edge, not flush" unless top.zero?
 end
 
+# Raise unless every child of +selector+ shares one top edge — i.e. the row
+# did not wrap. The queue's five tabs and their counts are the whole point of
+# that cell, and a tab that drops to a line of its own reads as a broken
+# toolbar rather than as responsive behaviour. Asserted rather than eyeballed,
+# so a longer label fails here instead of shipping.
+def assert_single_row!(session, selector)
+  rows = session.evaluate_script(<<~JS)
+    (function () {
+      const row = document.querySelector(#{selector.to_json});
+      if (!row) return null;
+      const tops = Array.from(row.children, (el) => Math.round(el.getBoundingClientRect().top));
+      return new Set(tops).size;
+    })();
+  JS
+
+  raise "nothing to measure for #{selector}" if rows.nil?
+  raise "#{selector} wrapped onto #{rows} lines" unless rows == 1
+end
+
 FileUtils.mkdir_p(OUT)
 
 # --- 1. The grouped inbox row ------------------------------------------------
@@ -494,6 +517,7 @@ emulate!(cdp, *DESK)
 login(session, NADIA_ID)
 session.visit "/admin/support"
 session.assert_selector "h1"
+assert_single_row!(session, "nav[aria-label]")
 settle(session)
 shoot!(cdp, "06-queue")
 
