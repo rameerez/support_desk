@@ -115,15 +115,18 @@ module ActiveSupport
     end
 
     # A ticket with its opening message already folded in — the canonical
-    # fixture.
+    # fixture. Positional requester because the gem's own suite says it a
+    # thousand times; it is the SAME call hosts make through the public
+    # `open_support_ticket`, delegated rather than duplicated so our helper
+    # and theirs can never drift apart.
     #
     # Nothing to fold by hand: since Rails 5 the test transaction is
     # non-joinable, so `after_commit` callbacks DO run inside it, which
     # means chats' `:message_created` subscriber has already called
     # `register!` by the time this returns. (Measured, not assumed — see
     # "the opening message leaves the desk owing the next word".)
-    def ticket_for(requester, about: nil, topic: nil, message: "Necesito ayuda")
-      requester.ask_support!(message, about: about, topic: topic)
+    def ticket_for(requester, **options)
+      open_support_ticket(for: requester, **options)
     end
   end
 end
