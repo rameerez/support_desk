@@ -36,6 +36,12 @@ module SupportDesk
     # Raises NotSupportable, UnknownTopic, NotAllowed, RateLimited,
     # TooManyOpenTickets.
     def ask_support!(message, about: nil, topic: nil, files: [], via: :in_app)
+      key = self.class.support_desk_requester_options[:desk]
+      desk = SupportDesk.desk(key) ||
+             raise(SupportDesk::ConfigurationError,
+                   "#{self.class} writes to desk #{key.inspect}, which isn't configured — " \
+                   "its tickets would silently land on the default desk")
+
       SupportDesk::Ticket.open!(
         requester: self,
         message: message,
@@ -43,7 +49,7 @@ module SupportDesk
         topic: topic,
         files: files,
         via: via,
-        desk: SupportDesk.desk(self.class.support_desk_requester_options[:desk]),
+        desk: desk,
         requester_role: self.class.support_desk_requester_options[:as]
       )
     end

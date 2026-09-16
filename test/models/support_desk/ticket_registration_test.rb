@@ -128,6 +128,54 @@ module SupportDesk
       assert_equal before, @ticket.reload.awaiting
     end
 
+    test "replaying an older message never rewinds the case" do
+      old_message = @ticket.conversation.messages.order(:created_at).first
+      @ticket.reply!("vamos", by: @lucia)
+      before = @ticket.reload.attributes.slice("awaiting", "waiting_since", "last_requester_message_at",
+                                               "last_agent_message_at")
+
+      @ticket.register!(old_message)
+
+      assert_equal before, @ticket.reload.attributes.slice("awaiting", "waiting_since",
+                                                           "last_requester_message_at", "last_agent_message_at")
+      assert_awaiting_requester @ticket
+    end
+
+    test "replaying the message that reopened a case doesn't reopen it twice" do
+      @ticket.close!(by: @lucia)
+      @alice.message!(@ticket.conversation, "sigo con el problema")
+      reply = @ticket.conversation.messages.order(:created_at).last
+      @ticket.reload.close!(by: @lucia)
+
+      @ticket.register!(reply)
+
+      assert_closed @ticket
+      assert_equal 1, @ticket.reopen_count
+      assert_equal 1, @ticket.events.of_kind(:reopened).count
+    end
+
+    test "an agent's parting word on a closed case doesn't resurrect it" do
+      @ticket.close!(by: @lucia)
+
+      @ticket.reply!("una última cosa", by: @lucia)
+
+      assert_closed @ticket
+      assert_equal "none", @ticket.reload.awaiting
+      assert_nil @ticket.waiting_since
+      assert_not_includes Ticket.awaiting_requester, @ticket
+      assert_not_nil @ticket.last_agent_message_at, "the clocks still tell the truth"
+    end
+
+    test "maintenance survives a chats reset, because re-subscribing really subscribes" do
+      Chats.reset!
+      Chats.configure { |config| config.messager_class = "User" }
+      SupportDesk.subscribe_to_chats!
+
+      @ticket.reply!("vamos", by: @lucia)
+
+      assert_awaiting_requester @ticket
+    end
+
     test "registration is what the queue's waiting clock reads" do
       @ticket.update!(waiting_since: 3.hours.ago)
 

@@ -99,23 +99,16 @@ module ActiveSupport
       Invoice.create!(user: user, number: number, **attributes)
     end
 
-    # A ticket with its opening message already registered — the canonical
-    # fixture. Registration rides on chats' after-commit callback, which
-    # doesn't fire inside a test transaction, so we fold the message in the
-    # way production does.
+    # A ticket with its opening message already folded in — the canonical
+    # fixture.
+    #
+    # Nothing to fold by hand: since Rails 5 the test transaction is
+    # non-joinable, so `after_commit` callbacks DO run inside it, which
+    # means chats' `:message_created` subscriber has already called
+    # `register!` by the time this returns. (Measured, not assumed — see
+    # "the opening message leaves the desk owing the next word".)
     def ticket_for(requester, about: nil, topic: nil, message: "Necesito ayuda")
-      ticket = requester.ask_support!(message, about: about, topic: topic)
-      register_last_message(ticket)
-      ticket
-    end
-
-    # Register the conversation's newest message by hand. In production
-    # chats' `:message_created` subscriber does this after commit; inside a
-    # test transaction there is no commit, so tests call this explicitly.
-    def register_last_message(ticket)
-      message = ticket.conversation.messages.order(:created_at, :id).last
-      ticket.register!(message) if message
-      message
+      requester.ask_support!(message, about: about, topic: topic)
     end
   end
 end

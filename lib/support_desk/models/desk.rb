@@ -35,6 +35,15 @@ module SupportDesk
 
     # The desk for +key+, found or created. Never INSERT-first: `find_by`
     # answers from the index on every call but the very first.
+    #
+    # `SupportDesk.desk` then memoises the record FOR THE LIFE OF THE
+    # PROCESS, so a `settings` change written by another process (a console,
+    # another web worker) is not picked up until this one boots again or
+    # somebody calls `SupportDesk.reset_desks!`. That is the trade the
+    # performance requirement asks for — a desk is read on every page and
+    # written once in its life — and it is why configuration, not
+    # `settings`, is the place to put anything that has to change together
+    # everywhere.
     def self.for(key)
       key = key.to_s
       find_by(key: key) || create_or_find_by!(key: key)
@@ -84,6 +93,7 @@ module SupportDesk
     # A desk prints as its name — it's a counterpart, not a row.
     def to_s = name
 
+    # The desk, in one line.
     def inspect
       "#<SupportDesk::Desk #{key} #{name.inspect}>"
     end

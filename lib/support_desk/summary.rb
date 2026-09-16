@@ -9,6 +9,7 @@ module SupportDesk
   class Summary
     attr_reader :ticket
 
+    # The one-line summary of a ticket.
     def initialize(ticket)
       @ticket = ticket
     end
@@ -17,10 +18,12 @@ module SupportDesk
     def reference = ticket.reference
     def label = ticket.label
 
+    # Who is asking, and who is answering (nil while nobody is).
     def requester_name
       Chats.display_name_for(ticket.requester)
     end
 
+    # Who is answering, or nil while nobody is.
     def assignee_name
       ticket.assignee&.support_agent_name
     end
@@ -42,12 +45,14 @@ module SupportDesk
       ActiveSupport::Duration.build(duration.to_i).inspect
     end
 
+    # The whole line.
     def to_s
       parts = [ reference, label, requester_name, state ]
       parts << "(#{waiting})" if waiting
       parts.compact.join(" · ")
     end
 
+    # The same line, in pieces.
     def to_h
       {
         reference: reference, label: label, requester: requester_name, assignee: assignee_name,
@@ -55,6 +60,7 @@ module SupportDesk
       }
     end
 
+    # The summary, in one line.
     def inspect = "#<SupportDesk::Summary #{to_s.inspect}>"
   end
 end

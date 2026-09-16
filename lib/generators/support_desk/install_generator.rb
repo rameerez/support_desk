@@ -15,19 +15,25 @@ module SupportDesk
       source_root File.expand_path("templates", __dir__)
       desc "Install support_desk's migration and initializer"
 
+      # Rails' migration numbering, borrowed from ActiveRecord's generators.
       def self.next_migration_number(dir)
         ActiveRecord::Generators::Base.next_migration_number(dir)
       end
 
+      # The schema: four tables, adaptive keys, partial indexes where the
+      # adapter has them.
       def create_migration_file
         migration_template "create_support_desk_tables.rb.erb",
                            File.join(db_migrate_path, "create_support_desk_tables.rb")
       end
 
+      # The annotated initializer — every setting the gem has, with what it
+      # means and what it defaults to.
       def create_initializer
         template "initializer.rb", "config/initializers/support_desk.rb"
       end
 
+      # The three model lines and one route line that finish the install.
       def display_post_install_message
         say "\n🎫 The `support_desk` gem has been installed.", :green
         say "\nTo complete the setup:"

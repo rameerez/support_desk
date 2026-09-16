@@ -48,6 +48,64 @@ module SupportDesk
       assert_raises(NotAnAgent) { @ticket.assign!(to: @alice, by: @lucia) }
     end
 
+    test "the desk-side verbs are the desk's, not the requester's" do
+      assert_raises(NotAnAgent) { @ticket.close!(by: @alice) }
+      assert_raises(NotAnAgent) { @ticket.release!(by: @alice) }
+      assert_raises(NotAnAgent) { @ticket.change_topic!(to: :account, by: @alice) }
+      assert_raises(NotAnAgent) { @ticket.attach_subject!(@order, by: @alice) }
+
+      assert_open @ticket
+      assert_equal "order", @ticket.topic.path
+    end
+
+    test "reopening is the requester's to do" do
+      @ticket.close!(by: @lucia)
+
+      assert_nothing_raised { @ticket.reopen!(by: @alice) }
+      assert_open @ticket
+    end
+
+    test "a job may still act as :system" do
+      assert_nothing_raised { @ticket.close!(by: :system) }
+      assert_closed @ticket
+    end
+
+    test "a ticket can't be assigned to :system" do
+      error = assert_raises(NotAnAgent) { @ticket.assign!(to: :system, by: @lucia) }
+
+      assert_match(/pass an agent record/, error.message)
+      assert_raises(NotAnAgent) { @ticket.assign!(to: nil, by: @lucia) }
+      assert_unassigned @ticket
+    end
+
+    test "a reply that fails leaves nothing of itself behind" do
+      # An empty message is refused by chats — after the raise there must be
+      # no assignment, no announcement and no event: the agent never
+      # answered, so the case must not look answered.
+      assert_raises(ActiveRecord::RecordInvalid) { @ticket.reply!(nil, by: @lucia) }
+
+      assert_unassigned @ticket
+      assert_empty @ticket.assignments.reload
+      refute_ticket_event @ticket, :assigned
+      assert_empty @ticket.conversation.messages.where(kind: "system")
+    end
+
+    test "an off-duty agent is offered nothing that speaks to the requester" do
+      off_duty = create_agent
+      off_duty.define_singleton_method(:on_duty?) { false }
+
+      assert_equal [ :note ], @ticket.actions_for(off_duty)
+      assert_includes @ticket.actions_for(@lucia), :reply
+    end
+
+    test "writing into a locked ticket raises Locked, which is an illegal transition" do
+      SupportDesk.config.closed_tickets = :locked
+      @ticket.close!(by: @lucia)
+
+      assert_raises(Locked) { @ticket.reply!("hola", by: @lucia) }
+      assert_raises(InvalidTransition) { @ticket.reply!("hola", by: @lucia) }
+    end
+
     # --- assign! ---------------------------------------------------------------
 
     test "assign! to yourself is taking the ticket" do

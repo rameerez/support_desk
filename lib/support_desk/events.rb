@@ -37,10 +37,20 @@ module SupportDesk
       ticket_transitioned: "ticket, kind, by:, request:, payload:"
     }.freeze
 
+    # One registered callable, and the key it can be replaced under.
+    Subscriber = Struct.new(:key, :callable) do
+      def call(*args, **kwargs) = callable.call(*args, **kwargs)
+    end
+
     # Subscribe to an event. Multiple subscribers per event are the point;
     # they run in registration order and never see each other's exceptions.
     # Returns the block, so a host can keep the handle.
-    def on(event, &block)
+    #
+    # Pass `key:` from anywhere that runs more than once — a `to_prepare`
+    # block, an engine initializer — and re-registering REPLACES that
+    # subscriber in place instead of stacking a second copy on every code
+    # reload.
+    def on(event, key: nil, &block)
       event = event.to_sym
       unless CATALOGUE.key?(event)
         raise ConfigurationError,
@@ -48,8 +58,18 @@ module SupportDesk
       end
       raise ConfigurationError, "SupportDesk.on(#{event.inspect}) needs a block" unless block
 
-      subscribers[event] << block
+      entry = Subscriber.new(key, block)
+      list = subscribers[event]
+      existing = key && list.index { |subscriber| subscriber.key == key }
+      existing ? list[existing] = entry : list << entry
       block
+    end
+
+    # Drop a keyed subscriber. Mostly for tests and for hosts that wire
+    # support up and down around a block.
+    def off(event, key)
+      subscribers[event.to_sym].reject! { |subscriber| subscriber.key == key }
+      self
     end
 
     # Everything registered, as { event => [block, …] }. Mutable on purpose:

@@ -108,4 +108,30 @@ class TestHelperApiTest < ActiveSupport::TestCase
 
     assert_equal %i[ticket_transitioned ticket_closed].sort, events.map(&:first).sort
   end
+
+  test "capture_support_events unsubscribes on the way out" do
+    before = SupportDesk.subscribers[:ticket_closed].size
+
+    capture_support_events(:ticket_closed) { open_support_ticket(for: @alice) }
+
+    assert_equal before, SupportDesk.subscribers[:ticket_closed].size
+  end
+
+  test "capture_support_events unsubscribes even when the block raises" do
+    before = SupportDesk.subscribers[:ticket_closed].size
+
+    assert_raises(RuntimeError) do
+      capture_support_events(:ticket_closed) { raise "boom" }
+    end
+
+    assert_equal before, SupportDesk.subscribers[:ticket_closed].size
+  end
+
+  test "ticket_for needs no hand-registration: the chats subscriber already ran" do
+    ticket = ticket_for(@alice)
+
+    assert_equal "agent", ticket.awaiting
+    assert_not_nil ticket.last_requester_message_at
+    assert_equal ticket.conversation.messages.first.id.to_s, ticket.last_registered_message_id.to_s
+  end
 end

@@ -135,6 +135,31 @@ class ConfigurationTest < ActiveSupport::TestCase
     assert_match(/can't breach before it's at risk/, error.message)
   end
 
+  test "an agents block that returns something uncountable fails at BOOT" do
+    @config.requester_class = "User"
+    @config.agents { 42 }
+
+    error = assert_raises(SupportDesk::ConfigurationError) { @config.validate_classes! }
+
+    assert_match(/must return a relation or an array/, error.message)
+  end
+
+  test "an agents block that raises fails at boot, naming what it raised" do
+    @config.requester_class = "User"
+    @config.agents { raise ArgumentError, "no pool here" }
+
+    error = assert_raises(SupportDesk::ConfigurationError) { @config.validate_classes! }
+
+    assert_match(/ArgumentError: no pool here/, error.message)
+  end
+
+  test "a lazy relation costs nothing to validate" do
+    @config.requester_class = "User"
+    @config.agents { User.where(admin: true) }
+
+    assert_nothing_raised { @config.validate_classes! }
+  end
+
   test "validate_classes! refuses a requester_class that is not one" do
     @config.requester_class = "Order"
 

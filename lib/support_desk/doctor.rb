@@ -18,6 +18,7 @@ module SupportDesk
       def warn? = status == :warn
       def fail? = status == :fail
 
+      # "✓ name message" — one finding, printable.
       def to_s
         icon = { ok: "✓", warn: "!", fail: "✗" }.fetch(status)
         [ icon, name, message ].compact.join(" ")
@@ -28,6 +29,7 @@ module SupportDesk
     class Report
       attr_reader :checks
 
+      # A report over the checks that were run.
       def initialize(checks)
         @checks = checks
       end
@@ -39,22 +41,28 @@ module SupportDesk
       def failures = checks.select(&:fail?)
       def warnings = checks.select(&:warn?)
 
+      # Every check, one per line, with the verdict last.
       def to_s
         lines = checks.map(&:to_s)
         lines << (ok? ? "support_desk is healthy (#{warnings.size} warning(s))" : "#{failures.size} check(s) failed")
         lines.join("\n")
       end
 
+      # Print the report and return whether it passed — the one line to
+      # put in a CI step.
       def print(io = $stdout)
         io.puts(to_s)
         ok?
       end
 
+      # The verdict, in one line.
       def inspect = "#<SupportDesk::Doctor::Report #{ok? ? "ok" : "#{failures.size} failed"}>"
     end
 
+    # Run every check and hand back the report.
     def self.run = new.run
 
+    # Run every check and hand back the report.
     def run
       checks = []
       checks.concat(configuration_checks)

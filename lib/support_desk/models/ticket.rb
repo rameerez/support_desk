@@ -30,7 +30,7 @@ module SupportDesk
 
     STATUSES = %w[open snoozed closed].freeze
     AWAITING_STATES = %w[agent requester none].freeze
-    CHANNELS = %w[in_app email intercom api].freeze
+    CHANNELS = %i[in_app email intercom api].freeze
 
     # Crockford base32: no I, L, O or U, so a reference read aloud down a
     # phone line or typed from a screenshot can't come back wrong.
@@ -86,15 +86,9 @@ module SupportDesk
       not_closed.where.not(waiting_since: nil).where(waiting_since: ..duration.ago)
     }
     # Waiting long enough to warn about, but not yet past the promise.
-    scope :at_risk, lambda { |desk_key = :default|
-      config = SupportDesk.config.desk(desk_key)
-      relation = awaiting_reply.waiting_over(config.at_risk_after)
-      config.reply_within ? relation.where.not(waiting_since: ..config.reply_within.ago) : relation
-    }
+    scope :at_risk, ->(desk_key = nil) { past_sla(:at_risk_after, desk_key: desk_key, but_not: :reply_within) }
     # Past the promise (`config.reply_within`).
-    scope :overdue, lambda { |desk_key = :default|
-      awaiting_reply.waiting_over(SupportDesk.config.desk(desk_key).reply_within)
-    }
+    scope :overdue, ->(desk_key = nil) { past_sla(:reply_within, desk_key: desk_key) }
 
     scope :about, ->(record) { where(subject_type: record.class.polymorphic_name, subject_id: record.id) }
     scope :about_any, ->(klass) { where(subject_type: klass.polymorphic_name) }
@@ -120,6 +114,20 @@ module SupportDesk
     # --- Finding & opening ------------------------------------------------------
 
     class << self
+      # Tickets whose wait has passed one of the desk's thresholds.
+      #
+      # Measured per DESK, not against whichever desk happens to be the
+      # default: two desks can promise different things, and a billing desk
+      # that answers in an hour must not be judged by a 24 hour promise.
+      # Pass a key to ask about one desk, nothing to ask about all of them.
+      def past_sla(threshold, desk_key: nil, but_not: nil)
+        keys = desk_key ? [ desk_key.to_sym ] : SupportDesk.config.desks.keys
+        clauses = keys.filter_map { |key| sla_clause(key, threshold, but_not) }
+        return none if clauses.empty?
+
+        awaiting_reply.not_closed.where.not(waiting_since: nil).where(clauses.reduce(:or))
+      end
+
       # The ticket with this reference, case- and prefix-insensitive
       # ("t-ab12cd", "AB12CD" and "T-AB12CD" all find it), or nil.
       def find_by_reference(reference)
@@ -155,7 +163,7 @@ module SupportDesk
         # The subject is checked BEFORE the topic: "this isn't supportable" is
         # the useful error, and an unsupportable record has no topic to find.
         validate_subject!(about, requester)
-        node = resolve_topic!(topic, about, desk, requester)
+        node = resolve_topic!(topic, about, desk, requester, about)
 
         cardinality = cardinality_key_for(requester: requester, subject: about, topic: node)
         existing = open_ticket_for(requester: requester, desk: desk, cardinality_key: cardinality)
@@ -179,10 +187,15 @@ module SupportDesk
         REFERENCE_PREFIX + Array.new(REFERENCE_LENGTH) { REFERENCE_ALPHABET[SecureRandom.random_number(32)] }.join
       end
 
+      # A reference as it is stored: upper case, prefixed, and with
+      # Crockford's lookalikes folded in.
       def normalize_reference(reference) # :nodoc:
         return nil if reference.nil?
 
-        body = reference.to_s.strip.upcase.delete_prefix(REFERENCE_PREFIX)
+        # Crockford's whole point: O reads as 0, I and L read as 1, so a
+        # reference read down a phone line or typed off a screenshot still
+        # finds its ticket.
+        body = reference.to_s.strip.upcase.delete_prefix(REFERENCE_PREFIX).tr("OIL", "011")
         return nil if body.empty?
 
         REFERENCE_PREFIX + body
@@ -203,12 +216,32 @@ module SupportDesk
 
       private
 
-      def resolve_topic!(topic, about, desk, requester)
-        node = locate_topic!(topic, about, desk)
-        return node if node.visible_for?(requester)
+      # "on this desk, and waiting longer than its own threshold" — with an
+      # upper bound when the caller wants the band between two thresholds
+      # (at risk, but not yet breached).
+      def sla_clause(key, threshold, but_not)
+        config = SupportDesk.config.desk(key)
+        duration = config.public_send(threshold)
+        return nil if duration.nil?
 
-        raise NotAllowed, "#{requester.class}##{requester.id} may not open a ticket under topic " \
-                          "#{node.path.inspect} (its only: condition says no)"
+        clause = arel_table[:desk_id].in(Desk.where(key: key.to_s).select(:id).arel)
+                                     .and(arel_table[:waiting_since].lteq(duration.ago))
+        ceiling = but_not && config.public_send(but_not)
+        ceiling ? clause.and(arel_table[:waiting_since].gt(ceiling.ago)) : clause
+      end
+
+      def resolve_topic!(topic, about, desk, requester, subject)
+        node = locate_topic!(topic, about, desk)
+        unless node.visible_for?(requester)
+          raise NotAllowed, "#{requester.class}##{requester.id} may not open a ticket under topic " \
+                            "#{node.path.inspect} (its only: condition says no)"
+        end
+
+        if node.subject_required? && subject.nil?
+          raise NotAllowed, "topic #{node.path.inspect} needs something to be about — pass about:"
+        end
+
+        node
       end
 
       def locate_topic!(topic, about, desk)
@@ -316,8 +349,14 @@ module SupportDesk
       end
 
       def post_opening_message(ticket, message, files)
-        ticket.post_requester_message!(message, files: files) if message.present? || files.present?
-        ticket
+        return ticket if message.blank? && files.blank?
+
+        ticket.post_requester_message!(message, files: files)
+        # Posting the first message is what starts the clocks, and it does
+        # that through chats' after-commit subscriber — on a DIFFERENT
+        # instance of this row. Without the reload the caller gets a ticket
+        # whose `waiting_since` is nil while the database's is not.
+        ticket.reload
       end
     end
 
@@ -403,14 +442,17 @@ module SupportDesk
     end
 
     # Which channel this ticket was opened through, as a Symbol.
-    def opened_via_channel = opened_via&.to_sym
+    def opened_via
+      super&.to_sym
+    end
 
     # Every channel the case can be answered through. 0.1 ships in-app
     # only; the email channel adds to this list in 0.2.
-    def channels = [ opened_via_channel ].compact
+    def channels = [ opened_via ].compact
 
+    # "in app · email" — the channels, in the reader's language.
     def channels_summary
-      channels.map { |channel| I18n.t("support_desk.channels.#{channel}", default: channel.to_s) }.join(" · ")
+      channels.map { |channel| I18n.t("support_desk.channels.#{channel}") }.join(" · ")
     end
 
     # The internal notes agents left, newest last.
@@ -437,8 +479,15 @@ module SupportDesk
       ensure_agent!(actor)
       ensure_writable!
 
-      apply_reply_policy!(actor, request: request)
-      desk.message!(conversation, body, files: files, author: actor)
+      # One transaction, because taking the ticket and announcing it are
+      # part of answering: a reply that raises (an empty body, a locked
+      # conversation, a rate limit) must not leave the agent holding a case
+      # they never answered, or "Lucía se ocupa de tu consulta" sitting in
+      # the requester's thread with no reply under it.
+      transaction do
+        apply_reply_policy!(actor, request: request)
+        desk.message!(conversation, body, files: files, author: actor)
+      end
     end
 
     # An internal note: in the timeline and the console, never in the
@@ -458,7 +507,7 @@ module SupportDesk
     # handed it. Repeating an assignment to the current holder does nothing.
     def assign!(to:, by: nil, reason: nil, note: nil, request: nil)
       actor = resolve_actor(by)
-      ensure_agent!(to)
+      ensure_assignable!(to)
       raise InvalidTransition, "can't assign a closed ticket — reopen it first" if closed?
 
       reason ||= to == actor ? :taken : :assigned
@@ -486,7 +535,7 @@ module SupportDesk
         raise NotTheAssignee, "#{describe_actor(actor)} doesn't hold ticket #{reference} " \
                               "(#{assignee ? describe_actor(assignee) : "nobody"} does) — use assign! to override"
       end
-      ensure_agent!(to)
+      ensure_assignable!(to)
       raise InvalidTransition, "can't hand off a closed ticket" if closed?
 
       from = assignee
@@ -509,6 +558,7 @@ module SupportDesk
     # Put the ticket back in the unassigned pile.
     def release!(by: nil, reason: :released, request: nil)
       actor = resolve_actor(by)
+      ensure_agent!(actor)
       raise InvalidTransition, "can't release a closed ticket" if closed?
 
       from = assignee
@@ -528,6 +578,7 @@ module SupportDesk
     # Close the case. Closing a closed ticket is a no-op, not an error.
     def close!(by: nil, request: nil)
       actor = resolve_actor(by)
+      ensure_agent!(actor)
 
       event = write_transition!(:closed, actor: actor, request: request) do
         next false if closed?
@@ -599,6 +650,7 @@ module SupportDesk
     # Point a free-form ticket at the record it turned out to be about.
     def attach_subject!(record, by: nil, request: nil)
       actor = resolve_actor(by)
+      ensure_agent!(actor)
       unless record.respond_to?(:supportable?) && record.supportable?
         raise NotSupportable, "#{record.class} isn't supportable — add `supportable topic: :something` to it"
       end
@@ -653,9 +705,12 @@ module SupportDesk
             reopened = true
           end
         when :agent
-          attributes[:awaiting] = "requester"
           attributes[:last_agent_message_at] = message.created_at
           attributes[:first_agent_reply_at] = message.created_at if first_agent_reply_at.nil?
+          # A closed case owes nobody anything. An agent adding one last
+          # word keeps the clocks honest without putting the case back in a
+          # queue that `close!` just took it out of.
+          attributes[:awaiting] = "requester" unless closed?
         end
 
         assign_attributes(attributes)
@@ -691,6 +746,10 @@ module SupportDesk
     # policy, status and duty.
     def actions_for(agent)
       return [] unless agent.respond_to?(:support_agent?) && agent.support_agent?
+      # Off duty is a real answer: the console can still show the case, and
+      # an agent passing by can still leave a note, but nothing that speaks
+      # to the requester is offered to somebody who isn't working.
+      return [ :note ] if agent.respond_to?(:on_duty?) && !agent.on_duty?
 
       actions = [ :note ]
       if closed?
@@ -787,6 +846,16 @@ module SupportDesk
 
     def record_actor(actor) = actor.is_a?(Symbol) ? nil : actor
 
+    # The ACTOR of a transition may be `:system` (a job, a sweep); the agent
+    # a ticket is handed TO may not — somebody has to be able to answer it.
+    def ensure_assignable!(agent)
+      if agent.nil? || agent.is_a?(Symbol)
+        raise NotAnAgent, "can't assign a ticket to #{agent.inspect} — pass an agent record"
+      end
+
+      ensure_agent!(agent)
+    end
+
     def ensure_agent!(actor)
       return if actor.is_a?(Symbol)
       return if actor.respond_to?(:support_agent?) && actor.support_agent?
@@ -806,7 +875,7 @@ module SupportDesk
     def ensure_writable!
       return unless chat_locked?
 
-      raise InvalidTransition, "ticket #{reference} is closed and this desk locks closed tickets — reopen it first"
+      raise Locked, "ticket #{reference} is closed and this desk locks closed tickets — reopen it first"
     end
 
     def apply_reply_policy!(actor, request: nil)
@@ -886,8 +955,25 @@ module SupportDesk
 
     # --- Registration plumbing ------------------------------------------------------
 
+    # Whether this message is already folded in. The last-id check catches
+    # the common redelivery; the clock check catches the rest, because a
+    # REPLAY can arrive in any order and an older message must never rewind
+    # `awaiting`, restart an SLA clock, or reopen a case that was closed
+    # after it.
+    #
+    # The comparison is `<=`, so a message whose timestamp already sits on
+    # the clock counts as folded in: idempotency is the documented promise,
+    # and the cost of the rare tie is one clock that doesn't advance until
+    # the next message.
     def registered?(message)
-      last_registered_message_id.present? && last_registered_message_id.to_s == message.id.to_s
+      return true if last_registered_message_id.present? && last_registered_message_id.to_s == message.id.to_s
+
+      clock = case role_of(message)
+      when :requester then last_requester_message_at
+      when :agent then last_agent_message_at
+      end
+
+      clock.present? && message.created_at <= clock
     end
 
     def opening_message?

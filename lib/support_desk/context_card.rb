@@ -17,6 +17,7 @@ module SupportDesk
   class ContextCard
     attr_reader :ticket
 
+    # The card for one ticket.
     def initialize(ticket)
       @ticket = ticket
     end
@@ -24,6 +25,7 @@ module SupportDesk
     # What the case is about, and what to call it.
     def subject = ticket.subject
 
+    # What to put at the top of the card.
     def title = ticket.label
 
     # The subject's own status pill, when it has one.
@@ -37,17 +39,22 @@ module SupportDesk
     # Where to open the subject in the host's admin, or nil.
     def subject_url = subject&.support_url
 
+    # The topic, and the whole branch spelled out.
     def topic = ticket.topic
 
+    # The whole branch spelled out ("Billing › Invoice").
     def topic_label = ticket.topic&.full_label
 
     # Who is asking, as the console should show them.
     def requester = ticket.requester
 
+    # The requester as the console should show them: a display name, and
+    # an avatar if the host has one.
     def requester_name
       Chats.display_name_for(requester)
     end
 
+    # Anything image_tag accepts, or nil.
     def requester_avatar
       Chats.avatar_for(requester)
     end
@@ -77,6 +84,7 @@ module SupportDesk
       }
     end
 
+    # The card, in one line.
     def inspect = "#<SupportDesk::ContextCard #{title.inspect}>"
   end
 end

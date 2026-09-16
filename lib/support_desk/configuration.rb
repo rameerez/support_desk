@@ -69,6 +69,8 @@ module SupportDesk
 
       attr_reader :key, :fallback
 
+      # A desk's settings, falling back to +fallback+ for anything it
+      # doesn't state (the default desk, for every desk but itself).
       def initialize(key, fallback: nil)
         @key = key.to_sym
         @fallback = fallback
@@ -93,6 +95,7 @@ module SupportDesk
       # An asset path, a URL, or ->(desk) { … }. Anything `image_tag` accepts.
       def avatar = read(:avatar)
 
+      # Set it, validating on assignment (see the reader above).
       def avatar=(value)
         unless value.nil? || value.is_a?(String) || value.respond_to?(:call)
           raise ConfigurationError, "avatar must be a String, a callable, or nil, got #{value.inspect}"
@@ -104,6 +107,7 @@ module SupportDesk
       # The address the email channel answers from (0.2).
       def email = read(:email)
 
+      # Set it, validating on assignment (see the reader above).
       def email=(value)
         if value && !value.to_s.include?("@")
           raise ConfigurationError, "email must be an email address, got #{value.inspect}"
@@ -125,6 +129,7 @@ module SupportDesk
         read(:agents)
       end
 
+      # Set it, validating on assignment (see the reader above).
       def agents=(value)
         @settings[:agents] = ensure_callable(value, "agents")
       end
@@ -180,6 +185,7 @@ module SupportDesk
       # :assignee_only (raises NotAllowed).
       def reply_policy = read(:reply_policy)
 
+      # Set it, validating on assignment (see the reader above).
       def reply_policy=(value)
         @settings[:reply_policy] = ensure_one_of(value, REPLY_POLICIES, "reply_policy")
       end
@@ -188,6 +194,7 @@ module SupportDesk
       # (the first human to take it), :always (hand-offs too), or :never.
       def announce_assignments = read(:announce_assignments)
 
+      # Set it, validating on assignment (see the reader above).
       def announce_assignments=(value)
         @settings[:announce_assignments] = ensure_one_of(value, ANNOUNCE_MODES, "announce_assignments")
       end
@@ -197,6 +204,7 @@ module SupportDesk
       # notice).
       def closed_tickets = read(:closed_tickets)
 
+      # Set it, validating on assignment (see the reader above).
       def closed_tickets=(value)
         @settings[:closed_tickets] = ensure_one_of(value, CLOSED_TICKET_MODES, "closed_tickets")
       end
@@ -205,6 +213,7 @@ module SupportDesk
       # menos de 24 h" line the requester is shown. One setting, one truth.
       def reply_within = duration(read(:reply_within))
 
+      # Set it, validating on assignment (see the reader above).
       def reply_within=(value)
         @settings[:reply_within] = ensure_duration(value, "reply_within")
       end
@@ -212,6 +221,7 @@ module SupportDesk
       # When a waiting ticket starts showing as at risk, short of breach.
       def at_risk_after = duration(read(:at_risk_after))
 
+      # Set it, validating on assignment (see the reader above).
       def at_risk_after=(value)
         @settings[:at_risk_after] = ensure_duration(value, "at_risk_after")
       end
@@ -220,6 +230,7 @@ module SupportDesk
       # tickets. nil disables it.
       def open_rate_limit = read(:open_rate_limit)
 
+      # Set it, validating on assignment (see the reader above).
       def open_rate_limit=(value)
         if value.nil?
           @settings[:open_rate_limit] = nil
@@ -238,6 +249,7 @@ module SupportDesk
       # How many tickets one requester may have open at once. nil for no cap.
       def max_open_tickets = read(:max_open_tickets)
 
+      # Set it, validating on assignment (see the reader above).
       def max_open_tickets=(value)
         unless value.nil? || (value.is_a?(Integer) && value.positive?)
           raise ConfigurationError, "max_open_tickets must be a positive Integer or nil, got #{value.inspect}"
@@ -251,6 +263,7 @@ module SupportDesk
       # or :never.
       def inbox_entry = read(:inbox_entry)
 
+      # Set it, validating on assignment (see the reader above).
       def inbox_entry=(value)
         @settings[:inbox_entry] = ensure_one_of(value, INBOX_ENTRY_MODES, "inbox_entry")
       end
@@ -260,6 +273,7 @@ module SupportDesk
       # arrive with the duty table in 0.3.
       def routing = read(:routing)
 
+      # Set it, validating on assignment (see the reader above).
       def routing=(value)
         if value.respond_to?(:call)
           @settings[:routing] = value
@@ -279,6 +293,7 @@ module SupportDesk
       # Whether agent replies are also emailed to the requester (0.2).
       def mirror_replies_by_email = read(:mirror_replies_by_email)
 
+      # Set it, validating on assignment (see the reader above).
       def mirror_replies_by_email=(value)
         @settings[:mirror_replies_by_email] = ensure_one_of(value, MIRROR_MODES, "mirror_replies_by_email")
       end
@@ -286,6 +301,7 @@ module SupportDesk
       # Close a ticket that has been awaiting the requester this long (0.2).
       def auto_close_after = duration(read(:auto_close_after))
 
+      # Set it, validating on assignment (see the reader above).
       def auto_close_after=(value)
         @settings[:auto_close_after] = ensure_duration(value, "auto_close_after")
       end
@@ -299,6 +315,7 @@ module SupportDesk
         DEFAULTS[name]
       end
 
+      # Whether THIS desk states the setting itself, rather than inheriting.
       def own?(name) = @settings.key?(name) # :nodoc:
 
       # Forget a setting so this desk inherits it again (tests).
@@ -306,6 +323,7 @@ module SupportDesk
         @settings.delete(name)
       end
 
+      # The desk and what it calls itself.
       def inspect
         "#<SupportDesk::Configuration::DeskConfiguration #{key} #{name.inspect}>"
       end
@@ -385,6 +403,8 @@ module SupportDesk
     # How the console finds the person answering.
     attr_accessor :current_agent_method
 
+    # A fresh configuration: one `:default` desk, every setting at the
+    # documented default.
     def initialize
       @requester_class = "User"
       @parent_controller = "::ApplicationController"
@@ -475,8 +495,11 @@ module SupportDesk
               "requester_class."
       end
 
+      validate_requester_desks!
+
       @warnings = []
       @desks.each_value do |desk|
+        validate_agent_pool!(desk)
         # Reading the tree is what BUILDS it, so a malformed topics block
         # fails here — at boot, with the offending option named.
         tree = desk.topics
@@ -503,6 +526,41 @@ module SupportDesk
     def console_parent_controller_class = console_parent_controller.constantize
 
     private
+
+    # `config.agents { … }` has to hand back something a desk can iterate.
+    # Resolving it costs nothing at boot — a relation is lazy — and a block
+    # that returns 42, or raises, is a configuration mistake, not a 3am
+    # surprise the first time somebody opens a ticket.
+    def validate_agent_pool!(desk)
+      return if desk.agents.nil?
+
+      desk.agent_pool
+    rescue ConfigurationError
+      raise
+    rescue ActiveRecord::ActiveRecordError
+      # No database yet (asset precompile, a boot before migrating).
+      # `SupportDesk.doctor` asks the same question where there is one.
+      nil
+    rescue StandardError => e
+      raise ConfigurationError,
+            "config.agents for desk #{desk.key} raised #{e.class}: #{e.message}"
+    end
+
+    # A model that writes to a desk nobody configured would quietly land its
+    # tickets on the default desk instead.
+    def validate_requester_desks!
+      SupportDesk.requester_class_names.each do |name|
+        klass = name.safe_constantize
+        next unless klass.respond_to?(:support_desk_requester_options)
+
+        key = klass.support_desk_requester_options[:desk]
+        next if @desks.key?(key)
+
+        raise ConfigurationError,
+              "#{name} has `has_support_tickets desk: #{key.inspect}`, but no such desk is configured. " \
+              "Add `config.desk #{key.inspect} do |desk| … end`, or drop the desk: option."
+      end
+    end
 
     def validate_supportable!(name, topic, desk)
       klass = name.safe_constantize

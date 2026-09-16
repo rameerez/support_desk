@@ -16,6 +16,7 @@ module SupportDesk
     class Entry
       attr_reader :at, :message, :event
 
+      # One moment: a message, or an event, and when it happened.
       def initialize(at:, message: nil, event: nil)
         @at = at
         @message = message
@@ -44,19 +45,23 @@ module SupportDesk
         message? ? message.try(:visible_body) : event.note
       end
 
+      # Time, kind and the first line of what was said — printable.
       def to_s
         "#{at&.iso8601} #{kind} #{body.to_s.truncate(60)}".strip
       end
 
+      # The entry, in one line.
       def inspect = "#<SupportDesk::Timeline::Entry #{to_s.inspect}>"
     end
 
     attr_reader :ticket
 
+    # The timeline of one ticket.
     def initialize(ticket)
       @ticket = ticket
     end
 
+    # Every moment, oldest first. Enumerable, so map/select/find work.
     def each(&block)
       return to_enum(:each) unless block
 
@@ -79,6 +84,7 @@ module SupportDesk
       nil
     end
 
+    # Which ticket, and how much has happened to it.
     def inspect = "#<SupportDesk::Timeline #{ticket.reference} #{size} entries>"
 
     private

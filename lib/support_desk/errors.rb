@@ -20,20 +20,20 @@ module SupportDesk
   # Raised by `hand_off!` when the actor doesn't currently hold the ticket.
   class NotTheAssignee < Error; end
 
-  # Raised when routing or an assignment targets an agent who is off duty.
-  class OffDuty < Error; end
-
   # Raised when policy forbids the attempted action — a drop-in reply under
   # `reply_policy = :assignee_only`, a requester acting on someone else's
   # ticket, a subject the requester may not talk about.
   class NotAllowed < Error; end
 
   # Raised when a transition can't happen from the ticket's current state
-  # (replying into a locked closed ticket, releasing a closed one).
+  # (releasing a closed ticket, assigning one).
   class InvalidTransition < Error; end
 
-  # Raised when the conversation behind a ticket is locked for writing.
-  class Locked < Error; end
+  # Raised when the conversation behind a ticket is locked for writing —
+  # a closed ticket on a desk configured `closed_tickets: :locked`.
+  # A subclass of InvalidTransition, so `rescue InvalidTransition` still
+  # catches it and the specific name is there when you want it.
+  class Locked < InvalidTransition; end
 
   # Raised when a topic path isn't in the desk's tree.
   class UnknownTopic < Error; end

@@ -74,6 +74,7 @@ module SupportDesk
       ActiveSupport::Duration.build(((released_at || Time.current) - assigned_at).to_i)
     end
 
+    # The seat, in one line.
     def inspect
       "#<SupportDesk::Assignment ticket=#{ticket_id} agent=#{agent_type}##{agent_id} " \
         "#{reason}#{" released:#{release_reason}" if released?}>"

@@ -68,6 +68,44 @@ class SupportDeskTest < ActiveSupport::TestCase
     assert_not SupportDesk.supportable_class?(User)
   end
 
+  test "the same key replaces a subscriber instead of stacking another" do
+    calls = 0
+    3.times { SupportDesk.on(:ticket_opened, key: :support_desk_test) { |_ticket| calls += 1 } }
+
+    assert_equal 1, SupportDesk.subscribers[:ticket_opened].size
+
+    create_user.ask_support!("hola")
+
+    assert_equal 1, calls
+  end
+
+  test "without a key, subscribers stack, and off removes one" do
+    SupportDesk.on(:ticket_opened) { |_ticket| }
+    SupportDesk.on(:ticket_opened) { |_ticket| }
+
+    assert_equal 2, SupportDesk.subscribers[:ticket_opened].size
+
+    SupportDesk.on(:ticket_opened, key: :removable) { |_ticket| }
+    SupportDesk.off(:ticket_opened, :removable)
+
+    assert_equal 2, SupportDesk.subscribers[:ticket_opened].size
+  end
+
+  test "every error the gem declares is one it can actually raise" do
+    # PRD §4.9 is a promise about the vocabulary, not a wishlist: a class
+    # nothing raises is a class that misleads whoever rescues it.
+    declared = SupportDesk.constants.map { |name| SupportDesk.const_get(name) }
+                          .select { |value| value.is_a?(Class) && value < SupportDesk::Error }
+                          .map(&:name).map { |name| name.split("::").last }.sort
+    raised = Dir[File.expand_path("../lib/support_desk/**/*.rb", __dir__)]
+             .flat_map { |file| File.read(file).scan(/raise\(?\s*(?:SupportDesk::)?([A-Z]\w+)/) }
+             .flatten.uniq
+
+    (declared - [ "ConfigurationError" ]).each do |error|
+      assert_includes raised, error, "SupportDesk::#{error} is declared but never raised"
+    end
+  end
+
   test "actor_key is stable per record and distinguishes classes" do
     user = create_user
     order = create_order(user: user)

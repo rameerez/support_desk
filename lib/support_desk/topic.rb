@@ -28,6 +28,7 @@ module SupportDesk
 
     attr_reader :key, :path, :parent, :children, :options
 
+    # Nodes are built by the topics DSL, never by hand.
     def initialize(key:, parent: nil, **options)
       @key = key.to_sym
       @parent = parent
@@ -40,7 +41,9 @@ module SupportDesk
 
     # Top level, nothing below it, or something below it.
     def root? = parent.nil?
+    # Nothing below it.
     def leaf? = children.empty?
+    # Something below it.
     def branch? = !leaf?
 
     # Every ancestor, closest first.
@@ -56,6 +59,7 @@ module SupportDesk
     # --- Identity -------------------------------------------------------------
 
     def to_s = path
+    # The path, for URLs.
     def to_param = path
 
     # True for the null object returned for paths that aren't in the tree.
@@ -72,6 +76,7 @@ module SupportDesk
     end
     alias eql? ==
 
+    # Hashes by path, so topics work as Hash keys.
     def hash = path.hash
 
     # True when this topic is +other+ or lives under it:
@@ -193,6 +198,7 @@ module SupportDesk
     # Hidden from the wizard; the label still resolves for historic tickets.
     def retired? = !!inherited_or_own(:retired)
 
+    # The topic, in one line.
     def inspect = "#<SupportDesk::Topic #{path}>"
 
     # Freeze this node and everything under it — the tree is built once, at
@@ -203,6 +209,7 @@ module SupportDesk
       freeze
     end
 
+    # Used by the DSL while the tree is being built.
     def add_child(child) # :nodoc:
       children << child
       child

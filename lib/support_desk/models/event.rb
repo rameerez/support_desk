@@ -42,8 +42,15 @@ module SupportDesk
       )
     end
 
-    # Append-only: a written event can never be updated. (Destroy still
-    # works, so deleting a ticket takes its timeline with it.)
+    # Append-only, enforced the way ActiveRecord can enforce it: a loaded
+    # event refuses `update!`, `update_column` and friends.
+    #
+    # It is NOT tamper-proofing. `update_all` and `delete_all` never
+    # instantiate a record, so they bypass this exactly as they bypass every
+    # other model-level rule, and anything with database access can rewrite
+    # a row regardless. A host that needs tamper EVIDENCE mirrors
+    # `:ticket_transitioned` into its own hash-chained log; this guarantees
+    # that the gem, and code using the gem's models, only ever appends.
     def readonly?
       persisted?
     end
@@ -57,6 +64,7 @@ module SupportDesk
     # The text of an internal note, for kind "note".
     def note = payload["note"]
 
+    # The event, in one line.
     def inspect
       "#<SupportDesk::Event #{kind} ticket=#{ticket_id} #{created_at&.iso8601}>"
     end

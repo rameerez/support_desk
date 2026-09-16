@@ -26,10 +26,12 @@ module SupportDesk
 
     attr_reader :roots
 
+    # Build a tree from a `topics do … end` block, and freeze it.
     def self.build(&block)
       new.tap { |tree| Builder.new(tree).instance_eval(&block) if block }.freeze!
     end
 
+    # An empty tree. Prefer `TopicTree.build`.
     def initialize
       @roots = []
       @index = {}
@@ -98,12 +100,14 @@ module SupportDesk
       flat_map(&:about_class_names).uniq
     end
 
+    # Used by the DSL while the tree is being built.
     def add(node, parent: nil) # :nodoc:
       parent ? parent.add_child(node) : @roots << node
       @index[node.path] = node
       node
     end
 
+    # Used by `other false` to take the way out back out.
     def remove(path) # :nodoc:
       node = @index.delete(path.to_s)
       return nil unless node
@@ -112,6 +116,7 @@ module SupportDesk
       node
     end
 
+    # Freeze the tree and every node in it: built once, at boot.
     def freeze! # :nodoc:
       @roots.each(&:deep_freeze)
       @roots.freeze
@@ -119,6 +124,7 @@ module SupportDesk
       freeze
     end
 
+    # Every path in the tree, in one line.
     def inspect = "#<SupportDesk::TopicTree #{map(&:path).join(" ")}>"
 
     # The `topic` / `other` DSL. It runs once, at boot, inside

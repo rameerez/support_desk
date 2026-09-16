@@ -57,10 +57,12 @@ module SupportDesk
       @desk = desk
     end
 
+    # The desk this requester writes to.
     def desk
       @desk ||= SupportDesk.desk(requester.class.try(:support_desk_key) || :default)
     end
 
+    # That desk's topic tree.
     def tree = desk.config.topics
 
     # Which step the requester is on, given what they've chosen so far.
@@ -71,8 +73,11 @@ module SupportDesk
       :compose
     end
 
+    # Which step this is, for a view that would rather ask than compare.
     def topic_step? = step == :topic
+    # Picking the thing it's about.
     def subject_step? = step == :subject
+    # Writing the message.
     def compose_step? = step == :compose
 
     # The chosen topic, resolved from the `topic:` param or from the chosen
@@ -119,6 +124,7 @@ module SupportDesk
       topic&.prefill(subject)
     end
 
+    # The composer's placeholder for this topic.
     def placeholder
       topic&.placeholder || I18n.t("support_desk.wizard.placeholder")
     end
@@ -186,6 +192,7 @@ module SupportDesk
       subject && self.class.sign_subject(subject)
     end
 
+    # Where the requester has got to, in one line.
     def inspect
       "#<SupportDesk::Wizard step=#{step} topic=#{topic&.path.inspect} subject=#{subject.inspect}>"
     end

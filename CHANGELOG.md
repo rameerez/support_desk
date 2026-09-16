@@ -59,6 +59,16 @@ First release: the whole core of a support desk, on top of `chats` 0.2.
 - Install generator (migration + annotated initializer), Spanish and
   English locales, and a mountable engine.
 
+### Notes
+
+- `SupportDesk::OffDuty` is NOT part of 0.1.0. Duty is a seam this release
+  only asks about (`agent.on_duty?` decides who is notified and what
+  `actions_for` offers); nothing in it assigns work, so nothing can
+  honestly refuse on those grounds yet. It arrives with the duty table in
+  0.3. `SupportDesk::Locked` IS raised — writing into a closed ticket on a
+  desk configured `closed_tickets: :locked` — and subclasses
+  `InvalidTransition`, so either name catches it.
+
 ### Credits
 
 The wizard copy, the console screens and the Spanish strings began life in

@@ -79,7 +79,6 @@ module SupportDesk
       @configured = false
       @subscribers = nil
       @desks = nil
-      @chats_subscribed = false
       self
     end
 
@@ -105,6 +104,7 @@ module SupportDesk
       desks[key] ||= Desk.for(key)
     end
 
+    # Every desk record this process has resolved, keyed by key.
     def desks # :nodoc:
       @desks ||= {}
     end
@@ -135,11 +135,13 @@ module SupportDesk
     # Called by the macros. Returns the class, so it composes.
     def register_requester(klass) = register(requester_class_names, klass)
     def register_supportable(klass) = register(supportable_class_names, klass)
+    # Called by `acts_as_support_agent`. Returns the class.
     def register_agent(klass) = register(agent_class_names, klass)
 
     # The registered class names, as Sets of Strings.
     def requester_class_names = @requester_class_names ||= Set.new
     def supportable_class_names = @supportable_class_names ||= Set.new
+    # Every class that has declared itself able to answer.
     def agent_class_names = @agent_class_names ||= Set.new
 
     # Whether +klass+ (a Class, an instance, or a class name) is supportable.
@@ -153,17 +155,20 @@ module SupportDesk
 
     # Subscribe the gem's own `:message_created` listener, which is what
     # keeps `awaiting`, the SLA clocks and reopen-on-reply true without
-    # anybody remembering to call anything. Idempotent; the engine calls it
-    # at boot, and tests call it again after `Chats.reset!`.
+    # anybody remembering to call anything.
+    #
+    # Safe to call as often as you like: chats replaces a subscriber
+    # registered under the same `key:` rather than stacking another one.
+    # There is deliberately NO "already subscribed" flag here — one would
+    # make re-subscribing after a `Chats.reset!` a silent no-op, and the
+    # first sign of that is a desk whose tickets stop knowing whose turn it
+    # is, with nothing in the log.
     def subscribe_to_chats!
-      return self if @chats_subscribed
-
       Chats.on(:message_created, key: :support_desk) do |message|
         # The constant is resolved on every call on purpose: in development
         # the Ticket class is a new object after each reload.
         SupportDesk::Ticket.for_conversation(message.conversation)&.register!(message)
       end
-      @chats_subscribed = true
       self
     end
 

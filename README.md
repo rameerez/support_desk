@@ -86,6 +86,8 @@ end
 
 Check your work any time with `SupportDesk.doctor.print`.
 
+Desk records are memoised for the life of the process, so anything that has to change everywhere at once belongs in this initializer rather than in a desk's `settings` column.
+
 ## The model macros
 
 ### `has_support_tickets(desk: :default, as: nil)`
@@ -202,6 +204,8 @@ SupportDesk.on(:ticket_transitioned) do |ticket, kind, by:, request:, payload:|
   AuditLog.log("support_ticket_#{kind}", actor: by, request: request, subject: ticket, **payload)
 end
 ```
+
+Pass `key:` from anywhere that runs more than once (a `to_prepare` block, an engine initializer) and re-registering replaces that subscriber instead of stacking a copy on every reload.
 
 Keep notification titles generic — `ticket.notification_title` is — and put the detail in the body. A lock screen shouldn't spell out what somebody's support case is about.
 

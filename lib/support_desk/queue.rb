@@ -26,6 +26,8 @@ module SupportDesk
       new(agent, desk: desk || SupportDesk.desk)
     end
 
+    # An agent's view of one desk. Prefer `Queue.for` or
+    # `agent.support_queue`.
     def initialize(agent, desk:)
       @agent = agent
       @desk = desk
@@ -122,6 +124,7 @@ module SupportDesk
       public_send(tab)
     end
 
+    # Whose queue, on which desk.
     def inspect
       "#<SupportDesk::Queue desk=#{desk.key} agent=#{agent.class}##{agent.id}>"
     end

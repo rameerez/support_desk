@@ -53,6 +53,7 @@ module SupportDesk
       assert_predicate ticket, :closed?, message || "expected #{ticket.reference} to be closed, was #{ticket.status}"
     end
 
+    # The case is still live.
     def assert_open(ticket, message = nil)
       ticket.reload
       assert_predicate ticket, :open?, message || "expected #{ticket.reference} to be open, was #{ticket.status}"
@@ -65,6 +66,7 @@ module SupportDesk
              message || "expected #{ticket.reference} to be held by #{agent.inspect}, was #{ticket.assignee.inspect}"
     end
 
+    # Nobody is holding it.
     def assert_unassigned(ticket, message = nil)
       ticket.reload
       assert_predicate ticket, :unassigned?,
@@ -115,13 +117,20 @@ module SupportDesk
     # Capture the events the gem emits inside the block:
     #
     #   events = capture_support_events(:ticket_closed) { ticket.close!(by: lucia) }
+    #
+    # The subscribers are removed again on the way out, block or raise, so a
+    # capture in one example can never fire in the next one.
     def capture_support_events(*names)
       captured = []
+      key = :"support_desk_capture_#{SecureRandom.hex(4)}"
       names.each do |name|
-        SupportDesk.on(name) { |*args, **kwargs| captured << [ name, args, kwargs ] }
+        SupportDesk.on(name, key: key) { |*args, **kwargs| captured << [ name, args, kwargs ] }
       end
+
       yield
       captured
+    ensure
+      names.each { |name| SupportDesk.off(name, key) }
     end
   end
 end

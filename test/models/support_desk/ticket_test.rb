@@ -20,7 +20,7 @@ module SupportDesk
       assert_equal @order, ticket.subject
       assert_equal "order", ticket.topic.path
       assert_equal "open", ticket.status
-      assert_equal "in_app", ticket.opened_via
+      assert_equal :in_app, ticket.opened_via
       assert_not_nil ticket.conversation
       assert_equal "No me ha llegado", ticket.messages.first.body
       assert ticket.conversation.participant?(@alice)
@@ -178,6 +178,41 @@ module SupportDesk
       assert_raises(TooManyOpenTickets) { @alice.ask_support!("dos", about: @order) }
     end
 
+    test "a topic that requires a subject can't be opened without one" do
+      SupportDesk.config.topics do
+        topic :order, about: "Order", subject: :required
+        other
+      end
+
+      error = assert_raises(NotAllowed) { @alice.ask_support!("hola", topic: :order) }
+
+      assert_match(/needs something to be about/, error.message)
+      assert_nothing_raised { @alice.ask_support!("hola", about: @order) }
+    end
+
+    test "opened_via is a Symbol, and the channel summary comes from the locale" do
+      ticket = ticket_for(@alice)
+
+      assert_equal :in_app, ticket.opened_via
+      assert_equal [ :in_app ], ticket.channels
+      assert_equal "in app", ticket.channels_summary
+
+      ticket.update!(opened_via: "email")
+
+      assert_equal :email, ticket.reload.opened_via
+      assert_equal "email", ticket.channels_summary
+      assert_includes Ticket.opened_via(:email), ticket
+    end
+
+    test "every channel has copy in both languages" do
+      Ticket::CHANNELS.each do |channel|
+        %i[es en].each do |locale|
+          assert I18n.exists?("support_desk.channels.#{channel}", locale),
+                 "no #{locale} copy for the #{channel} channel"
+        end
+      end
+    end
+
     # --- References ------------------------------------------------------------
 
     test "references are Crockford base32 and unique" do
@@ -187,13 +222,16 @@ module SupportDesk
       assert_equal 10, 10.times.map { Ticket.generate_reference }.uniq.size
     end
 
-    test "find_by_reference is forgiving about case and the prefix" do
+    test "find_by_reference is forgiving about case, the prefix and Crockford's lookalikes" do
       ticket = ticket_for(@alice)
       body = ticket.reference.delete_prefix("T-")
 
       assert_equal ticket, Ticket.find_by_reference(ticket.reference)
       assert_equal ticket, Ticket.find_by_reference(ticket.reference.downcase)
       assert_equal ticket, Ticket.find_by_reference(body)
+      # The alphabet has no O, I or L precisely so these can be read back.
+      assert_equal ticket, Ticket.find_by_reference(ticket.reference.tr("01", "OI"))
+      assert_equal ticket, Ticket.find_by_reference(ticket.reference.tr("1", "L"))
       assert_nil Ticket.find_by_reference("T-ZZZZZZ")
       assert_nil Ticket.find_by_reference(nil)
       assert_raises(ActiveRecord::RecordNotFound) { Ticket.find_by_reference!("T-ZZZZZZ") }
