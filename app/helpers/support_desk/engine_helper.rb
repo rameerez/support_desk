@@ -105,19 +105,55 @@ module SupportDesk
       !viewer.support_tickets.exists?
     end
 
+    # The desk RECORD for +desk_key+, resolved WITHOUT ever creating one.
+    #
+    # `SupportDesk.desk` is memoised for the life of the process, but its
+    # first call in that process INSERTs (`Desk.for` is find-or-create), and
+    # this renders on an inbox that may have nothing to do with support: a
+    # page view is not a reason to write a row.
+    #
+    # Before anybody has ever written there is no row, so this hands back an
+    # UNSAVED stand-in carrying the key. `name`, `display_name` and `avatar`
+    # all answer from configuration, so it renders exactly like the real
+    # thing — the same "null object that still renders" the topic tree uses.
+    # That keeps the door's badge a property of the ACCOUNT rather than of
+    # whether the table happens to have a row yet, and it means
+    # `Chats.config.verified_badge` is always handed a SupportDesk::Desk and
+    # never a Class.
+    #
+    # Memoised per view instance, so the door's avatar and its badge cost ONE
+    # query between them rather than one each.
+    def support_desk_record(desk_key = :default)
+      key = desk_key.to_s
+      @support_desk_records ||= {}
+      @support_desk_records[key] ||= SupportDesk::Desk.find_by(key: key) || SupportDesk::Desk.new(key: key)
+    end
+
     # The desk's face. Once the desk has a row it is just another chats
     # messager, so chats draws it; before that (nobody has ever written to
     # it) an initials disc from `config.name`.
     #
-    # It never CREATES the desk: this renders on an inbox that may have
-    # nothing to do with support, and a page view is not a reason to INSERT.
+    # It never CREATES the desk — see support_desk_record.
     def support_desk_avatar(desk_key = :default, css_class: "chats-avatar")
-      desk = SupportDesk::Desk.find_by(key: desk_key.to_s)
-      return chats_messager_avatar(desk, css_class: css_class) if desk
+      desk = support_desk_record(desk_key)
+      return chats_messager_avatar(desk, css_class: css_class) if desk.persisted?
 
       name = SupportDesk.config.desk(desk_key).name
       initials = name.to_s.split.first(2).filter_map { |word| word[0] }.join.upcase
       tag.span(initials.presence || "?", class: "#{css_class} chats-avatar--initials", "aria-hidden": true)
+    end
+
+    # The desk's official-account badge (chats' `verified:` option), for the
+    # door — the entry that stands in for the desk's own inbox row before the
+    # requester has written.
+    #
+    # chats badges that real row from the moment it exists, so without this
+    # somebody would see an unbadged "Soporte" before their first case and a
+    # badged one after, which makes the mark read as a property of having
+    # written to us rather than of the account. Renders nothing if a host
+    # ever declares its desk unverified.
+    def support_desk_badge(desk_key = :default)
+      chats_verified_badge(support_desk_record(desk_key))
     end
 
     # Where a case is read and answered: its chats conversation. Falls back

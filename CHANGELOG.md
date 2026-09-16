@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counterpart that legitimately asks people for account details. The badge
   is chats' own; recolour it with the `--chats-verified` CSS variable or
   replace it with `Chats.configure { |c| c.verified_badge = … }`.
+- **The inbox door is badged too.** The door that stands in for the desk's
+  inbox row before a requester has written now carries the same mark, so the
+  badge reads as a property of the account rather than of having already
+  written to us. It still never INSERTs a desk (`support_desk_record` is a
+  find-or-stand-in, never `SupportDesk.desk`, whose first call in a process
+  creates the row), and it costs no query of its own: the door's avatar and
+  its badge share one memoised lookup per render, pinned by a query-count
+  test.
 
 ## [0.1.0] - 2026-09-16
 
