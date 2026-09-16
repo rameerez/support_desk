@@ -1,6 +1,9 @@
 # 🎫 `support_desk` - Customer support for your Rails app, as conversations
 
-[![Gem Version](https://badge.fury.io/rb/support_desk.svg)](https://badge.fury.io/rb/support_desk)
+[![Gem Version](https://badge.fury.io/rb/support_desk.svg)](https://badge.fury.io/rb/support_desk) [![Build Status](https://github.com/rameerez/support_desk/workflows/Tests/badge.svg)](https://github.com/rameerez/support_desk/actions)
+
+> [!TIP]
+> **🚀 Ship your next Rails app 10x faster!** I've built **[RailsFast](https://railsfast.com/?ref=support_desk)**, a production-ready Rails boilerplate template that comes with everything you need to launch a software business in days, not weeks. Go [check it out](https://railsfast.com/?ref=support_desk)!
 
 `support_desk` gives your Rails app a **support desk**: tickets that are real conversations. Somebody asks for help about something in your app (a ride, an order, a withdrawal) or about nothing in particular, your desk answers, humans sign the answers, and your team works a queue.
 
@@ -418,7 +421,27 @@ Pass `key:` from anywhere that runs more than once (a `to_prepare` block, an eng
 
 Keep notification titles generic — `ticket.notification_title` is — and put the detail in the body. A lock screen shouldn't spell out what somebody's support case is about.
 
+## Compatibility
+
+Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`).
+
+PostgreSQL and SQLite additionally hold the two cardinality rules — one open ticket about one thing, one open assignment per ticket — as **partial unique indexes**, so a race loses at the database and not merely at the model. MySQL has no partial indexes, so there those two rules are model-only; that is why the suite's own matrix is SQLite and PostgreSQL.
+
 ## Testing
+
+The gem is tested with Minitest against a real dummy host app: models and transitions, full request cycles through both the requester engine and the console, the generators, every authorization negative, and the wizard's three Turbo Frames driven in a real browser — a frame is only a frame in one.
+
+```bash
+bundle exec rake ci              # everything a pull request has to pass
+bundle exec rake test            # just the suite
+bundle exec appraisal install    # then test across Rails versions:
+bundle exec appraisal rails-7.2 rake test
+bundle exec appraisal rails-8.1 rake test
+```
+
+`rake ci` is `rake test`, `rake rubocop` and `rake brakeman`. The suite runs against SQLite by default, and against PostgreSQL with `DATABASE_URL` set.
+
+**Testing your own app** — the gem ships the helpers its own suite uses, so your acceptance tests and ours describe the same behaviour:
 
 ```ruby
 include SupportDesk::TestHelper
@@ -431,15 +454,15 @@ assert_ticket_event ticket, :handed_off, from: users(:lucia), to: users(:pedro)
 with_support_config(reply_policy: :assignee_only) { … }
 ```
 
-## Compatibility
+## Development
 
-Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`). PostgreSQL additionally enforces "one open ticket about one thing" and "one open assignment per ticket" with partial unique indexes.
+After checking out the repo, run `bundle install`, then `bundle exec rake ci`. The dummy app lives in `test/dummy` and mounts all three surfaces the way a real host does: the requester engine at `/messages/support`, `chats` at `/messages`, and the turnkey console at `/admin/support` — plus the same console again inside a host-owned `madmin` namespace, because "the console uses only the public API" is a claim that needs a second implementation to be worth anything.
+
+`chats` is the kernel this gem is a product on and the two are developed in lockstep, so the Gemfile points at a sibling checkout (`../chats`) until `chats` 0.2.0 is on rubygems.
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/rameerez/support_desk.
-
-`bundle exec rake ci` runs everything a pull request has to pass: the suite, the linter and the security scanner. Individually those are `rake test`, `rake rubocop` and `rake brakeman`. The suite runs against SQLite by default and against PostgreSQL or MySQL with `DATABASE_URL` set, and `bundle exec appraisal rake test` runs it across the supported Rails versions.
+Bug reports and pull requests are welcome on GitHub at https://github.com/rameerez/support_desk. Our code of conduct is: just be nice and make your mom proud of what you do and post online.
 
 ## License
 
