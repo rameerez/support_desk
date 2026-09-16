@@ -15,13 +15,11 @@ on:
 permissions:
   contents: read
 
-# Two checkouts, not one: `chats` is the kernel this gem is a product on, and
-# it is developed in lockstep — the Gemfile points at `../chats` until 0.2.0 is
-# on rubygems. Checking both repos out as SIBLINGS under the workspace makes
-# that path resolve in CI exactly as it does on a laptop, for the root Gemfile
-# (`../chats`) and for the appraisal gemfiles (`../../chats`) alike. When the
-# Gemfile switches to the released gem, delete the chats step and the
-# working-directory lines with it.
+# The reviewed chats package is cached until its public release. Use the same
+# cache for the root Gemfile and every appraisal; no sibling checkout is needed.
+env:
+  BUNDLE_CACHE_PATH: ${{ github.workspace }}/support_desk/vendor/cache
+
 jobs:
   # Main test suite — Ruby versions and Rails compatibility, on SQLite
   sqlite:
@@ -61,13 +59,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: support_desk
-          persist-credentials: false
-
-      - name: Check out the chats kernel
-        uses: actions/checkout@v4
-        with:
-          repository: rameerez/chats
-          path: chats
           persist-credentials: false
 
       - name: Set up Ruby ${{ matrix.ruby_version }}
@@ -131,13 +122,6 @@ jobs:
           path: support_desk
           persist-credentials: false
 
-      - name: Check out the chats kernel
-        uses: actions/checkout@v4
-        with:
-          repository: rameerez/chats
-          path: chats
-          persist-credentials: false
-
       - name: Set up Ruby ${{ matrix.ruby_version }}
         uses: ruby/setup-ruby@v1
         with:
@@ -174,13 +158,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: support_desk
-          persist-credentials: false
-
-      - name: Check out the chats kernel
-        uses: actions/checkout@v4
-        with:
-          repository: rameerez/chats
-          path: chats
           persist-credentials: false
 
       - name: Set up Ruby

@@ -27,7 +27,7 @@ Gem::Specification.new do |spec|
       (f == gemspec) ||
         # `screenshots/` is README furniture — ~750 KB of PNGs that the README
         # loads over https from the repo, so nothing inside the gem needs them.
-        f.start_with?(*%w[bin/ test/ spec/ features/ docs/ screenshots/ .git .github appveyor Gemfile])
+        f.start_with?(*%w[bin/ test/ spec/ features/ docs/ screenshots/ vendor/ .git .github appveyor Gemfile])
     end
   end
   spec.bindir = "exe"
