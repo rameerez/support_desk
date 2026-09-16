@@ -1,0 +1,30 @@
+<%# Step 1 — "¿Con qué necesitas ayuda?" One level of the tree at a time: a
+    branch drills in place (same frame, new URL), a leaf ends the step.
+    Retired topics and anything behind an `only:` never reach this list —
+    the tree filtered them out. %>
+<%= render "support_desk/tickets/wizard_header", wizard: wizard, error: error %>
+
+<% if wizard.choices.any? %>
+  <ul class="support-desk-choices">
+    <% wizard.choices.each do |topic| %>
+      <li>
+        <%= link_to support_desk_routes.new_ticket_path(topic: topic.path), class: "support-desk-choice" do %>
+          <% if topic.icon %>
+            <span class="support-desk-choice__icon" aria-hidden="true"><%= topic.icon %></span>
+          <% end %>
+          <span class="support-desk-choice__label"><%= topic.label %></span>
+          <span class="support-desk-choice__chevron" aria-hidden="true">›</span>
+        <% end %>
+      </li>
+    <% end %>
+  </ul>
+<% else %>
+  <%# Only reachable on a desk with no topics AND no free-form leaf — which
+      the gem warns about at boot. Say so plainly instead of rendering a
+      question with no answers. %>
+  <div class="chats-empty">
+    <p class="chats-empty__title"><%= t("support_desk.wizard.no_topics") %></p>
+    <%= link_to t("support_desk.wizard.back_to_list"), support_desk_routes.root_path,
+                class: "support-desk-button", data: { turbo_frame: "_top" } %>
+  </div>
+<% end %>

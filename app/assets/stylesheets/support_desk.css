@@ -1,0 +1,242 @@
+/*
+ * support_desk — bundled default styles for the requester-facing screens.
+ *
+ * Self-contained for the same reason chats' are: an engine's views can't
+ * lean on the host's CSS framework, because a Tailwind host never scans gem
+ * view files and the utility classes used here would simply not exist in its
+ * build. Semantic support-desk-* classes + plain modern CSS work in ANY host
+ * with zero build integration.
+ *
+ * The list and its rows deliberately reuse chats' own classes (.chats-row,
+ * .chats-badge, .chats-empty) — a support case IS a conversation, and it
+ * should look like one. This file only adds what chats has no opinion about:
+ * the wizard, the choices, the composer and the doors.
+ *
+ * Theme with CSS variables (chats' are inherited where they overlap):
+ *
+ *   :root {
+ *     --support-desk-accent: #facc15;
+ *     --support-desk-accent-contrast: #111827;
+ *   }
+ *
+ * `rails g support_desk:views` ejects the templates into your app — restyle
+ * them with your own framework and skip this file (it's linked by the views
+ * through the support_desk_styles helper).
+ */
+
+:root {
+  --support-desk-card-bg: #ffffff;
+  --support-desk-accent: var(--chats-accent, #111827);
+  --support-desk-accent-contrast: var(--chats-accent-contrast, #ffffff);
+  --support-desk-surface: var(--chats-surface, #f3f4f6);
+  --support-desk-border: var(--chats-border, rgba(0, 0, 0, 0.08));
+  --support-desk-text: var(--chats-text, #111827);
+  --support-desk-text-muted: var(--chats-text-muted, #6b7280);
+  --support-desk-radius: var(--chats-radius, 1.1rem);
+}
+
+.support-desk { color: var(--support-desk-text); }
+
+/*
+ * Every box this file draws sizes itself INCLUDING its padding and border.
+ * A gem cannot assume the host ships a `* { box-sizing: border-box }` reset,
+ * and without it `width: 100%` plus 1rem of padding is 2rem wider than the
+ * screen — which on the composer, the one screen this gem exists for, means
+ * the page scrolls sideways on a phone.
+ */
+.support-desk,
+.support-desk *,
+.support-desk *::before,
+.support-desk *::after,
+.support-desk-door,
+.support-desk-choice,
+.support-desk-card,
+.support-desk-notice,
+.support-desk-form__input,
+.support-desk-button { box-sizing: border-box; }
+
+/* --- Doors ------------------------------------------------------------------ */
+
+.support-desk-door {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  margin: 0.5rem 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px dashed var(--support-desk-border);
+  border-radius: var(--support-desk-radius);
+  text-decoration: none;
+  color: inherit;
+}
+.support-desk-door:hover { background: var(--support-desk-surface); }
+.support-desk-door__icon {
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--support-desk-surface);
+  font-size: 1.1rem;
+}
+.support-desk-door__body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.support-desk-door__title { font-weight: 650; }
+.support-desk-door__hint { font-size: 0.85rem; color: var(--support-desk-text-muted); }
+
+.support-desk-inbox-door { padding-bottom: 0; }
+
+/* --- Closed section --------------------------------------------------------- */
+
+.support-desk-closed { margin: 0.5rem 0 2rem; }
+.support-desk-closed__summary {
+  cursor: pointer;
+  padding: 0.75rem 1.25rem;
+  font-size: 0.9rem;
+  color: var(--support-desk-text-muted);
+}
+.support-desk-closed[open] .support-desk-closed__summary { color: var(--support-desk-text); }
+.support-desk-closed__capped {
+  margin: 0 1.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--support-desk-text-muted);
+}
+
+/* --- Wizard ----------------------------------------------------------------- */
+
+.support-desk-wizard__header { padding: 1rem 1.25rem 0.25rem; }
+.support-desk-wizard__back {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--support-desk-text-muted);
+  text-decoration: none;
+}
+.support-desk-wizard__back::before { content: "‹ "; }
+.support-desk-wizard__ask { font-size: 1.35rem; font-weight: 750; margin: 0 0 0.5rem; }
+
+.support-desk-error {
+  margin: 0 1.25rem 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.75rem;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 0.9rem;
+}
+
+.support-desk-empty { padding: 1.5rem 1.25rem; color: var(--support-desk-text-muted); }
+
+/* --- Choices ---------------------------------------------------------------- */
+
+.support-desk-choices { list-style: none; margin: 0; padding: 0.25rem 0 1rem; }
+
+.support-desk-choice {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 0.4rem 1.25rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--support-desk-border);
+  border-radius: var(--support-desk-radius);
+  background: var(--support-desk-card-bg);
+  text-decoration: none;
+  color: inherit;
+}
+.support-desk-choice:hover { background: var(--support-desk-surface); }
+.support-desk-choice__icon { flex: none; font-size: 1.2rem; }
+.support-desk-choice__label { flex: 1; min-width: 0; font-weight: 600; }
+.support-desk-choice__status {
+  flex: none;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--support-desk-surface);
+  color: var(--support-desk-text-muted);
+}
+.support-desk-choice__chevron { flex: none; color: var(--support-desk-text-muted); }
+.support-desk-choice__hint { flex: none; font-size: 0.8rem; color: var(--support-desk-text-muted); }
+.support-desk-choice--taken { background: var(--support-desk-surface); }
+.support-desk-choice--none { justify-content: center; border-style: dashed; font-weight: 500; }
+
+/* --- Context card ----------------------------------------------------------- */
+
+.support-desk-card {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 0 1.25rem 0.75rem;
+  padding: 0.8rem 1rem;
+  border-radius: var(--support-desk-radius);
+  background: var(--support-desk-surface);
+}
+.support-desk-card__label { flex: 1; min-width: 0; font-weight: 600; }
+.support-desk-card__status {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--support-desk-card-bg);
+  color: var(--support-desk-text-muted);
+}
+
+/* --- Composer --------------------------------------------------------------- */
+
+.support-desk-form { display: flex; flex-direction: column; gap: 0.75rem; padding: 0 1.25rem 2rem; }
+.support-desk-form__input {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--support-desk-border);
+  border-radius: var(--support-desk-radius);
+  background: var(--support-desk-card-bg);
+  font: inherit;
+  resize: vertical;
+}
+.support-desk-form__attach { font-size: 0.9rem; color: var(--support-desk-text-muted); }
+.support-desk-form__promise { margin: 0; font-size: 0.85rem; color: var(--support-desk-text-muted); }
+
+.support-desk-button {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 0.75rem 1.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--support-desk-accent);
+  color: var(--support-desk-accent-contrast);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* --- Notices ---------------------------------------------------------------- */
+
+.support-desk-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin: 0 1.25rem 1.5rem;
+  padding: 1rem;
+  border-radius: var(--support-desk-radius);
+  background: var(--support-desk-surface);
+}
+.support-desk-notice__title { margin: 0 1.25rem 0.75rem; font-weight: 600; }
+.support-desk-notice .support-desk-notice__title { margin: 0; }
+
+/* --- Dark ------------------------------------------------------------------- *
+ *
+ * Only the surfaces this file hardcodes: everything else already comes from
+ * a token that chats' own dark handling moves. A host with its own dark
+ * palette overrides the variables and never reaches this block.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --support-desk-surface: var(--chats-surface, #1f2430);
+    --support-desk-border: var(--chats-border, rgba(255, 255, 255, 0.12));
+    --support-desk-text: var(--chats-text, #f3f4f6);
+    --support-desk-text-muted: var(--chats-text-muted, #9ca3af);
+    --support-desk-card-bg: #111827;
+  }
+
+  /* The cards, the composer and the status pills all read --card-bg above;
+     only the error notice carries colours of its own. */
+  .support-desk-error { background: #3f1d1d; color: #fecaca; }
+}

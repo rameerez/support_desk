@@ -99,6 +99,21 @@ module ActiveSupport
       Invoice.create!(user: user, number: number, **attributes)
     end
 
+    # How many real queries a block runs. Schema reads and the transaction
+    # bookkeeping don't count — they are the harness, not the page.
+    def count_queries
+      queries = []
+      counter = lambda do |_name, _start, _finish, _id, payload|
+        next if payload[:name].to_s.in?(%w[SCHEMA TRANSACTION])
+        next if payload[:sql].to_s.start_with?("SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK")
+
+        queries << payload[:sql]
+      end
+
+      ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
+      queries
+    end
+
     # A ticket with its opening message already folded in — the canonical
     # fixture.
     #
@@ -119,6 +134,20 @@ module ActionDispatch
     def login_as(user)
       post "/test_login", params: { user_id: user.id }
       assert_response :no_content
+    end
+
+    # Let an exception out of the request instead of rendering an error page,
+    # so a test can assert on what a misconfiguration actually raises. The
+    # dummy's test environment already raises everything it can't rescue;
+    # this also covers the rescuable ones, and says at the call site which
+    # kind of test this is.
+    def without_exception_handling
+      key = "action_dispatch.show_exceptions"
+      original = Rails.application.env_config[key]
+      Rails.application.env_config[key] = :none
+      yield
+    ensure
+      Rails.application.env_config[key] = original
     end
   end
 end

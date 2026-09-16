@@ -1,0 +1,23 @@
+<%# The top of every wizard frame: the way back, the question, and anything
+    that went wrong. Inside the frame, not above it, so one frame render
+    updates all three. %>
+<header class="support-desk-wizard__header">
+  <% if (back = wizard.back) %>
+    <%= link_to t("support_desk.wizard.back"),
+                support_desk_routes.new_ticket_path(**back),
+                class: "support-desk-wizard__back" %>
+  <% else %>
+    <%= link_to t("support_desk.wizard.back"),
+                support_desk_routes.root_path,
+                class: "support-desk-wizard__back",
+                data: { turbo_frame: "_top" } %>
+  <% end %>
+
+  <% if (ask = local_assigns[:ask] || wizard.ask) %>
+    <h1 class="support-desk-wizard__ask"><%= ask %></h1>
+  <% end %>
+</header>
+
+<% if error.present? %>
+  <p class="support-desk-error" role="alert"><%= error %></p>
+<% end %>

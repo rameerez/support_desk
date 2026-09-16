@@ -31,12 +31,45 @@ en:
       email: "email"
       intercom: "Intercom"
       api: "API"
+    tickets:
+      title: "Support"
+      empty_title: "You haven't written to us yet"
+      empty_hint: "Conversations you open will show up here."
+      closed_section:
+        one: "1 closed conversation"
+        other: "%{count} closed conversations"
+      state:
+        awaiting_reply: "We're on it"
+        answered: "We replied"
+        closed: "Closed"
+    doors:
+      new: "Need help?"
+      about: "Need help with %{subject}?"
+      existing: "See your support conversation"
+      new_conversation: "Start a new conversation"
+    inbox:
+      empty_hint: "Need help? Write to us"
+    limits:
+      title: "You already have conversations open"
+      too_many_open:
+        one: "You already have a conversation open. Write there and we'll keep going in it."
+        other: "You already have %{count} conversations open. Write in one of them and we'll keep going there."
+      too_fast: "You've opened several conversations in a very short time. Give it a moment, or write in one you already have."
     wizard:
       ask_topic: "What do you need help with?"
       ask_subject: "Which one?"
+      write: "Tell us what happened"
       placeholder: "Tell us what happened"
       none_of_these: "None of these"
       already_open: "You already have a conversation open about this"
+      back: "Back"
+      back_to_list: "See your conversations"
+      send: "Send"
+      sending: "Sending"
+      write_anyway: "Write to us anyway"
+      message_required: "Write us a few lines so we can help."
+      nothing_to_pick: "We couldn't find anything to open this conversation about."
+      no_topics: "New conversations can't be opened right now."
     topics:
       other:
         label: "Something else"

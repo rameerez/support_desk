@@ -42,6 +42,11 @@ group :test do
   gem "pg"
   gem "sqlite3"
 
+  # System tests: the wizard's three frames driven in a real browser, which
+  # is the only place a Turbo Frame is really a Turbo Frame.
+  gem "capybara"
+  gem "selenium-webdriver"
+
   # Dummy Rails app
   gem "importmap-rails"
   gem "propshaft"

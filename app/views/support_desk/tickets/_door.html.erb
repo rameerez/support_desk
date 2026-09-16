@@ -1,0 +1,12 @@
+<%# "Abrir una nueva conversación" — the way in, always above the list.
+    A support screen whose only entry point is an existing case is a screen
+    nobody can start from. %>
+<%= link_to support_desk_routes.new_ticket_path, class: "support-desk-door" do %>
+  <span class="support-desk-door__icon" aria-hidden="true">＋</span>
+  <span class="support-desk-door__body">
+    <span class="support-desk-door__title"><%= t("support_desk.doors.new_conversation") %></span>
+    <% if (promise = support_reply_promise) %>
+      <span class="support-desk-door__hint"><%= promise %></span>
+    <% end %>
+  </span>
+<% end %>

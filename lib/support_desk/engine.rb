@@ -73,6 +73,20 @@ module SupportDesk
       end
     end
 
+    # Serve the bundled stylesheet the requester-facing views link (propshaft
+    # or sprockets — both honour config.assets.paths). A host that ejects and
+    # restyles the views simply stops rendering `support_desk_styles`.
+    initializer "support_desk.assets" do |app|
+      if app.config.respond_to?(:assets)
+        app.config.assets.paths << root.join("app/assets/stylesheets")
+        # Sprockets compiles only what is declared; without this the host
+        # 404s the stylesheet in production while Propshaft (which serves
+        # everything on the path) works fine, so the gap only shows up on
+        # somebody else's deploy.
+        app.config.assets.precompile << "support_desk.css" if app.config.assets.respond_to?(:precompile)
+      end
+    end
+
     # Ship the gem's locale files (en, es). Host locale files with the same
     # keys override these automatically (I18n's load order puts the app last).
     initializer "support_desk.locales" do |app|
@@ -91,6 +105,13 @@ module SupportDesk
     # (not an initializer) so they re-run after every code reload, which is
     # exactly when a model stops being `supportable`.
     config.to_prepare do
+      # Touch the helper so its bottom-of-file on_load(:action_view) hook
+      # registers even when no engine code has been referenced yet. Without
+      # this, `link_to_support` is undefined in every host that does not
+      # eager load — which is every host in development.
+      # (Assigned to appease Lint/Void — the constant REFERENCE is the point.)
+      _loaded = SupportDesk::EngineHelper
+
       SupportDesk.config.validate_classes! if SupportDesk.configured?
     end
   end

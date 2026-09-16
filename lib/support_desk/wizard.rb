@@ -28,15 +28,26 @@ module SupportDesk
     # What a subject token is signed for, so a token minted for one purpose
     # can't be replayed at another.
     SUBJECT_PURPOSE = :support_subject
+
+    # How long a token minted for a DOOR stays good. Doors sit on long-lived
+    # pages and get copied into chats and bug reports, so the link somebody
+    # pastes tomorrow should not still open a wizard.
     SUBJECT_TOKEN_TTL = 1.hour
+
+    # How long the token the COMPOSER round-trips stays good. It is a hidden
+    # field in a form somebody is typing into, not a link: at one hour, a
+    # person who writes a long message, takes a call and hits Enviar loses
+    # the lot to a 404. Nothing is trusted on the strength of the token
+    # anyway — `supportable_by?` is re-checked on the way in.
+    FORM_TOKEN_TTL = 24.hours
 
     STEPS = %i[topic subject compose].freeze
 
     attr_reader :requester, :params
 
     # Sign a record for a door or a picker link.
-    def self.sign_subject(record)
-      record.to_sgid(expires_in: SUBJECT_TOKEN_TTL, for: SUBJECT_PURPOSE).to_s
+    def self.sign_subject(record, expires_in: SUBJECT_TOKEN_TTL)
+      record.to_sgid(expires_in: expires_in, for: SUBJECT_PURPOSE).to_s
     end
 
     # Resolve a signed subject token, or nil when it's missing, expired,
@@ -64,6 +75,20 @@ module SupportDesk
 
     # That desk's topic tree.
     def tree = desk.config.topics
+
+    # Where the ticket will actually be FILED. A topic may hand its subtree
+    # to another desk (`topic :invoice, desk: :billing`), and a ticket
+    # belongs where its topic says, not where the requester's class does.
+    #
+    # Deliberately not folded into #desk: the tree is read from the
+    # requester's desk, and a #desk that depended on the topic would ask the
+    # tree for the topic to find out which tree to ask.
+    def target_desk
+      key = topic&.desk_key
+      return desk if key.nil? || key == desk.key
+
+      SupportDesk.desk(key) || desk
+    end
 
     # Which step the requester is on, given what they've chosen so far.
     def step
@@ -101,9 +126,31 @@ module SupportDesk
     def choices
       case step
       when :topic then tree.visible_for(requester, under: topic&.path)
-      when :subject then Array(topic.candidates_for(requester))
+      when :subject then candidates
       else []
       end
+    end
+
+    # The records the picker would offer, resolved once per wizard: the
+    # step machine asks whether there are any, and then the view asks for
+    # them, and a `candidates:` proc that runs a query shouldn't run it twice.
+    def candidates
+      @candidates ||= Array(topic&.candidates_for(requester))
+    end
+
+    # The declared way out of the tree ("Otra cosa"), when this requester may
+    # use it — what a screen with nothing else to offer links to, so a dead
+    # end always has a door in it.
+    def free_form_exit
+      exit_leaf = tree.free_form_leaf
+      exit_leaf if exit_leaf&.visible_for?(requester)
+    end
+
+    # The state this step carries into the next request — what the composer
+    # round-trips as hidden fields, so a POST lands on exactly the step the
+    # GET rendered.
+    def state_params
+      { topic: topic&.path, subject: subject_token, no_subject: (1 if declined_subject?) }.compact
     end
 
     # The prompt above the choices.
@@ -163,17 +210,57 @@ module SupportDesk
       key = Ticket.cardinality_key_for(requester: requester, subject: subject, topic: topic)
       return nil if key.start_with?("free:")
 
-      Ticket.not_closed.find_by(requester: requester, desk: desk, cardinality_key: key)
+      Ticket.not_closed.find_by(requester: requester, desk: target_desk, cardinality_key: key)
     end
 
     # Which records in +choices+ the requester already has an open case
-    # about, so the picker can mark them.
+    # about, so the picker can mark them. One query per wizard, not one per
+    # row.
     def open_tickets_by_subject
-      return {} unless subject_step?
+      return @open_tickets_by_subject if defined?(@open_tickets_by_subject)
 
-      Ticket.not_closed.where(requester: requester, desk: desk)
-            .where.not(subject_id: nil)
-            .index_by { |ticket| [ ticket.subject_type, ticket.subject_id.to_s ] }
+      @open_tickets_by_subject =
+        if subject_step?
+          Ticket.not_closed.where(requester: requester, desk: target_desk)
+                .where.not(subject_id: nil)
+                .index_by { |ticket| [ ticket.subject_type, ticket.subject_id.to_s ] }
+        else
+          {}
+        end
+    end
+
+    # The open case this requester already has about +record+, or nil — what
+    # the picker marks with "Ya tienes una conversación abierta" and links to
+    # instead of offering as a choice.
+    def open_ticket_about(record)
+      return nil if record.nil?
+
+      open_tickets_by_subject[[ record.class.polymorphic_name, record.id.to_s ]]
+    end
+
+    # True when the params named a subject that didn't resolve: a forged or
+    # expired token, a record that has since been deleted, one that isn't
+    # supportable, or somebody else's. Callers turn this into a 404 — "not
+    # yours" and "not there" must look the same from outside.
+    def subject_rejected?
+      subject_named? && subject.nil?
+    end
+
+    # The params that take the requester one step back, or nil when this is
+    # the first screen. An empty Hash means the top of the topic tree, so
+    # `new_ticket_path(wizard.back)` is always the right link — the wizard
+    # never leans on `history.back()`, because every step is a real URL.
+    def back
+      case step
+      when :topic then topic && level_above(topic)
+      when :subject then level_above(topic)
+      when :compose
+        # A door dropped them straight here from a host page. "Back" to a
+        # picker they never saw would be a place they have never been.
+        return nil if subject_named? && params[:topic].blank?
+
+        picker_step? ? { topic: topic.path } : level_above(topic)
+      end
     end
 
     # Submit. Raises SupportDesk::InvalidTransition when the wizard isn't
@@ -183,13 +270,21 @@ module SupportDesk
         raise InvalidTransition, "the wizard is still on the #{step} step — pick one before submitting"
       end
 
-      requester.ask_support!(message, about: subject, topic: topic.path, files: files)
+      # `ask_support!` files under the REQUESTER's desk, which is right
+      # until a topic says otherwise; then the redirect is spelled out.
+      if target_desk == desk
+        requester.ask_support!(message, about: subject, topic: topic.path, files: files)
+      else
+        Ticket.open!(requester: requester, message: message, about: subject, topic: topic.path,
+                     files: files, desk: target_desk,
+                     requester_role: requester.class.support_desk_requester_options[:as])
+      end
     end
 
     # A signed token for the currently chosen subject, to round-trip through
-    # the next form.
+    # the next form — on the form's clock, not a door's (see FORM_TOKEN_TTL).
     def subject_token
-      subject && self.class.sign_subject(subject)
+      subject && self.class.sign_subject(subject, expires_in: FORM_TOKEN_TTL)
     end
 
     # Where the requester has got to, in one line.
@@ -206,9 +301,42 @@ module SupportDesk
 
       return false if topic.subject_mode == :none
       # "None of these" is only on offer when the topic said it was optional.
-      return false if params.key?(:no_subject) && topic.subject_mode == :optional
+      return false if declined_subject?
+      # Nothing to pick from and nothing insisting we pick: asking "which
+      # one?" above an empty list is a dead end, so skip straight to writing.
+      return false if candidates.empty? && topic.subject_mode != :required
 
       true
+    end
+
+    # Whether they answered "ninguno de estos" — only an answer at all when
+    # the topic offered it.
+    def declined_subject?
+      params.key?(:no_subject) && topic&.subject_mode == :optional
+    end
+
+    # True when the params tried to name a subject at all — used to tell
+    # "they haven't picked one yet" apart from "the one they named is not
+    # theirs".
+    def subject_named?
+      params[:about].present? || params[:subject].present?
+    end
+
+    # Whether this topic has a picker that would actually RENDER — which is
+    # what decides where "back" from the composer goes. A picker skipped for
+    # having nothing in it must not be the place back leads to, or back
+    # forwards straight to where it came from.
+    def picker_step?
+      return false if topic.nil? || topic.free_form? || topic.about.empty?
+      return true if topic.subject_mode == :required
+
+      candidates.any?
+    end
+
+    # The params for the level of the tree +node+ was chosen from: its
+    # parent branch, or the top level ({}).
+    def level_above(node)
+      node&.parent ? { topic: node.parent.path } : {}
     end
 
     def resolve_topic
@@ -221,17 +349,44 @@ module SupportDesk
       end
 
       # A deep link is a list of one: a topic this requester would never be
-      # offered is not one they may walk into by typing its path.
-      node if node&.visible_for?(requester)
+      # offered is not one they may walk into by typing its path — nor by
+      # pointing at a record whose own `support_topic` is hidden from them,
+      # which is the same bypass wearing a different hat.
+      return node&.visible_for?(requester) ? node : nil if path || chosen
+
+      # Nothing on offer at all: every branch behind an `only:`, or a desk
+      # with no tree. The wizard must not open on a question with no
+      # answers, so it starts at the composer under the DECLARED way out
+      # (`other`, or `free_form: true`) — and only when that leaf is one
+      # this requester may use, because `Ticket.open!` refuses a hidden
+      # topic and a composer that 404s on submit is worse than a refusal.
+      #
+      # nil when the tree declares no exit, or hides the one it declares:
+      # the requester stays on the topic step with nothing to choose, and
+      # the screen says so.
+      return nil unless tree.visible_for(requester).empty?
+
+      free_form_exit
     end
 
     def resolve_subject
-      record = params[:about] || self.class.find_signed_subject(params[:subject])
+      record = subject_from_params
       return nil if record.nil?
       return nil unless record.respond_to?(:supportable?) && record.supportable?
       return nil unless record.supportable_by?(requester)
 
       record
+    end
+
+    # `about:` is the one param a door, a deep link and a host driving the
+    # wizard in Ruby all use, so it accepts BOTH: a signed GlobalID off the
+    # query string, or the record itself. `subject:` is the same token under
+    # the name the wizard's own forms round-trip it as.
+    def subject_from_params
+      given = params[:about]
+      return given unless given.nil? || given.is_a?(String)
+
+      self.class.find_signed_subject(given.presence || params[:subject])
     end
   end
 end

@@ -1,0 +1,56 @@
+<%# Step 3 — the composer. Context card, prefill, attachments, and the
+    promise, which is the same `config.reply_within` the SLA breaches on.
+
+    The form targets `_top`: it POSTs to /tickets and the answer is a
+    redirect into the conversation, which must replace the page, not land
+    inside the wizard frame. %>
+<%= render "support_desk/tickets/wizard_header", wizard: wizard, error: error,
+           ask: t("support_desk.wizard.write") %>
+
+<% if (existing = wizard.existing_ticket) %>
+  <%# They already have a case open about exactly this. Opening a second one
+      would split the conversation in two and leave the agent reading half a
+      story, so we hand them the one they have. %>
+  <div class="support-desk-notice">
+    <p class="support-desk-notice__title"><%= t("support_desk.wizard.already_open") %></p>
+    <%= link_to t("support_desk.doors.existing"), support_thread_path(existing),
+                class: "support-desk-button", data: { turbo_frame: "_top" } %>
+  </div>
+<% else %>
+  <%= render "support_desk/tickets/context_card", subject: wizard.subject if wizard.subject %>
+
+  <%= form_with url: support_desk_routes.tickets_path,
+                method: :post,
+                class: "support-desk-form",
+                data: { turbo_frame: "_top" } do %>
+    <% wizard.state_params.each do |name, value| %>
+      <%= hidden_field_tag name, value %>
+    <% end %>
+
+    <%# What they typed wins over the prefill: this template also renders the
+        422 after a refused submit, and losing five paragraphs to a validation
+        message is the rudest thing a form can do. %>
+    <%= text_area_tag :message, params[:message].presence || wizard.prefill,
+                      rows: 6,
+                      class: "support-desk-form__input",
+                      placeholder: wizard.placeholder,
+                      autocomplete: "off" %>
+
+    <% if Chats.config.attachments %>
+      <label class="support-desk-form__attach">
+        <%= file_field_tag "files[]", multiple: true,
+                           accept: (Chats.config.attachments == :images ? "image/*" : nil) %>
+      </label>
+    <% end %>
+
+    <% if wizard.promise %>
+      <p class="support-desk-form__promise"><%= wizard.promise %></p>
+    <% end %>
+
+    <%# turbo_submits_with disables the button for the length of the submit.
+        `Ticket.open!` makes the TICKET idempotent, but two taps still post
+        two identical opening messages into it. %>
+    <%= submit_tag t("support_desk.wizard.send"), class: "support-desk-button",
+                   data: { turbo_submits_with: t("support_desk.wizard.sending") } %>
+  <% end %>
+<% end %>

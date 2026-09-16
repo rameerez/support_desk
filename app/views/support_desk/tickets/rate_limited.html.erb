@@ -1,0 +1,40 @@
+<%# The wall, when somebody is at the cap or has opened too many cases too
+    fast. It is a WALL WITH A DOOR IN IT: the cases they already have, so
+    "you have too many open conversations" always comes with the place to go
+    and write. Never a 500, never a silent failure. %>
+<%= chats_styles %>
+<%= support_desk_styles %>
+
+<div class="chats chats-inbox support-desk">
+  <header class="chats-inbox__header">
+    <h1 class="chats-inbox__title"><%= t("support_desk.limits.#{@limit_reason}_title") %></h1>
+  </header>
+
+  <p class="support-desk-notice__title">
+    <%= t("support_desk.limits.#{@limit_reason}", count: @open_tickets.size) %>
+  </p>
+
+  <% if @open_tickets.any? %>
+    <ul class="chats-inbox__list">
+      <%= render partial: "support_desk/tickets/ticket_row",
+                 collection: @open_tickets,
+                 as: :ticket,
+                 locals: { unread_counts: @unread_counts } %>
+    </ul>
+  <% end %>
+
+  <%# Whatever they had typed comes with them. The wall sends them into a
+      conversation they already have, and the words they just wrote are not
+      ours to throw away — kept on the page to copy rather than pushed
+      through a URL, where it would land in logs and browser history. %>
+  <% if params[:message].present? %>
+    <div class="support-desk-form">
+      <p class="support-desk-form__promise"><%= t("support_desk.limits.your_message") %></p>
+      <%= text_area_tag :message, params[:message], rows: 6, readonly: true,
+                        class: "support-desk-form__input", id: "support_desk_kept_message" %>
+    </div>
+  <% end %>
+
+  <%= link_to t("support_desk.wizard.back_to_list"), support_desk_routes.root_path,
+              class: "support-desk-button" %>
+</div>

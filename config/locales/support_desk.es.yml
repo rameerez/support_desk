@@ -34,12 +34,47 @@ es:
       email: "correo"
       intercom: "Intercom"
       api: "API"
+    # The requester's own list of cases.
+    tickets:
+      title: "Soporte"
+      empty_title: "Todavía no has escrito a soporte"
+      empty_hint: "Cuando abras una conversación la verás aquí."
+      closed_section:
+        one: "1 conversación cerrada"
+        other: "%{count} conversaciones cerradas"
+      state:
+        awaiting_reply: "Estamos con ello"
+        answered: "Te hemos contestado"
+        closed: "Cerrada"
+    # The ways in, from anywhere in the host app.
+    doors:
+      new: "¿Necesitas ayuda?"
+      about: "¿Necesitas ayuda con %{subject}?"
+      existing: "Ver tu conversación de soporte"
+      new_conversation: "Abrir una nueva conversación"
+    inbox:
+      empty_hint: "¿Necesitas ayuda? Escríbenos"
+    limits:
+      title: "Ya tienes conversaciones abiertas"
+      too_many_open:
+        one: "Ya tienes una conversación abierta. Escríbenos ahí y seguimos en la misma."
+        other: "Ya tienes %{count} conversaciones abiertas. Escríbenos en una de ellas y seguimos ahí."
+      too_fast: "Has abierto varias conversaciones en muy poco tiempo. Espera un momento o escríbenos en una de las que ya tienes."
     wizard:
       ask_topic: "¿Con qué necesitas ayuda?"
       ask_subject: "¿Sobre cuál?"
+      write: "Cuéntanos qué ha pasado"
       placeholder: "Cuéntanos qué ha pasado"
       none_of_these: "Ninguno de estos"
       already_open: "Ya tienes una conversación abierta"
+      back: "Atrás"
+      back_to_list: "Ver tus conversaciones"
+      send: "Enviar"
+      sending: "Enviando"
+      write_anyway: "Escríbenos de todos modos"
+      message_required: "Escríbenos unas líneas para que podamos ayudarte."
+      nothing_to_pick: "No encontramos nada sobre lo que abrir esta conversación."
+      no_topics: "Ahora mismo no se pueden abrir conversaciones nuevas."
     topics:
       other:
         label: "Otra cosa"

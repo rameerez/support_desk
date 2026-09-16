@@ -174,6 +174,83 @@ ticket.timeline          # messages ⨉ events merged by time; .print in a conso
 ticket.actions_for(lucia) # exactly the buttons to render
 ```
 
+## The requester experience
+
+Mounting the engine is the whole user side: four screens, ejectable views,
+and two helpers you drop anywhere in your app.
+
+```ruby
+mount SupportDesk::Engine => "/support"   # CarHey mounts it at "/messages/support"
+```
+
+| route | what |
+|---|---|
+| `GET /support` | their cases — open ones as chats rows, closed ones folded away, and the door into a new one |
+| `GET /support/new` | the wizard: pick a topic, pick the thing, write. One URL, three Turbo frames |
+| `POST /support/tickets` | `ask_support!`, then straight into the conversation |
+| `GET /support/tickets/:id` | a stable URL for a case (`/support/tickets/T-AB12CD` works too), redirecting to its thread |
+
+The screens inherit `config.parent_controller`, so your layout, your
+authentication (`config.authenticate_method`) and your locale switching all
+apply. `config.current_requester_method` names the person asking.
+
+Doors go anywhere, including in partials shared with pages that have nothing
+to do with support:
+
+```erb
+<%= link_to_support about: @order %>                                  <%# "Need help with Order SO1?" %>
+<%= link_to_support about: @withdrawal, text: "Report a problem", class: "btn" %>
+<%= link_to_support %>                                                <%# no subject: the wizard, step 1 %>
+<%= support_unread_badge %>
+```
+
+`link_to_support` renders **nothing** when there is no requester, when the
+record isn't `supportable`, or when it isn't theirs to ask about — and when
+they already have a case open about it, it leads to that conversation instead
+of opening a second one. Subjects travel as signed GlobalIDs (purpose
+`:support_subject`, one hour) and are re-checked against `supportable_by?`
+anyway; a token that is forged, expired or somebody else's is a 404, never a
+403 with a hint.
+
+In the chats inbox the desk appears **once**, as a grouped row. Before the
+requester has ever written there is no row to group, so the engine puts a
+door in its place (`config.inbox_entry = :always | :when_tickets | :never`) —
+a support entry that only exists once you already have a ticket is
+undiscoverable.
+
+Hotwire Native hosts merge the engine's path rules into their own, AFTER any
+rule that could swallow them:
+
+```ruby
+rules: [ *my_own_rules, *SupportDesk.native_path_rules ]
+```
+
+Order matters and the later rule wins: a host whose chats thread rule is
+`^/messages/[^/]+$` already matches `/messages/support`, so rules placed
+first would lose to it.
+
+Both surfaces are pushed screens, never modals: every wizard step is a real
+URL, so the back gesture and cold-boot deep links work.
+
+### Restyling
+
+The views ship with a small bundled stylesheet and semantic classes (the list
+reuses chats' own row classes, because a case *is* a conversation). The
+stylesheet goes into your layout's `<head>`, so that layout needs a
+`<%= yield :head %>` — every Rails app generated this decade has one. To make
+the screens yours:
+
+```bash
+rails generate support_desk:views
+```
+
+That copies `app/views/support_desk/tickets/**` and the two rows this engine
+contributes to chats' screens (`app/views/chats/slots/**`) into your app,
+where they shadow the gem's copies — the Devise move. Delete your copy and
+the default comes back; upgrade the gem and your copy is untouched. Every
+view helper the templates use stays available afterwards, so an ejected copy
+keeps working.
+
 ## The wizard
 
 "What do you need help with?" is a plain object, not a controller, so a host

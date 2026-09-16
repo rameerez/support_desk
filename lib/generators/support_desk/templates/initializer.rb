@@ -39,6 +39,11 @@ SupportDesk.configure do |config|
   #
   # config.current_requester_method = :current_user
   # config.current_agent_method = :current_user
+  #
+  # Your own authentication filter, run before every requester-facing
+  # screen, so a logged-out visitor meets YOUR login flow.
+  #
+  # config.authenticate_method = :authenticate_user!
 
   # ==========================================================================
   # THE DESK

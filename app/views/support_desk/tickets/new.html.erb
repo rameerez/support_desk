@@ -1,0 +1,14 @@
+<%# The wizard: one URL, three frames.
+
+    `data-turbo-action="advance"` is what keeps the promise the native apps
+    depend on — every step is a REAL URL, pushed into history, bookmarkable
+    and deep-linkable, even though only the frame re-renders. Nothing here
+    calls history.back(); each step renders its own back link. %>
+<%= chats_styles %>
+<%= support_desk_styles %>
+
+<div class="chats support-desk">
+  <%= turbo_frame_tag "support_wizard", data: { turbo_action: "advance" } do %>
+    <%= render support_wizard_partial(@wizard), wizard: @wizard, error: @error %>
+  <% end %>
+</div>
