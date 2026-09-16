@@ -174,6 +174,34 @@ class ConsoleDefectsTest < ActionDispatch::IntegrationTest
     collector.stop
   end
 
+  # --- A refusal the agent can see -------------------------------------------------
+
+  test "a forbidden verb answers Turbo with something it will actually render" do
+    # Turbo only renders an error response it can read as HTML, so a
+    # text/plain 403 to a form submission is dropped and the button just
+    # looks broken. The stream branch carries the reason instead.
+    SupportDesk.config.authorize_console = ->(_agent, _ticket, action) { action != :close }
+
+    post "/madmin/support_tickets/#{@ticket.id}/close",
+         headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :success
+    assert_equal "text/vnd.turbo-stream.html", response.media_type
+    assert_match(/<turbo-stream action="refresh">/, response.body)
+    assert_equal "You don't have access to the support console.", flash[:alert]
+    assert_open @ticket
+  end
+
+  test "a plain request still gets a plain 403" do
+    SupportDesk.config.authorize_console = ->(_agent, _ticket, action) { action != :close }
+
+    post "/madmin/support_tickets/#{@ticket.id}/close"
+
+    assert_response :forbidden
+    assert_equal "You don't have access to the support console.", response.body
+    assert_open @ticket
+  end
+
   # --- Locale --------------------------------------------------------------------
 
   test "a Spanish desk gets Spanish refusals, not the model's English" do

@@ -24,6 +24,15 @@ module SupportDesk
   # engine's URL helpers with it. So the console's controllers live under
   # `SupportDesk::Console`, which is also the concern hosts include: one name
   # for the console, whichever layer you use it from.
+  #
+  # ⚠️ One side effect worth knowing before you add anything to that
+  # namespace: `isolate_namespace` defines `table_name_prefix` on it, so a
+  # future `SupportDesk::Console::Something < ActiveRecord::Base` would look
+  # for a table called `support_desk_console_somethings` rather than the
+  # `support_desk_` prefix the rest of the gem uses. Nothing here is a
+  # model and nothing here should become one — the console is a web layer
+  # over `SupportDesk::Ticket`. Anything that needs to persist belongs in
+  # lib/support_desk/models, under the requester engine's namespace.
   class ConsoleEngine < ::Rails::Engine
     isolate_namespace SupportDesk::Console
 

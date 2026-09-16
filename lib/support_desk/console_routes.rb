@@ -29,6 +29,26 @@ module SupportDesk
     # The member verbs, in the order an agent uses them.
     MEMBER_VERBS = %i[reply take assign hand_off release close reopen note change_topic].freeze
 
+    # Rails' own message for this ("can't use collection outside resource(s)
+    # scope") is true and says nothing about which concern caused it, which
+    # is a bad half-hour when the only support_desk line in the file is the
+    # one word `concerns`.
+    OUTSIDE_RESOURCE_SCOPE = <<~MESSAGE
+      `concerns: :support_console` has to sit inside a `resources` block: it draws member routes
+      (reply, take, assign, …) and a collection route (next) for a ticket resource, and neither
+      means anything without one.
+
+          namespace :madmin do
+            resources :support_tickets, only: %i[index show], concerns: :support_console
+          end
+
+      or, if you prefer the block form:
+
+          resources :support_tickets, only: %i[index show] do
+            concerns :support_console
+          end
+    MESSAGE
+
     class << self
       # Make `concerns: :support_console` available in every route set.
       # Idempotent — the engine calls it at boot, tests may call it again.
@@ -69,6 +89,10 @@ module SupportDesk
         mapper.member do
           MEMBER_VERBS.each { |verb| mapper.post verb, **options }
         end
+      rescue ArgumentError => e
+        raise unless e.message.include?("outside resource")
+
+        raise SupportDesk::ConfigurationError, OUTSIDE_RESOURCE_SCOPE
       end
     end
 

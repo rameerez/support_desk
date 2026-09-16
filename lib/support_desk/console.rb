@@ -344,8 +344,21 @@ module SupportDesk
     end
 
     # A 403 that says why, in the host's locale. Override for a prettier one.
+    # A refusal the agent can actually see.
+    #
+    # A 403 with a plain-text body is the right answer to a GET and the
+    # wrong one to a Turbo form submission: Turbo only renders an error
+    # response it can read as HTML, so a text/plain 403 is dropped on the
+    # floor and the button looks broken rather than refused. The stream
+    # branch carries a real flash and refreshes, so the agent reads why.
     def support_console_forbidden
-      render plain: support_console_t("errors.forbidden"), status: :forbidden
+      respond_to do |format|
+        format.turbo_stream do
+          flash[:alert] = support_console_t("errors.forbidden")
+          render_support_console_refresh
+        end
+        format.any { render plain: support_console_t("errors.forbidden"), status: :forbidden }
+      end
     end
 
     # --- What they may reach --------------------------------------------------------
