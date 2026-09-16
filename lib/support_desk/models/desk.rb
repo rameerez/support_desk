@@ -9,6 +9,11 @@ module SupportDesk
   # one. Its conversations collapse into a single grouped inbox row, so
   # somebody with four open tickets sees "Soporte" once, not four times.
   #
+  # It is also a VERIFIED messager: a desk is the official voice of the
+  # product, and the person writing to it should be able to tell that from
+  # an impostor without reading the name carefully. chats badges it wherever
+  # it shows a messager's name.
+  #
   #   SupportDesk.desk            # the :default desk, memoised
   #   SupportDesk.desk(:billing)  # another one
   #
@@ -20,6 +25,7 @@ module SupportDesk
     acts_as_messager notifications: false,
                      blockable: false,
                      inbox: :grouped,
+                     verified: true,
                      group_path: ->(_viewer) { SupportDesk.root_path }
 
     has_many :tickets,

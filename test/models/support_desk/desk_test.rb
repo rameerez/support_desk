@@ -48,6 +48,14 @@ module SupportDesk
       assert_equal "/messages/support", desk.class.chat_group_path.call(create_user)
     end
 
+    test "the desk is an OFFICIAL account, so chats badges it" do
+      desk = SupportDesk.desk
+
+      assert_predicate desk.class, :chat_verified?
+      assert Chats.verified?(desk)
+      assert_not Chats.verified?(create_user), "only the desk is official"
+    end
+
     test "agents resolves the configured pool" do
       admin = create_user(admin: true)
       create_user(admin: false)

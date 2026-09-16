@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-16
+
+### Changed
+
+- **The desk is an official account.** `SupportDesk::Desk` now declares
+  `acts_as_messager verified: true` (chats 0.3.0), so chats badges it
+  wherever it names a messager: the grouped inbox row and the case thread's
+  header. A requester can tell the real desk from anyone who simply called
+  themselves "Soporte" without reading the name carefully — which matters
+  more here than anywhere else in a product, because the desk is the one
+  counterpart that legitimately asks people for account details. The badge
+  is chats' own; recolour it with the `--chats-verified` CSS variable or
+  replace it with `Chats.configure { |c| c.verified_badge = … }`.
+
 ## [0.1.0] - 2026-09-16
 
 First release: the whole core of a support desk, on top of `chats` 0.2.
