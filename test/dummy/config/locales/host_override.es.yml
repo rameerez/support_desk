@@ -1,0 +1,7 @@
+# What a real host does: reword one of the gem's strings by shipping the same
+# key. The gem must not win this. See test/locale_precedence_test.rb.
+es:
+  support_desk:
+    queue:
+      tabs:
+        awaiting: "Esperando al equipo (del host)"

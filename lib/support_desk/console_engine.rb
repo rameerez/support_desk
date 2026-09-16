@@ -41,6 +41,14 @@ module SupportDesk
     # that same file a second time.
     paths["config/routes.rb"] = "config/console_routes.rb"
 
+    # Both engines are rooted at the gem, so without this every locale file
+    # is registered twice — once by each engine's :add_locales. Harmless for
+    # precedence (identical files, adjacent in load_path) but it doubles the
+    # YAML parsed at boot, and a duplicated load_path is the kind of thing
+    # that makes a later precedence bug much harder to read. SupportDesk
+    # ::Engine already ships them for both namespaces.
+    paths["config/locales"] = []
+
     # `concerns: :support_console` in the HOST's routes file. Registered from
     # an initializer, which is early enough: the app's routes are not drawn
     # until every railtie initializer has run.

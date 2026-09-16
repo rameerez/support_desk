@@ -88,11 +88,21 @@ module SupportDesk
       end
     end
 
-    # Ship the gem's locale files (en, es). Host locale files with the same
-    # keys override these automatically (I18n's load order puts the app last).
-    initializer "support_desk.locales" do |app|
-      app.config.i18n.load_path += Dir[root.join("config", "locales", "**", "*.{rb,yml}").to_s]
-    end
+    # The gem's locale files (en, es) ship through Rails::Engine's own
+    # :add_locales initializer, which picks up every engine's config/locales
+    # automatically — and deliberately NOT through a manual
+    # `app.config.i18n.load_path +=` on top of it.
+    #
+    # That manual append is not merely redundant, it INVERTS the contract.
+    # Railtie paths are unshifted ahead of everything in load_path, so an
+    # appended copy of these files lands AFTER the host's own locales and
+    # silently overrides them: a host that rewords `support_desk.queue.tabs
+    # .awaiting` in its own es.yml would keep reading ours. Measured before
+    # this was removed: the gem's file sat in load_path 14 times and the
+    # host's override lost.
+    #
+    # Gem first, host last. `clickwrap` learned this the same way and its
+    # engine carries the same note.
 
     # Keep `awaiting`, the SLA clocks and reopen-on-reply true by listening
     # to chats. One subscriber, registered once, for every channel a message
