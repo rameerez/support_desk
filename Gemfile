@@ -38,7 +38,11 @@ group :test do
   gem "activejob"
   gem "activestorage"
 
-  # Database adapters (for multi-database testing)
+  # Database adapters (for multi-database testing). SQLite and PostgreSQL
+  # only, on purpose: both enforce the partial unique indexes the cardinality
+  # tests assert against, so `skip_unless_partial_indexes` can FAIL rather
+  # than skip. MySQL has no partial indexes, so a MySQL leg would have to
+  # weaken those assertions — see "Database support" in the README.
   gem "pg"
   gem "sqlite3"
 

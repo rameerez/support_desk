@@ -1,0 +1,199 @@
+name: Tests
+
+on:
+  pull_request:
+    paths-ignore:
+      - "*.md"
+      - "LICENSE.txt"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "*.md"
+      - "LICENSE.txt"
+
+permissions:
+  contents: read
+
+# Two checkouts, not one: `chats` is the kernel this gem is a product on, and
+# it is developed in lockstep — the Gemfile points at `../chats` until 0.2.0 is
+# on rubygems. Checking both repos out as SIBLINGS under the workspace makes
+# that path resolve in CI exactly as it does on a laptop, for the root Gemfile
+# (`../chats`) and for the appraisal gemfiles (`../../chats`) alike. When the
+# Gemfile switches to the released gem, delete the chats step and the
+# working-directory lines with it.
+jobs:
+  # Main test suite — Ruby versions and Rails compatibility, on SQLite
+  sqlite:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby_version: ["3.3", "3.4", "4.0"]
+        gemfile:
+          - path: Gemfile
+            label: default
+          - path: gemfiles/rails_7.2.gemfile
+            label: rails-7.2
+          - path: gemfiles/rails_8.0.gemfile
+            label: rails-8.0
+          - path: gemfiles/rails_8.1.gemfile
+            label: rails-8.1
+        include:
+          # Exercise both Rails boundaries on the Ruby floor the gemspec
+          # advertises (>= 3.2), which the matrix above never reaches.
+          - ruby_version: "3.2"
+            gemfile:
+              path: gemfiles/rails_7.2.gemfile
+              label: rails-7.2
+          - ruby_version: "3.2"
+            gemfile:
+              path: gemfiles/rails_8.1.gemfile
+              label: rails-8.1
+
+    env:
+      RAILS_ENV: test
+      BUNDLE_GEMFILE: ${{ github.workspace }}/support_desk/${{ matrix.gemfile.path }}
+
+    steps:
+      - name: Check out support_desk
+        uses: actions/checkout@v4
+        with:
+          path: support_desk
+          persist-credentials: false
+
+      - name: Check out the chats kernel
+        uses: actions/checkout@v4
+        with:
+          repository: rameerez/chats
+          path: chats
+          persist-credentials: false
+
+      - name: Set up Ruby ${{ matrix.ruby_version }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby_version }}
+          bundler-cache: true
+          working-directory: support_desk
+
+      - name: Prepare database and run tests
+        working-directory: support_desk
+        # `db:create db:migrate` rather than `db:migrate:reset`: the reset macro
+        # runs drop + create + migrate IN ONE PROCESS, and on SQLite the migrate
+        # step then writes through a stale connection to the just-deleted file,
+        # so nothing persists and the suite boots into "pending migrations".
+        # CI runners start fresh, so there is nothing to drop.
+        run: bundle exec rake db:create db:migrate test
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-sqlite-ruby-${{ matrix.ruby_version }}-${{ matrix.gemfile.label }}
+          path: support_desk/test/reports/
+          retention-days: 7
+
+  # PostgreSQL compatibility — the second adapter with partial unique indexes,
+  # which is what makes "one open ticket about one thing" a database promise
+  # rather than a model one.
+  postgres:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby_version: ["3.4"]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: support_desk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/support_desk_test
+
+    steps:
+      - name: Check out support_desk
+        uses: actions/checkout@v4
+        with:
+          path: support_desk
+          persist-credentials: false
+
+      - name: Check out the chats kernel
+        uses: actions/checkout@v4
+        with:
+          repository: rameerez/chats
+          path: chats
+          persist-credentials: false
+
+      - name: Set up Ruby ${{ matrix.ruby_version }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby_version }}
+          bundler-cache: true
+          working-directory: support_desk
+
+      - name: Prepare database
+        working-directory: support_desk
+        # db:migrate:reset, not db:test:prepare: the latter loads schema.rb,
+        # whose SQLite-shaped defaults fail on PostgreSQL. The reset runs the
+        # real migrations, which is the path a host takes anyway.
+        run: bundle exec rake db:migrate:reset
+
+      - name: Run tests
+        working-directory: support_desk
+        run: bundle exec rake test
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-postgres-ruby-${{ matrix.ruby_version }}
+          path: support_desk/test/reports/
+          retention-days: 7
+
+  # The other two thirds of `rake ci`. They inspect source, not behaviour, so
+  # they run once instead of once per matrix leg.
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out support_desk
+        uses: actions/checkout@v4
+        with:
+          path: support_desk
+          persist-credentials: false
+
+      - name: Check out the chats kernel
+        uses: actions/checkout@v4
+        with:
+          repository: rameerez/chats
+          path: chats
+          persist-credentials: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: support_desk
+
+      - name: Lint
+        working-directory: support_desk
+        run: bundle exec rake rubocop
+
+      - name: Security scan
+        working-directory: support_desk
+        run: bundle exec rake brakeman
