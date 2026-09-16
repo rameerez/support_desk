@@ -41,14 +41,15 @@ task :brakeman do
   sh "bundle exec brakeman --no-pager --quiet --force-scan ."
 end
 
-desc "Everything a pull request has to pass: tests, linter, security scan"
 # Clear SimpleCov's merged resultset first. It merges results across runs, so
 # a stale one from an earlier single-file run drags the total under the
 # coverage floor and fails the gate for a regression that does not exist.
+desc "Delete the merged coverage resultset so the next run starts clean"
 task :clear_coverage do
   rm_rf "coverage"
 end
 
+desc "Everything a pull request has to pass: tests, linter, security scan"
 task ci: %i[clear_coverage test rubocop brakeman]
 
 task default: :test
