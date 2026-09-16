@@ -42,7 +42,7 @@ Gem::Specification.new do |spec|
   # never a forced dependency.
   spec.add_dependency "activerecord", ">= 7.2.0", "< 9.0"
   spec.add_dependency "activesupport", ">= 7.2.0", "< 9.0"
-  spec.add_dependency "chats", "~> 0.2"
+  spec.add_dependency "chats", ">= 0.2.1", "< 0.3"
   spec.add_dependency "globalid", "~> 1.0"
   spec.add_dependency "railties", ">= 7.2.0", "< 9.0"
 end

@@ -429,13 +429,19 @@ end
 
 Pass `key:` from anywhere that runs more than once (a `to_prepare` block, an engine initializer) and re-registering replaces that subscriber instead of stacking a copy on every reload.
 
-Keep notification titles generic — `ticket.notification_title` is — and put the detail in the body. A lock screen shouldn't spell out what somebody's support case is about.
+Keep push titles and bodies generic — `ticket.notification_title` is safe for previews.
+`ticket.notification_body` contains case details for an authenticated feed, not a lock screen.
 
 ## Compatibility
 
 Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`).
 
-PostgreSQL and SQLite additionally hold the two cardinality rules — one open ticket about one thing, one open assignment per ticket — as **partial unique indexes**, so a race loses at the database and not merely at the model. MySQL has no partial indexes, so there those two rules are model-only; that is why the suite's own matrix is SQLite and PostgreSQL.
+PostgreSQL and SQLite enforce unique new-case creation and one open assignment per ticket
+with **partial unique indexes**. New submissions reuse an existing open case. Reopening
+historical cases is deliberately exempt from new-case deduplication: if a newer case
+already exists, both histories remain open and support is notified of the reply. No
+conversation is silently merged, closed or discarded. MySQL has no partial indexes,
+so these guarantees are model-only there; the suite's matrix is SQLite and PostgreSQL.
 
 ## Testing
 

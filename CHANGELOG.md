@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - Unreleased
+
+### Fixed
+
+- Opening a case and its first message is atomic; rejected uploads render validation errors with the draft preserved.
+- Reopening historical cases preserves both conversations when a newer case already exists; new submissions still reuse an open case.
+- Assignment authorizes its actor, and assignment, hand-off, release and reply policy check current state under the row lock.
+- Delayed message registration derives whose turn it is from both clocks and cannot reopen a case closed after the message.
+- Reading an authorized console transcript marks the desk's read horizon through the last displayed message.
+- Topics resolve within their ticket's desk; wizard routing and response promises honor nondefault desks.
+- The requester upload form uses multipart encoding, and its send budget is shared with chats.
+- Requires chats 0.2.1, including authors who need no messaging capabilities.
+
 ## [0.1.0] - 2026-09-16
 
 First release: the whole core of a support desk, on top of `chats` 0.2.
