@@ -42,6 +42,13 @@ task :brakeman do
 end
 
 desc "Everything a pull request has to pass: tests, linter, security scan"
-task ci: %i[test rubocop brakeman]
+# Clear SimpleCov's merged resultset first. It merges results across runs, so
+# a stale one from an earlier single-file run drags the total under the
+# coverage floor and fails the gate for a regression that does not exist.
+task :clear_coverage do
+  rm_rf "coverage"
+end
+
+task ci: %i[clear_coverage test rubocop brakeman]
 
 task default: :test
