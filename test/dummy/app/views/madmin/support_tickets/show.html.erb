@@ -3,6 +3,14 @@
     those helpers resolve against a HOST's routes as well as the engine's. %>
 <%= turbo_stream_from @ticket, :console %>
 
+<%# A host layout renders flashes; this one has no layout, so the console
+    screens render them here. Without it nothing ever READS the flash, and
+    an unread flash is never swept — a refusal from one request would still
+    be sitting there during the next. %>
+<% %i[notice alert].each do |kind| %>
+  <% if flash[kind] %><p id="flash-<%= kind %>"><%= flash[kind] %></p><% end %>
+<% end %>
+
 <h1><%= @ticket.label %></h1>
 
 <p id="reference"><%= @ticket.reference %></p>

@@ -16,6 +16,13 @@ AllCops:
     # The dummy host app mirrors GENERATED code (its migration is a copy of
     # the install template) — don't lint it against the gem's own style.
     - test/dummy/db/**/*
+    # Generator scratch output. `rake ci` runs the tests before rubocop, so
+    # leaving this in would make the set of linted files depend on whether a
+    # generator test had run — a gate that inspects 109 files on a clean
+    # checkout and 111 after a suite is a gate nobody can reproduce. The
+    # generated console is still linted for real: test/dummy's controller is
+    # a verbatim rendering of the same template, and a test keeps them equal.
+    - test/tmp/**/*
     # Appraisal-generated Gemfiles.
     - gemfiles/*
 
