@@ -756,8 +756,31 @@ module SupportDesk
     # Who held this ticket, in order.
     def assignment_history = assignments.chronological
 
-    # Exactly the buttons a console should render for +agent+, filtered by
+    # Exactly the verbs +agent+ may use on this case right now, filtered by
     # policy, status and duty.
+    #
+    # == This is authorization, not decoration
+    #
+    # It reads like a list of buttons and it is one, but `SupportDesk
+    # ::Console` also REFUSES any verb this method doesn't return — a
+    # console that renders one set of affordances and accepts a wider one
+    # has a UI that lies, and two agents working the same queue hit that
+    # every day: the second presses a button the first already made
+    # impossible. So treat this as a security boundary:
+    #
+    # * Narrowing it takes a verb away from every console, silently. The
+    #   button disappears AND the endpoint starts refusing.
+    # * Widening it hands one out. Nothing else re-checks; the transitions
+    #   raise for their own reasons, but "may this agent press this" is
+    #   answered here and nowhere else.
+    # * It must agree with `may_reply?` and with what the transitions
+    #   actually allow. Where they disagree, an agent sees a button that
+    #   only ever errors, or no button for something they may do.
+    #
+    # `test/console/console_offered_actions_test.rb` writes the expected set
+    # down state by state and checks it twice — against this method, and
+    # against what the console accepts over HTTP — so a change here fails a
+    # test instead of quietly moving the boundary.
     def actions_for(agent)
       return [] unless agent.respond_to?(:support_agent?) && agent.support_agent?
       # Off duty is a real answer: the console can still show the case, and
