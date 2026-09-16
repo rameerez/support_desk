@@ -273,6 +273,9 @@ flagship.note!("Third wrong-building drop for this courier this week. Flagged to
 flagship.reply!("I can see the drop pin was 80m off. Refunding in full, and tonight's order is on us.",
                 by: omar)
 flagship.hand_off!(to: nadia, note: "You own the Casa Lupita relationship — can you close the loop?", by: omar)
+# A second note, from the agent who was handed the case: it lands in the
+# timeline and nowhere else, which is the difference the note shot is about.
+flagship.note!("Picked this up from Omar. Calling Casa Lupita this afternoon.", by: nadia)
 age!(flagship, opened_at: now - 95.minutes, waiting_since: now - 70.minutes)
 
 MAYA_ID = maya.id
@@ -333,6 +336,35 @@ JS
 def settle(session)
   session.execute_script(SETTLE)
   sleep 0.4
+end
+
+# Scroll until the card +selector+ lives in starts exactly at the top edge of
+# the frame, and say so if it couldn't. A cell that opens on a sliced bubble
+# or a sliver of the card above it reads as a bad crop rather than a chosen
+# frame, which is the one thing nine identical frames can't carry.
+#
+# The page is padded first because the last card on a page cannot be scrolled
+# to the top without somewhere left to scroll to; the padding is page
+# background, below the fold, and never appears in a shot.
+def flush_to!(session, selector)
+  top = session.evaluate_script(<<~JS)
+    (function () {
+      // A real element, not padding on <body>: the console's body is a flex
+      // container with height 100%, and its bottom padding does not grow the
+      // document's scrollable height there.
+      const spacer = document.createElement("div");
+      spacer.style.cssText = "height:900px;flex:0 0 900px";
+      document.body.appendChild(spacer);
+
+      const card = document.querySelector(#{selector.to_json}).closest("section, details");
+      if (!card) return null;
+      window.scrollTo(0, Math.round(card.getBoundingClientRect().top + window.scrollY));
+      return Math.round(card.getBoundingClientRect().top);
+    })();
+  JS
+
+  raise "nothing to frame for #{selector}" if top.nil?
+  raise "#{selector} sits #{top}px from the top edge, not flush" unless top.zero?
 end
 
 FileUtils.mkdir_p(OUT)
@@ -398,27 +430,26 @@ settle(session)
 shoot!(cdp, "07-case")
 
 # --- 8. The internal note composer -------------------------------------------
+#
+# Narrow, like the hand-off shot below: the console stacks below 640px, and a
+# card that spans the frame is the only way either of these two lands FLUSH on
+# the top edge. In the two-column layout the columns are different heights, so
+# every scroll position slices whichever card the other column is in the
+# middle of — which in a grid of identical frames reads as a careless crop.
 
+emulate!(cdp, *PHONE)
 session.visit "/admin/support/#{FLAGSHIP_ID}?compose=note"
 session.assert_selector "textarea[name=body]"
-session.execute_script("window.scrollTo(0, 260)")
+flush_to!(session, "textarea[name=body]")
 settle(session)
 shoot!(cdp, "08-note")
 
 # --- 9. Hand-off and assignment history --------------------------------------
-#
-# Narrow on purpose: the same console stacks below 640px, which gives the
-# holder panel and the timeline the full width this shot is about — and shows
-# that the queue an agent works from a phone is the queue.
 
-emulate!(cdp, *PHONE)
 session.visit "/admin/support/#{FLAGSHIP_ID}"
 session.assert_selector "details summary"
-session.execute_script(<<~JS)
-  document.querySelectorAll("details").forEach((el) => (el.open = true));
-  const timeline = document.querySelector("aside details");
-  if (timeline) window.scrollTo(0, timeline.getBoundingClientRect().top + window.scrollY - 10);
-JS
+session.execute_script('document.querySelectorAll("details").forEach((el) => (el.open = true));')
+flush_to!(session, "aside details")
 settle(session)
 shoot!(cdp, "09-handoff")
 
