@@ -64,6 +64,10 @@ module SupportDesk
         say "\n  Locales: es and en ship with the gem. To translate your topic labels,"
         say "  add support_desk.topics.<path>.label keys to your own locale files."
 
+        say "\n  The requester's screens render with bundled styles. To restyle them,"
+        say "  'rails g support_desk:views' copies them into your app, where they"
+        say "  shadow the gem's copies (delete yours and the default comes back)."
+
         say "\n  Email (0.2): when the channel lands, route inbound mail with"
         say "  # app/mailboxes/application_mailbox.rb"
         say "  #   routing(/^support@/i => :support_desk)"
