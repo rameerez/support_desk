@@ -22,8 +22,13 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       # The adaptive machinery the whole gem ecosystem standardizes on.
       assert_match(/primary_key_type, foreign_key_type = primary_and_foreign_key_types/, migration)
       assert_match(/config\.options\[config\.orm\]\[:primary_key_type\]/, migration)
-      assert_match(/return :jsonb if connection\.adapter_name\.downcase\.include\?\("postgresql"\)/, migration)
-      assert_match(/return nil if connection\.adapter_name\.downcase\.include\?\("mysql"\)/, migration)
+      # By prefix, not `include?("postgresql")`: PostGIS answers "PostGIS".
+      assert_match(%r{return :jsonb if connection\.adapter_name\.match\?\(/\\Apostg/i\)}, migration)
+    # Both MySQL spellings: Trilogy is MySQL under a different ADAPTER_NAME,
+    # and a pattern that misses it hands that host a JSON default MySQL
+    # rejects and a partial index it cannot create.
+    assert_match(%r{return nil if connection\.adapter_name\.match\?\(/mysql\|trilogy/i\)}, migration)
+    assert_match(%r{!connection\.adapter_name\.match\?\(/mysql\|trilogy/i\)}, migration)
 
       # Polymorphic references carry the adaptive FK type.
       assert_match(/t\.references :requester, polymorphic: true, null: false, type: foreign_key_type/, migration)
@@ -35,7 +40,7 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       # MySQL) — NOT on PostgreSQL alone, which would leave the default
       # SQLite install enforcing nothing.
       assert_match(/if partial_indexes\?/, migration)
-      assert_match(/!connection\.adapter_name\.match\?\(\/mysql\/i\)/, migration)
+      assert_match(%r{!connection\.adapter_name\.match\?\(/mysql\|trilogy/i\)}, migration)
       assert_match(/unique: true, where: "status <> 'closed'"/, migration)
       assert_match(/unique: true, where: "released_at IS NULL"/, migration)
       assert_no_match(/if postgres\?/, migration)

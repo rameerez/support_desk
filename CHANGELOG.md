@@ -109,6 +109,11 @@ First release: the whole core of a support desk, on top of `chats` 0.2.
 
 ### Notes
 
+- **`jsonb` on PostGIS.** The install migration decides jsonb-or-json by
+  adapter name, and activerecord-postgis-adapter answers `"PostGIS"`, not
+  `"PostgreSQL"` — the first cut matched the full word and silently gave
+  PostGIS hosts plain `json` columns. Caught by the CarHey integration before
+  the gem shipped; the template now matches the prefix (`/\Apostg/i`).
 - `SupportDesk::OffDuty` is NOT part of 0.1.0. Duty is a seam this release
   only asks about (`agent.on_duty?` decides who is notified and what
   `actions_for` offers); nothing in it assigns work, so nothing can
