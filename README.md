@@ -272,7 +272,27 @@ end
 ```
 
 That adds member `reply take assign hand_off release close reopen note
-change_topic` and collection `next`. Then:
+change_topic` and collection `next`. It has to sit inside a `resources`
+block, since that is what those routes hang off.
+
+The concern is seeded into every route set by a small prepend on Rails'
+routing mapper, because routing concerns live in a Hash built per `draw`
+and there is no registry a gem can add to. If you would rather not have
+that, register it yourself and the patch stays out of your way:
+
+```ruby
+Rails.application.routes.draw do
+  SupportDesk::ConsoleRoutes.register(self)
+
+  namespace :madmin do
+    resources :support_tickets, only: %i[index show], concerns: :support_console
+  end
+end
+```
+
+Either way, a concern you define yourself under the same name wins.
+
+Then:
 
 ```ruby
 class Madmin::SupportTicketsController < Madmin::ApplicationController
@@ -348,16 +368,20 @@ Add the badge to your admin nav:
 <%= render "madmin/support_tickets/nav_badge", agent: current_user %>
 ```
 
-### Layer 4 — no admin framework at all
+#### No admin framework at all? Mount it instead
 
 ```ruby
 mount SupportDesk::ConsoleEngine => "/admin/support"
 ```
 
-Layer 2 with the views already filled in. It takes its layout and
-authentication from `config.console_parent_controller`, the way the
-requester engine takes `config.parent_controller`. Mounting it grants
-nothing: the agent check and `authorize_console` still run.
+The same Layer 3 views, already wired — nothing to generate and nothing to
+route. It takes its layout and authentication from
+`config.console_parent_controller`, the way the requester engine takes
+`config.parent_controller`. Mounting it grants nothing: the agent check and
+`authorize_console` still run.
+
+Generate when you have an admin to put this inside and want the files;
+mount when you don't. They render the same templates either way.
 
 ## The wizard
 
