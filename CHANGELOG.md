@@ -43,6 +43,28 @@ First release: the whole core of a support desk, on top of `chats` 0.2.
   machine as a PORO, so the views are replaceable and a native app or an API
   can drive the same steps. Subjects travel as signed GlobalIDs and are
   re-checked against `supportable_by?` anyway.
+- **A requester-facing engine you just mount.** `mount SupportDesk::Engine
+  => "/support"` and the user side is done: their list of cases (open ones
+  as chats rows, closed ones folded away), the three wizard frames at one
+  URL, and a stable `/support/tickets/:id` that redirects into the
+  conversation. Every step is a real URL, so the back gesture, a bookmark
+  and a cold-boot deep link all work; `data-turbo-action="advance"` is what
+  lets them also re-render in place. Limits (`max_open_tickets`,
+  `open_rate_limit`) render a wall with the cases they already have listed
+  on it, never a 500.
+- **`link_to_support(about:, text:, **html)` and `support_unread_badge`.**
+  The door renders nothing for a record that is not supportable or not
+  theirs, so it is safe in shared partials, and leads to the conversation
+  they already have rather than opening a second one.
+- **Two rows on chats’ own screens**, through its view slots: the
+  "¿Necesitas ayuda? Escríbenos" door above the inbox for somebody who has
+  never written (`config.inbox_entry`), and a way out of a case closed on a
+  desk configured `closed_tickets: :locked`.
+- **`SupportDesk.native_path_rules(mount:, title:)`** — the Hotwire Native
+  path-configuration rules for both surfaces, as pushed screens.
+- **`config.authenticate_method`** so the engine runs the host’s own
+  authentication filter, and `rails g support_desk:views` to eject every
+  requester-facing template.
 - **Queues and presenters**
  — `Queue#counts` in one grouped query, a badge
   cached 30s per agent, `ContextCard`, `Summary`, `Timeline` and
