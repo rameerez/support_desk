@@ -7,6 +7,8 @@
         has Turbo loaded, so the system tests need this to be testing
         anything at all. %>
     <%= javascript_importmap_tags %>
+    <%# Where engine stylesheets land (support_desk_styles, and any host's own). %>
+    <%= yield :head %>
   </head>
   <body>
     <%= yield %>

@@ -214,4 +214,90 @@ class WizardFlowTest < ActionDispatch::IntegrationTest
 
     assert_equal @alice, SupportDesk::Ticket.last.events.first.actor
   end
+  # --- What a refused submit must not cost --------------------------------------
+
+  test "a refused submit hands back every word they typed" do
+    long = "Llevo tres semanas esperando.\nEl pedido salió el día 4.\nNecesito una respuesta."
+
+    post "/messages/support/tickets", params: { topic: "billing", message: long }
+
+    assert_response :unprocessable_entity
+    post "/messages/support/tickets", params: { topic: "order", subject: token_for(@order), message: "" }
+
+    assert_response :unprocessable_entity
+    assert_select "textarea[name=message]", text: ""
+
+    # And the real case: a valid step, an empty message, the text kept.
+    post "/messages/support/tickets", params: { topic: "other", message: "   " }
+
+    assert_select ".support-desk-error"
+  end
+
+  test "the typed message survives the composer re-rendering under it" do
+    long = "Cinco párrafos de contexto"
+    post "/messages/support/tickets", params: { topic: "order", subject: token_for(@order), message: long,
+                                                files: [] }
+    # Opened fine; now force a re-render with the same text by hitting the cap.
+    SupportDesk.config.max_open_tickets = 1
+
+    post "/messages/support/tickets", params: { topic: "other", message: long }
+
+    assert_response :too_many_requests
+    assert_select "#support_desk_kept_message", text: long
+  end
+
+  test "the prefill only fills what nobody has typed over" do
+    SupportDesk.config.topics do
+      topic :order, about: "Order", prefill: ->(order) { "About #{order.support_label}: " }
+      other
+    end
+
+    post "/messages/support/tickets", params: { topic: "order", subject: token_for(@order), message: "" }
+
+    assert_select "textarea[name=message]", text: "About Order SO1: "
+  end
+
+  # --- The clock on the form ------------------------------------------------------
+
+  test "a slow writer is not logged out of their own form" do
+    get "/messages/support/new?about=#{token_for(@order)}"
+
+    token = css_select("input[name=subject]").first["value"]
+
+    travel 2.hours do
+      assert_difference -> { SupportDesk::Ticket.count }, 1 do
+        post "/messages/support/tickets", params: { topic: "order", subject: token, message: "Tardé un rato" }
+      end
+    end
+  end
+
+  test "a form token does expire, on its own clock" do
+    get "/messages/support/new?about=#{token_for(@order)}"
+    token = css_select("input[name=subject]").first["value"]
+
+    travel SupportDesk::Wizard::FORM_TOKEN_TTL + 1.minute do
+      post "/messages/support/tickets", params: { topic: "order", subject: token, message: "Demasiado tarde" }
+
+      assert_response :not_found
+    end
+  end
+
+  test "the send button disables itself, so a double tap is one message" do
+    get "/messages/support/new?topic=other"
+
+    assert_select "input[type=submit][data-turbo-submits-with=?]", I18n.t("support_desk.wizard.sending")
+  end
+  test "a required picker with nothing in it still offers the way out" do
+    SupportDesk.config.topics do
+      topic :order, about: "Order", subject: :required
+      other
+    end
+    login_as create_user(name: "Orderless", onboarded: true)
+
+    get "/messages/support/new?topic=order"
+
+    assert_select ".support-desk-empty"
+    assert_select "a[href=?]", "/messages/support/new?topic=other",
+                  text: I18n.t("support_desk.wizard.write_anyway")
+  end
 end

@@ -33,7 +33,7 @@ module SupportDesk
       return if requester.nil?
       return if about && !support_subject_available?(about, requester)
 
-      ticket = about && SupportDesk::Ticket.not_closed.about(about).find_by(requester: requester)
+      ticket = about && open_support_ticket_about(about, requester)
       if ticket
         link_to text || t("support_desk.doors.existing"), support_thread_path(ticket), **html_options
       else
@@ -56,10 +56,16 @@ module SupportDesk
 
     # --- What the bundled views render with -----------------------------------
 
-    # The gem's bundled stylesheet. The support screens also render chats'
-    # rows, so a view that includes this one includes `chats_styles` too.
+    # The gem's bundled stylesheet, into the host layout's <head> — where a
+    # stylesheet belongs, where `data-turbo-track` means something, and where
+    # it loads before the page paints instead of after.
+    #
+    # Requires `<%= yield :head %>` in the host layout (every Rails app
+    # generated this decade has one; add it if yours doesn't). Rendering a
+    # <link> mid-body instead would be invalid markup, an inert turbo-track
+    # attribute, and a flash of unstyled support screen.
     def support_desk_styles
-      stylesheet_link_tag "support_desk", "data-turbo-track": "reload"
+      content_for(:head) { stylesheet_link_tag "support_desk", "data-turbo-track": "reload" }
     end
 
     # "Normalmente respondemos en menos de 24 h" for a desk, or nil when the
@@ -139,6 +145,22 @@ module SupportDesk
       method_name = SupportDesk.config.current_requester_method
       requester = respond_to?(method_name) ? send(method_name) : nil
       requester if requester.respond_to?(:ask_support!)
+    end
+
+    # The requester's open cases, keyed by what they are about, loaded ONCE
+    # per request however many doors the page draws. A list screen with a
+    # door on every card (CarHey's trip cards) would otherwise pay a query
+    # per card, which is the kind of N+1 that only shows up in production.
+    #
+    # Memoised on the view instance, which is the render's own scope — the
+    # same place chats caches its slot lookups.
+    def open_support_ticket_about(record, requester)
+      @support_open_tickets ||= SupportDesk::Ticket.not_closed
+                                                   .where(requester: requester)
+                                                   .where.not(subject_id: nil)
+                                                   .index_by { |t| [ t.subject_type, t.subject_id.to_s ] }
+
+      @support_open_tickets[[ record.class.polymorphic_name, record.id.to_s ]]
     end
 
     # Supportable, and theirs to ask about.

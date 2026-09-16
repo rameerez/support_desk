@@ -32,8 +32,15 @@ class WizardNavigationTest < ActiveSupport::TestCase
   end
 
   test "back from the composer is the picker, when there was one" do
-    assert_equal({ topic: "order" }, wizard(about: @order).back)
+    assert_equal({ topic: "order" }, wizard(topic: "order", about: @order).back)
     assert_equal({ topic: "order" }, wizard(topic: "order", no_subject: "1").back)
+  end
+
+  test "a door deep link has no back, because the step before it was not ours" do
+    # They came from a host page with `link_to_support about: @order`. A back
+    # link into a picker they never saw would be a place they have never been.
+    assert_nil wizard(about: @order).back
+    assert_nil wizard(subject: SupportDesk::Wizard.sign_subject(@order)).back
   end
 
   test "back from a free-form composer is the topic tree, because there was no picker" do
@@ -234,5 +241,94 @@ class WizardNavigationTest < ActiveSupport::TestCase
     assert_equal ticket, w.open_ticket_about(@order)
     assert_nil w.open_ticket_about(other)
     assert_nil w.open_ticket_about(nil)
+  end
+  # --- The desk a topic hands its subtree to ---------------------------------------
+
+  test "a topic that names another desk files the ticket there" do
+    SupportDesk.config.desk(:billing) { |desk| desk.name = "Facturación" }
+    SupportDesk.config.topics do
+      topic :invoice, desk: :billing
+      other
+    end
+    w = wizard(topic: "invoice")
+
+    assert_equal "billing", w.target_desk.key
+    assert_equal "default", w.desk.key, "the tree still comes from the requester's own desk"
+
+    ticket = w.open!("Una factura")
+
+    assert_equal "billing", ticket.desk.key
+  end
+
+  test "a topic that names no desk leaves the ticket where the requester writes" do
+    w = wizard(topic: "other")
+
+    assert_equal w.desk, w.target_desk
+    assert_equal "default", w.open!("Una duda").desk.key
+  end
+
+  test "the existing case is looked for on the desk the ticket would land on" do
+    SupportDesk.config.desk(:billing)
+    SupportDesk.config.topics do
+      topic :invoice, desk: :billing
+      other
+    end
+    first = wizard(topic: "invoice").open!("Una factura")
+
+    assert_equal first, wizard(topic: "invoice").existing_ticket
+  end
+
+  test "a topic naming a desk nobody configured falls back rather than losing the ticket" do
+    SupportDesk.config.topics do
+      topic :invoice, desk: :nowhere
+      other
+    end
+    w = wizard(topic: "invoice")
+
+    assert_equal w.desk, w.target_desk
+    assert_equal "default", w.open!("Una factura").desk.key
+  end
+
+  # --- Token lifetimes --------------------------------------------------------------
+
+  test "the composer's own token outlives a long sit at the keyboard" do
+    state = wizard(about: @order).state_params
+
+    travel 2.hours do
+      assert_equal @order, SupportDesk::Wizard.new(@alice, state).subject
+    end
+  end
+
+  test "a door's token is short-lived, because links get pasted places" do
+    token = SupportDesk::Wizard.sign_subject(@order)
+
+    travel SupportDesk::Wizard::SUBJECT_TOKEN_TTL + 1.minute do
+      assert_nil SupportDesk::Wizard.find_signed_subject(token)
+    end
+  end
+
+  test "the composer's token expires too, just not on the door's clock" do
+    state = wizard(about: @order).state_params
+
+    travel SupportDesk::Wizard::FORM_TOKEN_TTL + 1.minute do
+      assert_nil SupportDesk::Wizard.new(@alice, state).subject
+    end
+  end
+
+  # --- The way out of a dead end ------------------------------------------------------
+
+  test "free_form_exit is the declared exit, and only when this requester may use it" do
+    assert_equal "other", wizard.free_form_exit.path
+
+    SupportDesk.config.topics do
+      topic :order, about: "Order"
+      other only: ->(_requester) { false }
+    end
+
+    assert_nil wizard.free_form_exit
+
+    SupportDesk.config.topics { topic :safety, subject: :none }
+
+    assert_nil wizard.free_form_exit, "an undeclared subject-less leaf is not an exit"
   end
 end

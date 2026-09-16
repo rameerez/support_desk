@@ -18,9 +18,10 @@ module SupportDesk
     # Their cases: open ones as rows, closed ones folded away, and the door
     # to open another.
     def index
-      tickets = current_requester.support_tickets.includes(:desk, conversation: :last_message)
+      tickets = current_requester.support_tickets.includes(:desk, :subject, conversation: { last_message: :sender })
       @open_tickets = tickets.not_closed.recent_activity_first.to_a
       @closed_tickets = tickets.closed.newest_first.limit(CLOSED_TICKETS_SHOWN).to_a
+      @closed_count = tickets.closed.count
       @unread_counts = unread_counts_for(@open_tickets + @closed_tickets)
     end
 
@@ -31,9 +32,11 @@ module SupportDesk
     end
 
     # Open the case and hand the requester straight to the conversation.
-    # Idempotent by construction: two taps on "Enviar" land in the same
-    # ticket, because `Ticket.open!` treats a unique-index collision as "you
-    # already opened this one".
+    #
+    # Two submits land in the same TICKET, because `Ticket.open!` treats a
+    # unique-index collision as "you already opened this one" — but they
+    # post two opening messages into it, so the form also disables its own
+    # button for the length of the submit (`turbo_submits_with`).
     def create
       if message.blank? && files.empty?
         @error = t("support_desk.wizard.message_required")
@@ -98,7 +101,7 @@ module SupportDesk
     def render_limit_wall(error)
       @limit_reason = error.is_a?(SupportDesk::TooManyOpenTickets) ? "too_many_open" : "too_fast"
       @open_tickets = current_requester.support_tickets.not_closed
-                                       .includes(:desk, conversation: :last_message)
+                                       .includes(:desk, :subject, conversation: { last_message: :sender })
                                        .recent_activity_first.to_a
       @unread_counts = unread_counts_for(@open_tickets)
       render :rate_limited, status: :too_many_requests

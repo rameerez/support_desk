@@ -125,6 +125,88 @@ class TicketsAuthorizationTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  # --- Topic visibility is authorization, not decoration -------------------------
+  #
+  # `only:` and `retired:` decide what a requester may FILE UNDER, not just
+  # what the picker draws. Typing the path, or pointing at a record whose own
+  # topic is hidden, must both come back refused — otherwise a topic carrying
+  # `priority:` or `route_to:` is a privilege anybody can claim.
+
+  test "a topic hidden by only: cannot be walked into by typing its path" do
+    login_as create_user(name: "Fresh", onboarded: false)
+
+    get "/messages/support/new?topic=account"
+
+    assert_response :success
+    # The topic step, not the composer: nothing to write into.
+    assert_select "textarea[name=message]", count: 0
+    assert_select ".support-desk-choice__label", text: "Account", count: 0
+  end
+
+  test "posting under a topic hidden by only: opens nothing" do
+    login_as create_user(name: "Fresh", onboarded: false)
+
+    assert_no_difference -> { SupportDesk::Ticket.count } do
+      post "/messages/support/tickets", params: { topic: "account", message: "Déjame entrar" }
+    end
+
+    assert_response :unprocessable_entity
+  end
+
+  test "a retired topic opens nothing either" do
+    SupportDesk.config.topics do
+      topic :order, about: "Order", retired: true
+      other
+    end
+    login_as @alice
+
+    get "/messages/support/new?topic=order"
+
+    assert_select "textarea[name=message]", count: 0
+
+    assert_no_difference -> { SupportDesk::Ticket.count } do
+      post "/messages/support/tickets", params: { topic: "order", message: "Sobre un pedido viejo" }
+    end
+
+    assert_response :unprocessable_entity
+  end
+
+  test "a hidden topic's priority cannot be claimed by naming it" do
+    SupportDesk.config.topics do
+      topic :safety, priority: :urgent, only: ->(requester) { requester.admin? }
+      other
+    end
+    login_as @alice # not an admin
+
+    assert_no_difference -> { SupportDesk::Ticket.count } do
+      post "/messages/support/tickets", params: { topic: "safety", message: "Es urgente" }
+    end
+
+    assert_response :unprocessable_entity
+
+    # And the honest route still files at the normal priority.
+    post "/messages/support/tickets", params: { topic: "other", message: "Una duda" }
+
+    assert_equal 0, SupportDesk::Ticket.last.priority
+  end
+
+  test "a subject whose own topic is hidden does not smuggle the requester in" do
+    SupportDesk.config.topics do
+      topic :order, about: "Order", priority: :urgent, only: ->(_requester) { false }
+      other
+    end
+    login_as @alice
+
+    get "/messages/support/new?about=#{token_for(@order)}"
+
+    assert_response :success
+    assert_select "textarea[name=message]", count: 0
+
+    assert_no_difference -> { SupportDesk::Ticket.count } do
+      post "/messages/support/tickets", params: { topic: "order", subject: token_for(@order), message: "…" }
+    end
+  end
+
   test "a requester who isn't the configured requester class is a configuration error, named as one" do
     SupportDesk.config.current_requester_method = :current_order
     login_as @alice

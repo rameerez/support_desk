@@ -70,6 +70,8 @@ es:
       back: "Atrás"
       back_to_list: "Ver tus conversaciones"
       send: "Enviar"
+      sending: "Enviando"
+      write_anyway: "Escríbenos de todos modos"
       message_required: "Escríbenos unas líneas para que podamos ayudarte."
       nothing_to_pick: "No encontramos nada sobre lo que abrir esta conversación."
       no_topics: "Ahora mismo no se pueden abrir conversaciones nuevas."

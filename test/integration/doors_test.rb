@@ -80,4 +80,17 @@ class DoorsTest < ActionDispatch::IntegrationTest
 
     assert_select "#badge .chats-badge", count: 0
   end
+  test "many doors on one page cost one query, not one each" do
+    orders = 5.times.map { |i| create_order(user: @alice, number: "SO#{i}") }
+    ticket_for(@alice, about: orders.first)
+    login_as @alice
+    get "/doors/#{orders.first.id}"
+
+    one_door = count_queries { get "/doors/#{orders.first.id}" }
+    # The page draws three doors over the same record; a list screen in a
+    # host draws one per card. Either way the lookup happens once.
+    door_lookups = one_door.grep(/support_desk_tickets.*subject_id/m)
+
+    assert_equal 1, door_lookups.size, "each door ran its own lookup:\n#{one_door.join("\n")}"
+  end
 end

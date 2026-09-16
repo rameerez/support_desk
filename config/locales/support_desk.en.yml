@@ -65,6 +65,8 @@ en:
       back: "Back"
       back_to_list: "See your conversations"
       send: "Send"
+      sending: "Sending"
+      write_anyway: "Write to us anyway"
       message_required: "Write us a few lines so we can help."
       nothing_to_pick: "We couldn't find anything to open this conversation about."
       no_topics: "New conversations can't be opened right now."

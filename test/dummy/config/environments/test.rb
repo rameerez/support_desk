@@ -16,6 +16,13 @@
 Rails.application.configure do
   config.enable_reloading = false
 
+  # Eager loading is what the suite wants (autoload problems become boot
+  # failures), but it also HIDES the bug where an engine constant is never
+  # referenced and its on_load hooks never fire. One test boots a second
+  # process with this off to prove the engine works the way a development
+  # host runs it — see test/engine_autoload_test.rb.
+  config.eager_load = ENV["SUPPORT_DESK_EAGER_LOAD"] != "false"
+
   if ENV["VERBOSE_TEST_LOG"].present?
     config.log_level = :debug
   else

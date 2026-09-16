@@ -218,11 +218,16 @@ door in its place (`config.inbox_entry = :always | :when_tickets | :never`) —
 a support entry that only exists once you already have a ticket is
 undiscoverable.
 
-Hotwire Native hosts merge the engine's path rules into their own:
+Hotwire Native hosts merge the engine's path rules into their own, AFTER any
+rule that could swallow them:
 
 ```ruby
-rules: [ *SupportDesk.native_path_rules, *my_own_rules ]
+rules: [ *my_own_rules, *SupportDesk.native_path_rules ]
 ```
+
+Order matters and the later rule wins: a host whose chats thread rule is
+`^/messages/[^/]+$` already matches `/messages/support`, so rules placed
+first would lose to it.
 
 Both surfaces are pushed screens, never modals: every wizard step is a real
 URL, so the back gesture and cold-boot deep links work.
@@ -230,8 +235,10 @@ URL, so the back gesture and cold-boot deep links work.
 ### Restyling
 
 The views ship with a small bundled stylesheet and semantic classes (the list
-reuses chats' own row classes, because a case *is* a conversation). To make
-them yours:
+reuses chats' own row classes, because a case *is* a conversation). The
+stylesheet goes into your layout's `<head>`, so that layout needs a
+`<%= yield :head %>` — every Rails app generated this decade has one. To make
+the screens yours:
 
 ```bash
 rails generate support_desk:views

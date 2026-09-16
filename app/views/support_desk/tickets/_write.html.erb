@@ -27,7 +27,10 @@
       <%= hidden_field_tag name, value %>
     <% end %>
 
-    <%= text_area_tag :message, wizard.prefill,
+    <%# What they typed wins over the prefill: this template also renders the
+        422 after a refused submit, and losing five paragraphs to a validation
+        message is the rudest thing a form can do. %>
+    <%= text_area_tag :message, params[:message].presence || wizard.prefill,
                       rows: 6,
                       class: "support-desk-form__input",
                       placeholder: wizard.placeholder,
@@ -44,6 +47,10 @@
       <p class="support-desk-form__promise"><%= wizard.promise %></p>
     <% end %>
 
-    <%= submit_tag t("support_desk.wizard.send"), class: "support-desk-button" %>
+    <%# turbo_submits_with disables the button for the length of the submit.
+        `Ticket.open!` makes the TICKET idempotent, but two taps still post
+        two identical opening messages into it. %>
+    <%= submit_tag t("support_desk.wizard.send"), class: "support-desk-button",
+                   data: { turbo_submits_with: t("support_desk.wizard.sending") } %>
   <% end %>
 <% end %>

@@ -98,4 +98,41 @@ class SupportWizardTest < ApplicationSystemTestCase
     assert_selector "textarea[name=message]"
     assert_equal 0, SupportDesk::Ticket.count
   end
+  # The gem exists for this one screen; it has to fit on the phone it is
+  # written on. Measured, not eyeballed: a composer sized content-box runs
+  # past the right edge in any host without a global border-box reset, and
+  # the whole page scrolls sideways.
+  test "no support screen scrolls sideways on a phone" do
+    ticket_for(@alice, about: @order)
+    # A record with no case open about it, or the composer step renders the
+    # "you already have a conversation" notice instead of the composer — and
+    # the composer is the screen this test exists to measure.
+    fresh = create_order(user: @alice, number: "SO-FRESH")
+
+    [ "/messages/support",
+      "/messages/support/new",
+      "/messages/support/new?topic=order",
+      "/messages/support/new?about=#{SupportDesk::Wizard.sign_subject(fresh)}" ].each do |path|
+      visit path
+
+      overflow = page.evaluate_script(<<~JS)
+        (function () {
+          const doc = document.documentElement;
+          const widest = Array.from(document.querySelectorAll("body *"))
+            .map((el) => Math.round(el.getBoundingClientRect().right))
+            .reduce((a, b) => Math.max(a, b), 0);
+          return { scrollWidth: doc.scrollWidth, clientWidth: doc.clientWidth, widest: widest };
+        })();
+      JS
+
+      assert_operator overflow["scrollWidth"], :<=, overflow["clientWidth"],
+                      "#{path} scrolls sideways at #{overflow["clientWidth"]}px"
+      assert_operator overflow["widest"], :<=, overflow["clientWidth"],
+                      "#{path} has an element reaching #{overflow["widest"]}px inside #{overflow["clientWidth"]}px"
+    end
+
+    # The composer is the widest thing the gem draws, so prove it was on
+    # screen for at least one of those measurements.
+    assert_selector "textarea[name=message]"
+  end
 end

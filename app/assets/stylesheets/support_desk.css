@@ -25,6 +25,7 @@
  */
 
 :root {
+  --support-desk-card-bg: #ffffff;
   --support-desk-accent: var(--chats-accent, #111827);
   --support-desk-accent-contrast: var(--chats-accent-contrast, #ffffff);
   --support-desk-surface: var(--chats-surface, #f3f4f6);
@@ -35,6 +36,24 @@
 }
 
 .support-desk { color: var(--support-desk-text); }
+
+/*
+ * Every box this file draws sizes itself INCLUDING its padding and border.
+ * A gem cannot assume the host ships a `* { box-sizing: border-box }` reset,
+ * and without it `width: 100%` plus 1rem of padding is 2rem wider than the
+ * screen — which on the composer, the one screen this gem exists for, means
+ * the page scrolls sideways on a phone.
+ */
+.support-desk,
+.support-desk *,
+.support-desk *::before,
+.support-desk *::after,
+.support-desk-door,
+.support-desk-choice,
+.support-desk-card,
+.support-desk-notice,
+.support-desk-form__input,
+.support-desk-button { box-sizing: border-box; }
 
 /* --- Doors ------------------------------------------------------------------ */
 
@@ -76,6 +95,11 @@
   color: var(--support-desk-text-muted);
 }
 .support-desk-closed[open] .support-desk-closed__summary { color: var(--support-desk-text); }
+.support-desk-closed__capped {
+  margin: 0 1.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--support-desk-text-muted);
+}
 
 /* --- Wizard ----------------------------------------------------------------- */
 
@@ -113,7 +137,7 @@
   padding: 0.9rem 1rem;
   border: 1px solid var(--support-desk-border);
   border-radius: var(--support-desk-radius);
-  background: #fff;
+  background: var(--support-desk-card-bg);
   text-decoration: none;
   color: inherit;
 }
@@ -149,7 +173,7 @@
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  background: #fff;
+  background: var(--support-desk-card-bg);
   color: var(--support-desk-text-muted);
 }
 
@@ -161,7 +185,7 @@
   padding: 0.85rem 1rem;
   border: 1px solid var(--support-desk-border);
   border-radius: var(--support-desk-radius);
-  background: #fff;
+  background: var(--support-desk-card-bg);
   font: inherit;
   resize: vertical;
 }
@@ -196,3 +220,23 @@
 }
 .support-desk-notice__title { margin: 0 1.25rem 0.75rem; font-weight: 600; }
 .support-desk-notice .support-desk-notice__title { margin: 0; }
+
+/* --- Dark ------------------------------------------------------------------- *
+ *
+ * Only the surfaces this file hardcodes: everything else already comes from
+ * a token that chats' own dark handling moves. A host with its own dark
+ * palette overrides the variables and never reaches this block.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --support-desk-surface: var(--chats-surface, #1f2430);
+    --support-desk-border: var(--chats-border, rgba(255, 255, 255, 0.12));
+    --support-desk-text: var(--chats-text, #f3f4f6);
+    --support-desk-text-muted: var(--chats-text-muted, #9ca3af);
+    --support-desk-card-bg: #111827;
+  }
+
+  /* The cards, the composer and the status pills all read --card-bg above;
+     only the error notice carries colours of its own. */
+  .support-desk-error { background: #3f1d1d; color: #fecaca; }
+}

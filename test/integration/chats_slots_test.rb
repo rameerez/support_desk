@@ -75,13 +75,18 @@ class ChatsSlotsTest < ActionDispatch::IntegrationTest
   end
 
   test "a conversation that is not a case keeps chats' own locked composer" do
-    other = create_user(name: "Bob")
-    conversation = @alice.chat_with(other)
-    conversation.subject = nil
+    # A LOCKED conversation about something that isn't a ticket: the slot
+    # replaces the composer's body for every locked conversation in the host,
+    # so it has to render chats' own notice and nothing of ours.
+    bob = create_user(name: "Bob")
+    order = create_order(user: @alice, number: "CLOSED", state: "closed")
+    conversation = @alice.chat_with(bob, about: order)
 
     get "/messages/#{conversation.id}"
 
     assert_response :success
+    assert_select ".chats-composer--locked"
+    assert_select ".chats-composer__locked-notice", text: "This order is closed."
     assert_select ".support-desk-button", count: 0
   end
 

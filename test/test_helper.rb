@@ -99,6 +99,21 @@ module ActiveSupport
       Invoice.create!(user: user, number: number, **attributes)
     end
 
+    # How many real queries a block runs. Schema reads and the transaction
+    # bookkeeping don't count — they are the harness, not the page.
+    def count_queries
+      queries = []
+      counter = lambda do |_name, _start, _finish, _id, payload|
+        next if payload[:name].to_s.in?(%w[SCHEMA TRANSACTION])
+        next if payload[:sql].to_s.start_with?("SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK")
+
+        queries << payload[:sql]
+      end
+
+      ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
+      queries
+    end
+
     # A ticket with its opening message already folded in — the canonical
     # fixture.
     #

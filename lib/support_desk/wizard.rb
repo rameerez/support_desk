@@ -28,15 +28,26 @@ module SupportDesk
     # What a subject token is signed for, so a token minted for one purpose
     # can't be replayed at another.
     SUBJECT_PURPOSE = :support_subject
+
+    # How long a token minted for a DOOR stays good. Doors sit on long-lived
+    # pages and get copied into chats and bug reports, so the link somebody
+    # pastes tomorrow should not still open a wizard.
     SUBJECT_TOKEN_TTL = 1.hour
+
+    # How long the token the COMPOSER round-trips stays good. It is a hidden
+    # field in a form somebody is typing into, not a link: at one hour, a
+    # person who writes a long message, takes a call and hits Enviar loses
+    # the lot to a 404. Nothing is trusted on the strength of the token
+    # anyway — `supportable_by?` is re-checked on the way in.
+    FORM_TOKEN_TTL = 24.hours
 
     STEPS = %i[topic subject compose].freeze
 
     attr_reader :requester, :params
 
     # Sign a record for a door or a picker link.
-    def self.sign_subject(record)
-      record.to_sgid(expires_in: SUBJECT_TOKEN_TTL, for: SUBJECT_PURPOSE).to_s
+    def self.sign_subject(record, expires_in: SUBJECT_TOKEN_TTL)
+      record.to_sgid(expires_in: expires_in, for: SUBJECT_PURPOSE).to_s
     end
 
     # Resolve a signed subject token, or nil when it's missing, expired,
@@ -64,6 +75,20 @@ module SupportDesk
 
     # That desk's topic tree.
     def tree = desk.config.topics
+
+    # Where the ticket will actually be FILED. A topic may hand its subtree
+    # to another desk (`topic :invoice, desk: :billing`), and a ticket
+    # belongs where its topic says, not where the requester's class does.
+    #
+    # Deliberately not folded into #desk: the tree is read from the
+    # requester's desk, and a #desk that depended on the topic would ask the
+    # tree for the topic to find out which tree to ask.
+    def target_desk
+      key = topic&.desk_key
+      return desk if key.nil? || key == desk.key
+
+      SupportDesk.desk(key) || desk
+    end
 
     # Which step the requester is on, given what they've chosen so far.
     def step
@@ -111,6 +136,14 @@ module SupportDesk
     # them, and a `candidates:` proc that runs a query shouldn't run it twice.
     def candidates
       @candidates ||= Array(topic&.candidates_for(requester))
+    end
+
+    # The declared way out of the tree ("Otra cosa"), when this requester may
+    # use it — what a screen with nothing else to offer links to, so a dead
+    # end always has a door in it.
+    def free_form_exit
+      exit_leaf = tree.free_form_leaf
+      exit_leaf if exit_leaf&.visible_for?(requester)
     end
 
     # The state this step carries into the next request — what the composer
@@ -177,7 +210,7 @@ module SupportDesk
       key = Ticket.cardinality_key_for(requester: requester, subject: subject, topic: topic)
       return nil if key.start_with?("free:")
 
-      Ticket.not_closed.find_by(requester: requester, desk: desk, cardinality_key: key)
+      Ticket.not_closed.find_by(requester: requester, desk: target_desk, cardinality_key: key)
     end
 
     # Which records in +choices+ the requester already has an open case
@@ -188,7 +221,7 @@ module SupportDesk
 
       @open_tickets_by_subject =
         if subject_step?
-          Ticket.not_closed.where(requester: requester, desk: desk)
+          Ticket.not_closed.where(requester: requester, desk: target_desk)
                 .where.not(subject_id: nil)
                 .index_by { |ticket| [ ticket.subject_type, ticket.subject_id.to_s ] }
         else
@@ -221,7 +254,12 @@ module SupportDesk
       case step
       when :topic then topic && level_above(topic)
       when :subject then level_above(topic)
-      when :compose then picker_step? ? { topic: topic.path } : level_above(topic)
+      when :compose
+        # A door dropped them straight here from a host page. "Back" to a
+        # picker they never saw would be a place they have never been.
+        return nil if subject_named? && params[:topic].blank?
+
+        picker_step? ? { topic: topic.path } : level_above(topic)
       end
     end
 
@@ -232,13 +270,21 @@ module SupportDesk
         raise InvalidTransition, "the wizard is still on the #{step} step — pick one before submitting"
       end
 
-      requester.ask_support!(message, about: subject, topic: topic.path, files: files)
+      # `ask_support!` files under the REQUESTER's desk, which is right
+      # until a topic says otherwise; then the redirect is spelled out.
+      if target_desk == desk
+        requester.ask_support!(message, about: subject, topic: topic.path, files: files)
+      else
+        Ticket.open!(requester: requester, message: message, about: subject, topic: topic.path,
+                     files: files, desk: target_desk,
+                     requester_role: requester.class.support_desk_requester_options[:as])
+      end
     end
 
     # A signed token for the currently chosen subject, to round-trip through
-    # the next form.
+    # the next form — on the form's clock, not a door's (see FORM_TOKEN_TTL).
     def subject_token
-      subject && self.class.sign_subject(subject)
+      subject && self.class.sign_subject(subject, expires_in: FORM_TOKEN_TTL)
     end
 
     # Where the requester has got to, in one line.
@@ -320,8 +366,7 @@ module SupportDesk
       # the screen says so.
       return nil unless tree.visible_for(requester).empty?
 
-      exit_leaf = tree.free_form_leaf
-      exit_leaf if exit_leaf&.visible_for?(requester)
+      free_form_exit
     end
 
     def resolve_subject

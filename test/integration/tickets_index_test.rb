@@ -90,4 +90,45 @@ class TicketsIndexTest < ActionDispatch::IntegrationTest
 
     assert_select ".support-desk-door__hint", text: /1 day|24 hours/
   end
+  test "the list costs the same number of queries however many cases there are" do
+    # The caps are the desk's business, not this test's.
+    SupportDesk.config.open_rate_limit = nil
+    SupportDesk.config.max_open_tickets = nil
+    3.times { |i| ticket_for(@alice, about: create_order(user: @alice, number: "SO#{i}")) }
+    login_as @alice
+    get "/messages/support"
+    three = count_queries { get "/messages/support" }
+
+    5.times { |i| ticket_for(@alice, about: create_order(user: @alice, number: "MORE#{i}")) }
+    eight = count_queries { get "/messages/support" }
+
+    # `Ticket#label` reads the polymorphic subject, so without it preloaded
+    # this grows by one query per row.
+    assert_equal three.size, eight.size, "the index is N+1:\n#{(eight - three).join("\n")}"
+  end
+
+  test "the closed section counts what is really there, and says what it is showing" do
+    SupportDesk.config.open_rate_limit = nil
+    SupportDesk.config.max_open_tickets = nil
+    ticket_for(@alice, about: @order)
+    25.times do |i|
+      ticket = ticket_for(@alice, about: create_order(user: @alice, number: "OLD#{i}"))
+      ticket.close!(by: @lucia)
+    end
+    login_as @alice
+    get "/messages/support"
+
+    assert_select ".support-desk-closed__summary", text: /25/
+    assert_select "details.support-desk-closed .chats-row",
+                  count: SupportDesk::TicketsController::CLOSED_TICKETS_SHOWN
+    assert_select ".support-desk-closed__capped"
+  end
+
+  test "the stylesheet goes in the head, where a stylesheet belongs" do
+    login_as @alice
+    get "/messages/support"
+
+    assert_select "head link[href*=?]", "support_desk"
+    assert_select "body link[href*=?]", "support_desk", count: 0
+  end
 end

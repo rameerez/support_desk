@@ -35,8 +35,13 @@
   <% if @closed_tickets.any? %>
     <%= tag.details class: "support-desk-closed", open: @open_tickets.empty? do %>
       <summary class="support-desk-closed__summary">
-        <%= t("support_desk.tickets.closed_section", count: @closed_tickets.size) %>
+        <%= t("support_desk.tickets.closed_section", count: @closed_count) %>
       </summary>
+      <% if @closed_count > @closed_tickets.size %>
+        <p class="support-desk-closed__capped">
+          <%= t("support_desk.tickets.closed_capped", count: @closed_tickets.size) %>
+        </p>
+      <% end %>
       <ul class="chats-inbox__list">
         <%= render partial: "support_desk/tickets/ticket_row",
                    collection: @closed_tickets,

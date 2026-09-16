@@ -38,6 +38,14 @@
       here means the topic insists — and the honest answer is that there is
       nothing to pick. %>
   <p class="support-desk-empty"><%= t("support_desk.wizard.nothing_to_pick") %></p>
+
+  <%# A dead end whose only link is "Back" is a dead end. The declared way
+      out takes them to a composer they can actually write in. %>
+  <% if (exit_leaf = wizard.free_form_exit) %>
+    <%= link_to t("support_desk.wizard.write_anyway"),
+                support_desk_routes.new_ticket_path(topic: exit_leaf.path),
+                class: "support-desk-choice support-desk-choice--none" %>
+  <% end %>
 <% end %>
 
 <% if wizard.subject_optional? %>
