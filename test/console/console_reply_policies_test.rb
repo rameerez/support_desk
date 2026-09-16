@@ -129,7 +129,6 @@ class ConsoleReplyPoliciesTest < ActionDispatch::IntegrationTest
       assert_equal "Answer sent.", flash[:notice]
     end
 
-    register_last_message(@ticket)
     assert_awaiting_requester @ticket
   end
 

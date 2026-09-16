@@ -44,7 +44,6 @@ class ConsoleActionsTest < ActionDispatch::IntegrationTest
 
   test "the default tab is mine once nothing is awaiting" do
     @ticket.reply!("Lo miramos", by: @lucia)
-    register_last_message(@ticket)
 
     get "/madmin/support_tickets"
 
@@ -87,7 +86,6 @@ class ConsoleActionsTest < ActionDispatch::IntegrationTest
     assert_equal "Answer sent.", flash[:notice]
     assert_assigned_to @ticket, @lucia
 
-    register_last_message(@ticket)
     assert_awaiting_requester @ticket
     assert_equal "Lo estamos revisando", @ticket.conversation.messages.order(:created_at).last.body
   end

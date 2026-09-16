@@ -54,13 +54,28 @@ module SupportDesk
     # `show` is the host's, but it still wants the ticket found safely.
     MEMBER_ACTIONS = ([ :show ] + TRANSITIONS).freeze
 
+    # Which entry in `ticket.actions_for(agent)` each verb needs. The
+    # console renders exactly what that method returns, so it must accept
+    # exactly that too: a POST the UI would never have offered is refused,
+    # whether it came from a stale tab, a second agent who got there first,
+    # or somebody with curl.
+    #
+    # `take` and `assign` are both :assign — taking a case is assigning it
+    # to yourself, which is the model's vocabulary, not two permissions.
+    OFFERED_AS = {
+      reply: :reply, take: :assign, assign: :assign, hand_off: :hand_off, release: :release,
+      close: :close, reopen: :reopen, note: :note, change_topic: :change_topic
+    }.freeze
+
     # Everything a transition raises because of WHO asked, WHEN, or from WHAT
     # state. All of it is a flash; anything else is a bug and still 500s.
     RESCUED_ERRORS = [
       SupportDesk::NotAllowed,
       SupportDesk::NotTheAssignee,
       SupportDesk::NotAnAgent,
-      SupportDesk::OffDuty,
+      # Locked is a subclass of InvalidTransition and so already covered.
+      # It is listed anyway: a reader shouldn't have to know the hierarchy
+      # to know that replying into a locked case is a flash.
       SupportDesk::InvalidTransition,
       SupportDesk::Locked,
       SupportDesk::UnknownTopic,
@@ -75,7 +90,6 @@ module SupportDesk
       "SupportDesk::NotAllowed" => "not_allowed",
       "SupportDesk::NotTheAssignee" => "not_the_assignee",
       "SupportDesk::NotAnAgent" => "not_an_agent",
-      "SupportDesk::OffDuty" => "off_duty",
       "SupportDesk::InvalidTransition" => "invalid_transition",
       "SupportDesk::Locked" => "locked",
       "SupportDesk::UnknownTopic" => "unknown_topic"
@@ -83,9 +97,11 @@ module SupportDesk
 
     included do
       before_action :require_support_agent!
+      before_action :require_visible_desk!
       before_action :set_support_current_actor
       before_action :set_support_ticket, only: MEMBER_ACTIONS
       before_action :authorize_support_console!
+      before_action :require_offered_action!, only: TRANSITIONS
 
       helper_method :current_agent, :support_desk_record, :support_queue, :support_transcript,
                     :console_ticket_path, :console_tickets_path, :console_file_path
@@ -240,12 +256,16 @@ module SupportDesk
         support_queue.awaiting.exists? ? :awaiting : :mine
       end
 
-      # The rows, with everything a row renders already loaded — including
-      # the last message and who wrote it, which is what makes the preview
-      # column cost nothing instead of a query per row.
+      # The rows, with everything a row renders already loaded.
+      #
+      # `:subject` is the one that is easy to forget and expensive to miss:
+      # every row prints `ticket.label`, which falls through to the
+      # subject's own `support_label`, so leaving it out is a SELECT per row
+      # that no test notices until somebody counts.
       def support_queue_tickets
         support_queue.scope(@scope)
-                     .includes(:requester, :assignee, :desk, conversation: { last_message: %i[sender author] })
+                     .includes(:requester, :assignee, :desk, :subject,
+                               conversation: { last_message: %i[sender author] })
                      .limit(support_tickets_per_page)
       end
 
@@ -295,6 +315,34 @@ module SupportDesk
       support_console_forbidden
     end
 
+    # Refuse a verb the console wouldn't have offered. Without this the UI
+    # and the endpoint can disagree — `actions_for` drops :reply on a closed
+    # case, but the model happily posts one, so the composer vanished while
+    # the POST behind it still flashed success.
+    def require_offered_action!
+      offered = @ticket.actions_for(current_agent)
+      return if offered.include?(OFFERED_AS.fetch(action_name.to_sym))
+
+      flash[:alert] = support_console_t("errors.#{unavailable_reason}", holder: support_console_holder)
+      respond_to_transition
+    end
+
+    # Why the button wasn't there, in the words that help most: the case is
+    # done, somebody else has it, or nobody does and this desk wants it
+    # taken first.
+    def unavailable_reason
+      return "closed_case" if @ticket.closed?
+      return "unavailable_action" unless %i[reply hand_off].include?(action_name.to_sym)
+      return "take_it_first" if @ticket.unassigned?
+
+      "held_by_somebody_else"
+    end
+
+    # Who has the case, for a refusal that names them.
+    def support_console_holder
+      @ticket&.assignee&.try(:support_agent_name) || support_console_t("assignment.nobody")
+    end
+
     # A 403 that says why, in the host's locale. Override for a prettier one.
     def support_console_forbidden
       render plain: support_console_t("errors.forbidden"), status: :forbidden
@@ -309,25 +357,50 @@ module SupportDesk
     # Tickets on the desks this agent may work. A ticket outside them is
     # `ActiveRecord::RecordNotFound` — a 404, which is the honest answer.
     def support_visible_tickets
-      SupportDesk::Ticket.where(desk: SupportDesk.config.desks_visible_to(current_agent))
+      SupportDesk::Ticket.where(desk: support_visible_desks)
     end
 
-    # The desk this console is working. `?desk=billing` when the host runs
-    # more than one and wants to switch between them.
+    # The desks this agent may work, asked once per request. EVERYTHING the
+    # console reaches for is scoped through this — the ticket, the queue,
+    # the tab counts, the badge and `next` — because scoping only the member
+    # actions leaves the index answering 200 with a reference, a requester's
+    # name and a preview on it.
+    def support_visible_desks
+      @support_visible_desks ||= SupportDesk.config.desks_visible_to(current_agent).to_a
+    end
+
+    # Nothing to work is not the same as "this case is none of your
+    # business": there is no case yet. A 403 says so, and it stops `?desk=`
+    # from being a way to ask about desks that were never on offer.
+    def require_visible_desk!
+      support_console_forbidden if support_visible_desks.empty?
+    end
+
+    # The desk this console is working. `?desk=billing` switches between
+    # them on a multi-desk host — but only among the ones this agent may
+    # see; a key outside that set quietly falls back to the first visible
+    # desk rather than confirming that it exists.
     def support_desk_record
-      @support_desk_record ||= SupportDesk.desk(params[:desk].presence || :default) || SupportDesk.desk
+      return @support_desk_record if defined?(@support_desk_record)
+
+      requested = params[:desk].presence&.to_sym
+      @support_desk_record =
+        (requested && support_visible_desks.detect { |desk| desk.key.to_sym == requested }) ||
+        support_visible_desks.first
     end
 
     def support_queue
       @support_queue ||= SupportDesk::Queue.for(current_agent, desk: support_desk_record)
     end
 
-    # The assign / hand-off target, resolved INSIDE this desk's pool — so an
-    # id from the wire can never name somebody who doesn't answer here.
+    # The assign / hand-off target, resolved inside the pool of the TICKET's
+    # desk — never the one `?desk=` names. Those are different desks the
+    # moment a host has two, and reading the parameter let a billing agent
+    # be assigned to a case on another desk entirely.
     def support_console_agent(id = params[:agent_id])
       return nil if id.blank?
 
-      support_desk_record.agents.detect { |agent| agent.id.to_s == id.to_s }
+      @ticket.desk.agents.detect { |agent| agent.id.to_s == id.to_s }
     end
 
     def support_agent_name(agent)
@@ -383,12 +456,15 @@ module SupportDesk
       false
     end
 
-    # The domain's message carries the detail an agent needs ("held by
-    # Lucía"), so it is what we show — with an i18n line in front of it for
-    # the cases a host has translated.
+    # A translated sentence, never the exception's own text. The model
+    # raises in English on purpose — those messages are written for whoever
+    # is reading a stack trace — so passing one straight into a flash meant
+    # a Spanish desk read "doesn't hold ticket T-AB12CD". `holder` carries
+    # the one detail worth keeping, and the console knows it without having
+    # to parse the error.
     def support_console_error_message(error)
       key = ERROR_KEYS[error.class.name] || "generic"
-      support_console_t("errors.#{key}", detail: error.message)
+      support_console_t("errors.#{key}", detail: error.message, holder: support_console_holder)
     end
 
     def support_console_t(key, **interpolations)

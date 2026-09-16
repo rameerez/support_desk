@@ -39,7 +39,6 @@ class ConsoleEngineTest < ActionDispatch::IntegrationTest
 
   test "a row carries the requester, the status pill, the preview and the wait" do
     @ticket.reply!("Lo miramos", by: @lucia)
-    register_last_message(@ticket)
 
     get "/admin/support", params: { tab: "open" }
 

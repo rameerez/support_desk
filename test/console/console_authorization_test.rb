@@ -155,12 +155,24 @@ class ConsoleAuthorizationTest < ActionDispatch::IntegrationTest
 
   test "the engine scopes the same way" do
     billing = billing_ticket
-    SupportDesk.config.visible_desks_for = ->(_agent) { [] }
+    SupportDesk.config.visible_desks_for = ->(_agent) { [ :default ] }
     login_as @lucia
 
     get "/admin/support/#{billing.id}"
 
     assert_response :not_found
+  end
+
+  test "an agent with no desks at all is 403, which is a different answer" do
+    # Empty is not "that case is none of your business" — there is no case
+    # in the question yet. It means this console has nothing to show you.
+    billing_ticket
+    SupportDesk.config.visible_desks_for = ->(_agent) { [] }
+    login_as @lucia
+
+    get "/admin/support"
+
+    assert_response :forbidden
   end
 
   # --- Finding the agent ----------------------------------------------------------
