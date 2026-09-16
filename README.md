@@ -468,7 +468,7 @@ with_support_config(reply_policy: :assignee_only) { … }
 
 After checking out the repo, run `bundle install`, then `bundle exec rake ci`. The dummy app lives in `test/dummy` and mounts all three surfaces the way a real host does: the requester engine at `/messages/support`, `chats` at `/messages`, and the turnkey console at `/admin/support` — plus the same console again inside a host-owned `madmin` namespace, because "the console uses only the public API" is a claim that needs a second implementation to be worth anything.
 
-`chats` is the kernel this gem is a product on and the two are developed in lockstep, so the Gemfile points at a sibling checkout (`../chats`) until `chats` 0.2.0 is on rubygems.
+`chats` is the kernel this gem is a product on and the two are developed in lockstep, so the Gemfile points at a sibling checkout (`../chats`) whenever this gem needs a `chats` that is not on rubygems yet. It currently requires `chats` ~> 0.3 (the `verified:` messager option).
 
 ## Contributing
 

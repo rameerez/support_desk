@@ -42,7 +42,10 @@ Gem::Specification.new do |spec|
   # never a forced dependency.
   spec.add_dependency "activerecord", ">= 7.2.0", "< 9.0"
   spec.add_dependency "activesupport", ">= 7.2.0", "< 9.0"
-  spec.add_dependency "chats", "~> 0.2"
+  # ~> 0.3, not ~> 0.2: Desk declares `acts_as_messager verified: true`, a
+  # keyword chats 0.2.x does not accept, so a host resolving 0.2 would fail at
+  # class definition with ArgumentError long before `doctor` could explain it.
+  spec.add_dependency "chats", "~> 0.3"
   spec.add_dependency "globalid", "~> 1.0"
   spec.add_dependency "railties", ">= 7.2.0", "< 9.0"
 end

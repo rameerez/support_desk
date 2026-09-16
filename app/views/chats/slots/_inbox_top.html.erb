@@ -9,16 +9,22 @@
     Locals come from chats' inbox (viewer:, inbox:). Renders nothing under
     :when_tickets or :never, and nothing once there is a real row to show. %>
 <% if support_inbox_door?(viewer) %>
+  <% desk_key = viewer.class.try(:support_desk_key) || :default %>
   <%= support_desk_styles %>
   <ul class="chats-inbox__list support-desk-inbox-door">
     <li class="chats-row">
       <%= link_to support_desk_routes.root_path, class: "chats-row__link" do %>
-        <%= support_desk_avatar(viewer.class.try(:support_desk_key) || :default) %>
+        <%= support_desk_avatar(desk_key) %>
 
         <span class="chats-row__body">
           <span class="chats-row__top">
-            <span class="chats-row__title">
-              <%= SupportDesk.config.desk(viewer.class.try(:support_desk_key) || :default).name %>
+            <%# Same shape chats gives its own rows: the name ellipsizes, the
+                official-account badge beside it always shows. %>
+            <span class="chats-row__name">
+              <span class="chats-row__title">
+                <%= SupportDesk.config.desk(desk_key).name %>
+              </span>
+              <%= support_desk_badge(desk_key) %>
             </span>
           </span>
           <span class="chats-row__bottom">
