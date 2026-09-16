@@ -172,13 +172,17 @@ module SupportDesk
         enforce_rate_limit!(requester, desk)
         enforce_open_ticket_cap!(requester, desk)
 
-        ticket = insert_ticket!(
+        ticket, inserted = insert_ticket!(
           requester: requester, desk: desk, node: node, about: about, via: via,
           requester_role: requester_role, title: title, metadata: metadata, cardinality_key: cardinality
         )
+        ticket = post_opening_message(ticket, message, files)
 
-        post_opening_message(ticket, message, files)
-        SupportDesk.emit_after_commit(:ticket_opened, ticket)
+        # ONLY the request that actually inserted announces the ticket. Under
+        # the insert race the loser is holding somebody else's ticket, and a
+        # subscriber that pages every agent, or writes a row into a
+        # hash-chained audit log, must not do it twice for one case.
+        SupportDesk.emit_after_commit(:ticket_opened, ticket) if inserted
         ticket
       end
 
@@ -292,6 +296,12 @@ module SupportDesk
                            "#{limit[:within].inspect} (limit #{limit[:to]})"
       end
 
+      # The wall from 10 §Abuse. Checked before the insert and NOT under a
+      # lock, so it is advisory by design: two requests racing about two
+      # different things can both pass it and leave a requester one over.
+      # The alternative is locking the host's own requester row on every
+      # open, which trades a real contention risk for an imaginary
+      # correctness one — nobody is harmed by a sixth open ticket.
       def enforce_open_ticket_cap!(requester, desk)
         cap = desk.config.max_open_tickets
         return if cap.nil?
@@ -306,6 +316,10 @@ module SupportDesk
       # Create the ticket, its conversation and its `opened` event in one
       # transaction. A collision on the cardinality index means somebody
       # else opened the same ticket a millisecond ago — we hand back theirs.
+      #
+      # Returns [ticket, inserted?] so the caller can tell "I opened this"
+      # from "I found this": they are the same ticket, and a very different
+      # thing to announce.
       def insert_ticket!(requester:, desk:, node:, about:, via:, requester_role:, title:, metadata:,
                          cardinality_key:)
         attempts = 0
@@ -329,10 +343,10 @@ module SupportDesk
             [ ticket, opened ]
           end
           ticket.send(:publish_transition, opened, :opened, requester, nil)
-          ticket
+          [ ticket, true ]
         rescue ActiveRecord::RecordNotUnique
           existing = open_ticket_for(requester: requester, desk: desk, cardinality_key: cardinality_key)
-          return existing if existing
+          return [ existing, false ] if existing
           raise if attempts >= 2
 
           retry

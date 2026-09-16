@@ -228,7 +228,9 @@ Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUI
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/rameerez/support_desk. Run the suite with `bundle exec rake test` and the linter with `bundle exec rubocop`.
+Bug reports and pull requests are welcome on GitHub at https://github.com/rameerez/support_desk.
+
+`bundle exec rake ci` runs everything a pull request has to pass: the suite, the linter and the security scanner. Individually those are `rake test`, `rake rubocop` and `rake brakeman`. The suite runs against SQLite by default and against PostgreSQL or MySQL with `DATABASE_URL` set, and `bundle exec appraisal rake test` runs it across the supported Rails versions.
 
 ## License
 

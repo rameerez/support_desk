@@ -128,7 +128,7 @@ module SupportDesk
       # pre-check ran, so the INSERT is what has to catch it. Calling the
       # private inserter directly is exactly that state, with no stubs to
       # make it pass for the wrong reason.
-      loser = Ticket.send(
+      loser, inserted = Ticket.send(
         :insert_ticket!,
         requester: @alice, desk: SupportDesk.desk, node: SupportDesk.find_topic("order"), about: @order,
         via: :in_app, requester_role: nil, title: nil, metadata: {},
@@ -136,7 +136,50 @@ module SupportDesk
       )
 
       assert_equal winner.id, loser.id
+      assert_not inserted, "the loser found the ticket, it didn't open one"
       assert_equal 1, Ticket.where(requester: @alice, subject: @order).count
+    end
+
+    test "losing the insert race announces nothing" do
+      skip_unless_partial_indexes
+
+      opened = []
+      SupportDesk.on(:ticket_opened) { |ticket| opened << ticket.id }
+      winner = @alice.ask_support!("primera", about: @order)
+
+      # Blind only the PRE-CHECK, the way a row committed by another request
+      # a millisecond ago is invisible to it. The insert then collides, and
+      # the loser ends up holding the winner's ticket — which it must not
+      # announce: a host subscriber that pages every agent, or appends to a
+      # hash-chained audit log, would do it twice for one case.
+      original = Ticket.method(:open_ticket_for)
+      checks = 0
+      blind_once = lambda do |**arguments|
+        checks += 1
+        checks == 1 ? nil : original.call(**arguments)
+      end
+
+      loser = Ticket.stub(:open_ticket_for, blind_once) do
+        @alice.ask_support!("segunda", about: @order)
+      end
+
+      assert_equal winner.id, loser.id
+      assert_equal [ winner.id ], opened, "exactly one ticket_opened for one ticket"
+      assert_equal 1, Ticket.where(requester: @alice, subject: @order).count
+      assert_equal 1, winner.reload.events.of_kind(:opened).count
+      assert_equal [ "primera", "segunda" ], winner.messages.reload.map(&:body),
+                   "the second requester's words still land in the ticket they landed in"
+    end
+
+    test "the open-ticket cap is advisory, and the cardinality short-circuit comes first" do
+      SupportDesk.config.max_open_tickets = 1
+      SupportDesk.config.open_rate_limit = nil
+      first = @alice.ask_support!("primera", about: @order)
+
+      # Being handed back the ticket you already have can't trip a cap: you
+      # are not opening anything.
+      assert_equal first.id, @alice.ask_support!("otra vez", about: @order).id
+      assert_raises(TooManyOpenTickets) { @alice.ask_support!("y otra cosa", topic: :account) }
     end
 
     test "a deep link into a topic the requester may not use is refused" do

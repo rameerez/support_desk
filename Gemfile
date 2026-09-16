@@ -15,7 +15,10 @@ gem "rake", "~> 13.0"
 group :development do
   gem "appraisal"
 
-  # Code quality
+  # Code quality. Both are gates (see the Rakefile): `rake ci` runs the
+  # suite, the linter and the security scanner, which is what a PR has to
+  # pass.
+  gem "brakeman", "~> 8.0", require: false
   gem "rubocop-rails-omakase", require: false
 end
 

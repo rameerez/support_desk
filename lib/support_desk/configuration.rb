@@ -246,7 +246,9 @@ module SupportDesk
         @settings[:open_rate_limit] = hash
       end
 
-      # How many tickets one requester may have open at once. nil for no cap.
+      # How many tickets one requester may have open at once. nil for no
+      # cap. Advisory: checked before the insert, not under a lock, so a
+      # burst of concurrent opens can leave a requester one over.
       def max_open_tickets = read(:max_open_tickets)
 
       # Set it, validating on assignment (see the reader above).

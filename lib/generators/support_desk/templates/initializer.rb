@@ -113,7 +113,12 @@ SupportDesk.configure do |config|
   # config.reply_within = 24.hours
   # config.at_risk_after = 4.hours
   #
-  # Abuse limits, per requester.
+  # Abuse limits, per requester. Both are walls against one person
+  # hammering the button, and both are checked before the insert rather
+  # than under a lock — so two requests racing about two different things
+  # can leave somebody one ticket over the cap. That is deliberate: the
+  # alternative locks your own users table on every support ticket, and
+  # nobody is harmed by a sixth open case.
   #
   # config.open_rate_limit = { to: 5, within: 1.hour }
   # config.max_open_tickets = 5

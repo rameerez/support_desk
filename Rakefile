@@ -29,4 +29,19 @@ Rake::TestTask.new(:test) do |t|
   t.verbose = false
 end
 
+desc "Lint with rubocop-rails-omakase"
+task :rubocop do
+  sh "bundle exec rubocop"
+end
+
+# The engine has controllers and a generated console, so it gets scanned
+# like an app. `--force-scan` because a gem is not a Rails app root.
+desc "Scan for security problems with brakeman"
+task :brakeman do
+  sh "bundle exec brakeman --no-pager --quiet --force-scan ."
+end
+
+desc "Everything a pull request has to pass: tests, linter, security scan"
+task ci: %i[test rubocop brakeman]
+
 task default: :test
