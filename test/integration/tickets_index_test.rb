@@ -40,7 +40,6 @@ class TicketsIndexTest < ActionDispatch::IntegrationTest
   test "an answered case says so, and carries its unread badge" do
     ticket = ticket_for(@alice, about: @order)
     reply_as @lucia, ticket, "Lo estamos mirando"
-    register_last_message(ticket)
 
     login_as @alice
     get "/messages/support"

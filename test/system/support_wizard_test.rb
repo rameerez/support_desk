@@ -91,7 +91,10 @@ class SupportWizardTest < ApplicationSystemTestCase
     visit "/messages/support/new?topic=other"
     click_on "Send"
 
-    assert_text I18n.t("support_desk.wizard.message_required")
+    # By CSS rather than assert_text: the 422 replaces the whole document,
+    # and reading `page.text` across that swap can catch a node that no
+    # longer belongs to it.
+    assert_selector ".support-desk-error", text: I18n.t("support_desk.wizard.message_required")
     assert_selector "textarea[name=message]"
     assert_equal 0, SupportDesk::Ticket.count
   end

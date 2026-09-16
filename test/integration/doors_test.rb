@@ -65,7 +65,6 @@ class DoorsTest < ActionDispatch::IntegrationTest
   test "the unread badge counts what the desk has said and they haven't read" do
     ticket = ticket_for(@alice, about: @order)
     reply_as @lucia, ticket, "Lo estamos mirando"
-    register_last_message(ticket)
 
     login_as @alice
     get "/doors"

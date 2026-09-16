@@ -87,9 +87,11 @@ class EngineHelperTest < ActionView::TestCase
     assert_equal I18n.t("support_desk.tickets.state.awaiting_reply"), support_ticket_state(ticket)
 
     reply_as lucia, ticket, "Vamos a mirarlo"
-    register_last_message(ticket)
 
-    assert_equal I18n.t("support_desk.tickets.state.answered"), support_ticket_state(ticket)
+    # The clocks move under the subscriber's OWN copy of the row, so this
+    # one is stale until it is reloaded — the same reason the gem's
+    # assert_awaiting_* helpers reload.
+    assert_equal I18n.t("support_desk.tickets.state.answered"), support_ticket_state(ticket.reload)
 
     ticket.close!(by: lucia)
 
