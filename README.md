@@ -287,14 +287,23 @@ end
 they need. What the concern owns is the half that is easy to get wrong:
 
 - `current_agent` has to be an eligible agent, or it's a **403**.
-- Tickets are found through `config.visible_desks_for`, so a desk this agent
-  may not work is a plain **404** — never a 403 that confirms the case exists.
+- `config.visible_desks_for` scopes *everything*, not just the ticket: the
+  queue, the tab counts, the badge and `next` all read the same list, and
+  `?desk=` can only name a desk that is already on it. A case on a desk this
+  agent may not work is a plain **404** — never a 403 that confirms it
+  exists. An agent with no desks at all gets a **403**, because that is a
+  different sentence: there is no case in the question yet.
 - `config.authorize_console` is consulted before every action, `index`
-  included, for hosts with Pundit or CanCan.
+  included, for hosts with Pundit or CanCan. A hook that raises **denies**;
+  the exception goes to `Rails.error`, not to the screen it was guarding.
+- The console never accepts what it wouldn't offer. Every verb checks
+  `ticket.actions_for(agent)` first, so a POST from a stale tab — replying
+  to a case somebody closed while you were reading it — is refused with a
+  reason rather than half-applied.
 - Every refusal the domain can raise — a drop-in under `:assignee_only`, a
   hand-off by somebody who doesn't hold the ticket, a reply into a locked
-  case — becomes `flash[:alert]`. A console that 500s on a policy is a
-  console nobody trusts.
+  case — becomes a translated `flash[:alert]`. A console that 500s on a
+  policy is a console nobody trusts.
 - Each verb answers an HTML redirect or a Turbo Stream page refresh.
   Override `after_transition_path(ticket)` to land somewhere else.
 

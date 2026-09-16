@@ -77,12 +77,17 @@ First release: the whole core of a support desk, on top of `chats` 0.2.
   - `concerns: :support_console` in any route set draws member `reply`,
     `take`, `assign`, `hand_off`, `release`, `close`, `reopen`, `note` and
     `change_topic`, plus collection `next`.
-  - `SupportDesk::Console` finds the ticket inside
-    `config.visible_desks_for` (a desk you may not work is a **404**, not a
-    403), asks `config.authorize_console` before every action, sets
+  - `SupportDesk::Console` scopes everything it reaches through
+    `config.visible_desks_for` — the ticket, the queue, the tab counts, the
+    badge and `next`, with `?desk=` able to name only a desk already on that
+    list. A case on a desk you may not work is a **404**; no desks at all is
+    a **403**. It asks `config.authorize_console` before every action (a
+    hook that raises denies, and is reported through `Rails.error`), checks
+    `actions_for` so it never accepts a verb it wouldn't have offered, sets
     `SupportDesk::Current.actor`, and turns every domain refusal into a
-    flash — a policy never 500s. `SupportDesk::Console::Index` is the
-    optional `@queue` / `@scope` / `@tickets`.
+    translated flash — a policy never 500s.
+    `SupportDesk::Console::Index` is the optional `@queue` / `@scope` /
+    `@tickets`, preloading everything a row renders including the subject.
   - `rails g support_desk:console madmin` writes a host-owned controller, a
     madmin resource, and the view set: queue tabs, waiting chips coloured by
     `at_risk_after` / `reply_within`, context card, transcript, timeline,
