@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-09-16
+
+### Fixed
+- **0.1.1 shipped without the thing it was released for.** The gem published
+  to rubygems as 0.1.1 was built from a tree that predated the merge, so
+  `SupportDesk::Desk` never declared `verified: true` and no desk was ever
+  badged — while the release notes said it was. The repository was correct
+  the whole time; only the package was wrong, which is the worst shape for
+  this kind of mistake because nothing in git looks off.
+
+  `SupportDesk::Desk.chat_verified?` now returns true, and a test asserts it
+  against the loaded class rather than the source file, so a package built
+  from the wrong tree fails instead of shipping quietly.
+
 ## [0.1.1] - 2026-09-16
 
 ### Changed

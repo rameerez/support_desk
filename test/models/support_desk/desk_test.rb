@@ -86,5 +86,19 @@ module SupportDesk
       assert_not ticket.desk.destroy
       assert_predicate ticket.desk.errors[:base], :any?
     end
+
+  # The desk is an official account, asserted against the LOADED class.
+  #
+  # 0.1.1 shipped to rubygems built from a tree that predated the merge, so
+  # the published gem declared no `verified: true` and no desk was ever
+  # badged — while the release notes said it was. Every test passed, because
+  # they ran against the repository. This one would not have: it asks the
+  # class that is actually loaded, which in a packaged gem is the packaged
+  # file.
+  test "a desk is an official account in whatever tree is loaded" do
+    assert SupportDesk::Desk.chat_verified?,
+           "SupportDesk::Desk is not verified — if the repo source says it is, " \
+           "the loaded gem was built from a different tree"
+  end
   end
 end
