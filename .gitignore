@@ -10,6 +10,10 @@
 /test/tmp/
 /test/dummy/db/*.sqlite3
 /test/dummy/db/*.sqlite3-*
+# `rake db:migrate` dumps one, and it is SQLite-shaped — committing it would
+# hand the other two adapters a schema they can't load. The dummy migrates
+# from test/dummy/db/migrate, never from a dump.
+/test/dummy/db/schema.rb
 /test/dummy/log/
 /test/dummy/storage/
 /test/dummy/tmp/
