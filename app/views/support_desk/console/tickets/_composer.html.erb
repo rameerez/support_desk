@@ -34,7 +34,11 @@
       <% end %>
 
     <% elsif may_reply %>
-      <%= form_with url: console_ticket_path(ticket, :reply), method: :post do %>
+      <%# multipart is explicit because `form_with` only infers it from the
+          FORM BUILDER's file_field, and this is a file_field_tag — without
+          it the browser posts the filename as a plain String and the
+          attachment silently never happens. %>
+      <%= form_with url: console_ticket_path(ticket, :reply), method: :post, html: { multipart: true } do %>
         <%= text_area_tag :body, nil, rows: 3,
               placeholder: t("support_desk.console.composer.reply_placeholder"),
               class: "w-full rounded-md border border-slate-300 p-2 text-sm" %>
@@ -51,7 +55,16 @@
           because it is closed. Say which, and offer the way out rather than
           a box that would only 422. %>
       <p class="text-sm text-slate-500">
-        <%= ticket.closed? ? t("support_desk.console.composer.closed") : t("support_desk.console.composer.assignee_only", agent: ticket.assignee&.support_agent_name) %>
+        <% if ticket.closed? %>
+          <%= t("support_desk.console.composer.closed") %>
+        <% elsif ticket.assigned? %>
+          <%= t("support_desk.console.composer.assignee_only", agent: ticket.assignee.support_agent_name) %>
+        <% else %>
+          <%# Nobody holds it, so there is no name to print — saying "is
+              handling this case" with a blank in front of it is worse than
+              saying nothing. Name the way out instead. %>
+          <%= t("support_desk.console.errors.take_it_first") %>
+        <% end %>
       </p>
     <% end %>
   </div>

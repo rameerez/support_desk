@@ -481,10 +481,20 @@ module SupportDesk
 
     # Whether the host's policy allows +agent+ to do +action+ here. True when
     # no hook is configured — the console's own agent check still applies.
+    #
+    # A hook that RAISES denies rather than taking the screen down with it.
+    # This is the one place in the gem where swallowing an exception is the
+    # right call: an authorization check that blew up has not said yes, and
+    # a 500 on the page that was guarding something is both a worse answer
+    # and a louder hint that something is there. The error still reaches the
+    # host through `Rails.error`, so nobody has to notice it from a flash.
     def console_authorized?(agent, ticket, action)
       return true if authorize_console.nil?
 
       !!authorize_console.call(agent, ticket, action)
+    rescue StandardError => e
+      report_console_authorization_error(e, action)
+      false
     end
 
     # --- Desks ------------------------------------------------------------------
@@ -648,6 +658,18 @@ module SupportDesk
       end
 
       value
+    end
+
+    # The same reporting path the event dispatcher uses for a subscriber
+    # that raises: `Rails.error` when there is one, the log otherwise.
+    def report_console_authorization_error(error, action)
+      if defined?(Rails) && Rails.respond_to?(:error) && Rails.error
+        Rails.error.report(error, handled: true, source: "support_desk",
+                                  context: { hook: :authorize_console, action: action })
+      else
+        SupportDesk.logger&.error("[support_desk] authorize_console raised on #{action}: " \
+                                  "#{error.class}: #{error.message}")
+      end
     end
   end
 end

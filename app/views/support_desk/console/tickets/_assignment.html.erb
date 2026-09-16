@@ -21,7 +21,11 @@
     <% end %>
   </p>
 
-  <% agents = ticket.desk.on_duty_agents.reject { |agent| ticket.assigned_to?(agent) } %>
+<%# Everyone who could take it over, which is the desk's on-duty pool minus
+    two people: whoever already has it, and you. "Assign to myself" is what
+    Take is, and offering it twice in one panel is how a picker starts
+    lying about what it does. %>
+<% agents = ticket.desk.on_duty_agents.reject { |agent| agent == current_agent || ticket.assigned_to?(agent) } %>
 
   <div class="mt-3 space-y-3">
     <% if actions.include?(:assign) && !ticket.assigned_to?(current_agent) %>

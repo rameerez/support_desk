@@ -64,5 +64,11 @@ module Dummy
     config.action_mailer.default_url_options = { host: "example.com" }
 
     config.secret_key_base = "support_desk_dummy_secret_key_base_for_tests_only"
+
+    # Throw the test log away. A full run writes ~90 MB of SQL here, which
+    # nobody reads and which rotates into test.log.0 — the 100 MB file that
+    # got committed once already. Tests that care about a log message swap
+    # in a logger of their own.
+    config.logger = ActiveSupport::Logger.new(IO::NULL)
   end
 end
