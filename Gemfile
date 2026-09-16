@@ -5,9 +5,6 @@ source "https://rubygems.org"
 # Runtime dependencies are specified in support_desk.gemspec
 gemspec
 
-# The kernel gem, developed in lockstep with this one. Swap for the released
-# `gem "chats", "~> 0.2"` once 0.2.0 is on rubygems.
-gem "chats", path: "../chats"
 
 # Build & release tools
 gem "rake", "~> 13.0"
