@@ -410,6 +410,14 @@ module SupportDesk
     # this gem's idea of one (`:authenticate_user!` is Devise's, and chats'
     # default too).
     attr_accessor :authenticate_method
+    # ->(agent) { … } returning the desks this agent may work, or nil for
+    # "every desk". Read through #desks_visible_to.
+    attr_reader :visible_desks_for
+
+    # ->(agent, ticket, action) { true/false } — the console asks this before
+    # every action, for hosts with Pundit, CanCan or a policy object of their
+    # own. Read through #console_authorized?.
+    attr_reader :authorize_console
 
     # A fresh configuration: one `:default` desk, every setting at the
     # documented default.
@@ -420,6 +428,8 @@ module SupportDesk
       @current_requester_method = :current_user
       @current_agent_method = :current_user
       @authenticate_method = :authenticate_user!
+      @visible_desks_for = nil
+      @authorize_console = nil
 
       @desks = { default: DeskConfiguration.new(:default) }
       @warnings = []
@@ -435,6 +445,46 @@ module SupportDesk
 
     def console_parent_controller=(value)
       @console_parent_controller = ensure_class_name(value, "console_parent_controller")
+    end
+
+    # --- The console ------------------------------------------------------------
+
+    # Narrow what the console can reach:
+    #
+    #   config.visible_desks_for = ->(agent) { agent.billing? ? [ SupportDesk.desk(:billing) ] : Desk.all }
+    #
+    # A ticket on a desk an agent can't see is a 404 in the console, not a
+    # 403: an agent who may not work the billing desk shouldn't learn that a
+    # billing case exists.
+    def visible_desks_for=(value)
+      @visible_desks_for = value.nil? ? nil : ensure_callable(value, "visible_desks_for")
+    end
+
+    # The desks +agent+ may work, always as Desk records. The hook may hand
+    # back records, a relation, or plain desk keys — all three read the same
+    # way in an initializer, so all three are accepted here.
+    def desks_visible_to(agent)
+      return Desk.all if visible_desks_for.nil?
+
+      Array(visible_desks_for.call(agent)).filter_map do |desk|
+        desk.is_a?(Desk) ? desk : SupportDesk.desk(desk)
+      end
+    end
+
+    #   config.authorize_console = ->(agent, ticket, action) { AdminPolicy.new(agent).support?(action) }
+    #
+    # `ticket` is nil on collection actions (the index, "next"). Returning
+    # false is a 403.
+    def authorize_console=(value)
+      @authorize_console = value.nil? ? nil : ensure_callable(value, "authorize_console")
+    end
+
+    # Whether the host's policy allows +agent+ to do +action+ here. True when
+    # no hook is configured — the console's own agent check still applies.
+    def console_authorized?(agent, ticket, action)
+      return true if authorize_console.nil?
+
+      !!authorize_console.call(agent, ticket, action)
     end
 
     # --- Desks ------------------------------------------------------------------
@@ -590,6 +640,14 @@ module SupportDesk
       raise ConfigurationError, "#{name} can't be blank" if string.strip.empty?
 
       string
+    end
+
+    def ensure_callable(value, name)
+      unless value.respond_to?(:call)
+        raise ConfigurationError, "#{name} must respond to #call (a proc/lambda), got #{value.inspect}"
+      end
+
+      value
     end
   end
 end
