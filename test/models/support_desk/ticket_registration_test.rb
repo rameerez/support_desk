@@ -83,7 +83,7 @@ module SupportDesk
 
       @alice.message!(@ticket.conversation, "sigo con el problema")
 
-      assert_open @ticket
+      assert_ticket_open @ticket
       assert_equal 1, @ticket.reopen_count
       assert_awaiting_reply @ticket
       assert_ticket_event @ticket, :reopened
@@ -105,7 +105,7 @@ module SupportDesk
       @ticket.close!(by: @lucia)
 
       assert_raises(ActiveRecord::RecordInvalid) { @alice.message!(@ticket.conversation, "hola?") }
-      assert_closed @ticket
+      assert_ticket_closed @ticket
     end
 
     test "a reopened case goes back to whoever handled it" do
@@ -149,7 +149,7 @@ module SupportDesk
 
       @ticket.register!(reply)
 
-      assert_closed @ticket
+      assert_ticket_closed @ticket
       assert_equal 1, @ticket.reopen_count
       assert_equal 1, @ticket.events.of_kind(:reopened).count
     end
@@ -159,7 +159,7 @@ module SupportDesk
 
       @ticket.reply!("una última cosa", by: @lucia)
 
-      assert_closed @ticket
+      assert_ticket_closed @ticket
       assert_equal "none", @ticket.reload.awaiting
       assert_nil @ticket.waiting_since
       assert_not_includes Ticket.awaiting_requester, @ticket

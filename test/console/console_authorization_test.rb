@@ -31,7 +31,7 @@ class ConsoleAuthorizationTest < ActionDispatch::IntegrationTest
     post "/madmin/support_tickets/#{@ticket.id}/close"
 
     assert_response :forbidden
-    assert_open @ticket
+    assert_ticket_open @ticket
   end
 
   test "somebody who isn't an agent gets 403, with a reason" do
@@ -98,7 +98,7 @@ class ConsoleAuthorizationTest < ActionDispatch::IntegrationTest
     post "/madmin/support_tickets/#{@ticket.id}/close"
 
     assert_response :forbidden
-    assert_open @ticket
+    assert_ticket_open @ticket
   end
 
   test "the hook is consulted by the mounted engine too" do
@@ -136,7 +136,7 @@ class ConsoleAuthorizationTest < ActionDispatch::IntegrationTest
     post "/madmin/support_tickets/#{billing.id}/close"
 
     assert_response :not_found
-    assert_open billing
+    assert_ticket_open billing
   end
 
   test "visible_desks_for accepts desk records as readily as keys" do

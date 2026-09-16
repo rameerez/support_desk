@@ -2,9 +2,9 @@
 
 require "test_helper"
 
-# SupportDesk::TestHelper is public API: a host's acceptance tests and the
+# SupportDesk::TestHelpers is public API: a host's acceptance tests and the
 # gem's own suite should describe behaviour the same way.
-class TestHelperApiTest < ActiveSupport::TestCase
+class TestHelpersApiTest < ActiveSupport::TestCase
   setup do
     @alice = create_user(name: "Alice")
     @lucia = create_agent(name: "Lucía")
@@ -39,7 +39,7 @@ class TestHelperApiTest < ActiveSupport::TestCase
   test "the state assertions read like the states" do
     ticket = open_support_ticket(for: @alice)
 
-    assert_open ticket
+    assert_ticket_open ticket
     assert_unassigned ticket
 
     ticket.assign!(to: @lucia, by: @lucia)
@@ -48,7 +48,7 @@ class TestHelperApiTest < ActiveSupport::TestCase
 
     ticket.close!(by: @lucia)
 
-    assert_closed ticket
+    assert_ticket_closed ticket
   end
 
   test "assert_ticket_event matches the actors in the payload" do

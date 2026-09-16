@@ -444,7 +444,7 @@ bundle exec appraisal rails-8.1 rake test
 **Testing your own app** — the gem ships the helpers its own suite uses, so your acceptance tests and ours describe the same behaviour:
 
 ```ruby
-include SupportDesk::TestHelper
+include SupportDesk::TestHelpers
 
 ticket = open_support_ticket(for: users(:alice), about: orders(:one), message: "…")
 reply_as users(:lucia), ticket, "…"

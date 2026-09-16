@@ -164,12 +164,12 @@ class ConsoleActionsTest < ActionDispatch::IntegrationTest
     post "/madmin/support_tickets/#{@ticket.id}/close"
 
     assert_equal "Case closed.", flash[:notice]
-    assert_closed @ticket
+    assert_ticket_closed @ticket
 
     post "/madmin/support_tickets/#{@ticket.id}/reopen"
 
     assert_equal "Case reopened.", flash[:notice]
-    assert_open @ticket
+    assert_ticket_open @ticket
   end
 
   test "note writes to the timeline and never to the conversation" do

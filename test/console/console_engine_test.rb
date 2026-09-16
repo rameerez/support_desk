@@ -193,7 +193,7 @@ class ConsoleEngineTest < ActionDispatch::IntegrationTest
     assert_equal %w[opened assigned note topic_changed handed_off released assigned closed reopened],
                  @ticket.events.chronological.map(&:kind),
                  "every verb should have written exactly one event, in the order they were pressed"
-    assert_open @ticket
+    assert_ticket_open @ticket
   end
 
   test "next walks the queue from the engine's own collection route" do

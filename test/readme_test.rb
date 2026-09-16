@@ -21,7 +21,7 @@ class ReadmeTest < ActiveSupport::TestCase
     ticket.reply!("We're on it", by: lucia)
     ticket.close!(by: lucia)
 
-    assert_closed ticket
+    assert_ticket_closed ticket
     assert_equal lucia, ticket.assignee
     assert_equal %w[opened assigned closed], ticket.events.chronological.map(&:kind)
     # Alice's question, "Lucía is taking care of your request", and the answer.

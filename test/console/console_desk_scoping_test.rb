@@ -119,7 +119,7 @@ class ConsoleDeskScopingTest < ActionDispatch::IntegrationTest
     post "/madmin/support_tickets/#{@billing.id}/close"
 
     assert_response :not_found
-    assert_open @billing
+    assert_ticket_open @billing
   end
 
   # --- The assign target ---------------------------------------------------------------

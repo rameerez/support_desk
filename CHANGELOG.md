@@ -103,7 +103,7 @@ First release: the whole core of a support desk, on top of `chats` 0.2.
   `config.authorize_console` are the console's two hooks into it.
 - **`SupportDesk.doctor`** — configuration, the chats seams, and the data
   invariants, with an `ok?` for CI.
-- **`SupportDesk::TestHelper`** for host suites.
+- **`SupportDesk::TestHelpers`** for host suites.
 - Install generator (migration + annotated initializer), Spanish and
   English locales, and a mountable engine.
 

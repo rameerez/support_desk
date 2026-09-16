@@ -3,7 +3,7 @@
 module SupportDesk
   # Test helpers for hosts. Include it in your `ActiveSupport::TestCase`:
   #
-  #   include SupportDesk::TestHelper
+  #   include SupportDesk::TestHelpers
   #
   #   ticket = open_support_ticket(for: users(:alice), about: rides(:sevilla), message: "No aparece")
   #   reply_as users(:lucia), ticket, "Lo miramos"
@@ -14,7 +14,7 @@ module SupportDesk
   #
   # The assertions read the same way the gem's own suite does, which is the
   # point: your acceptance tests and ours describe the same behaviour.
-  module TestHelper
+  module TestHelpers
     # Open a ticket the way a requester would, and hand it back.
     def open_support_ticket(message: "Necesito ayuda", about: nil, topic: nil, **options)
       requester = options.fetch(:for) { raise ArgumentError, "open_support_ticket needs for: a requester" }
@@ -33,6 +33,7 @@ module SupportDesk
 
     # --- Assertions -------------------------------------------------------------
 
+    # The requester spoke last and the desk owes the next word.
     def assert_awaiting_reply(ticket, message = nil)
       ticket.reload
       assert_predicate ticket, :awaiting_reply?,
@@ -47,14 +48,14 @@ module SupportDesk
                                   "was #{ticket.awaiting}"
     end
 
-    # The case is done, or still live.
-    def assert_closed(ticket, message = nil)
+    # The case is done.
+    def assert_ticket_closed(ticket, message = nil)
       ticket.reload
       assert_predicate ticket, :closed?, message || "expected #{ticket.reference} to be closed, was #{ticket.status}"
     end
 
     # The case is still live.
-    def assert_open(ticket, message = nil)
+    def assert_ticket_open(ticket, message = nil)
       ticket.reload
       assert_predicate ticket, :open?, message || "expected #{ticket.reference} to be open, was #{ticket.status}"
     end

@@ -19,14 +19,14 @@ module SupportDesk
 
       assert_match(/by:/, error.message)
       assert_match(/Current\.actor/, error.message)
-      assert_open @ticket
+      assert_ticket_open @ticket
     end
 
     test "Current.actor is the fallback" do
       Current.actor = @lucia
       @ticket.close!
 
-      assert_closed @ticket
+      assert_ticket_closed @ticket
       assert_equal @lucia, @ticket.events.of_kind(:closed).first.actor
     ensure
       Current.actor = nil
@@ -35,7 +35,7 @@ module SupportDesk
     test "by: :system is a legitimate actor with no row to point at" do
       @ticket.close!(by: :system)
 
-      assert_closed @ticket
+      assert_ticket_closed @ticket
       assert_nil @ticket.events.of_kind(:closed).first.actor
       assert_equal "system", @ticket.events.of_kind(:closed).first.payload["by"]
     end
@@ -54,7 +54,7 @@ module SupportDesk
       assert_raises(NotAnAgent) { @ticket.change_topic!(to: :account, by: @alice) }
       assert_raises(NotAnAgent) { @ticket.attach_subject!(@order, by: @alice) }
 
-      assert_open @ticket
+      assert_ticket_open @ticket
       assert_equal "order", @ticket.topic.path
     end
 
@@ -62,12 +62,12 @@ module SupportDesk
       @ticket.close!(by: @lucia)
 
       assert_nothing_raised { @ticket.reopen!(by: @alice) }
-      assert_open @ticket
+      assert_ticket_open @ticket
     end
 
     test "a job may still act as :system" do
       assert_nothing_raised { @ticket.close!(by: :system) }
-      assert_closed @ticket
+      assert_ticket_closed @ticket
     end
 
     test "a ticket can't be assigned to :system" do
@@ -242,7 +242,7 @@ module SupportDesk
       @ticket.assign!(to: @lucia, by: @lucia)
       @ticket.close!(by: @lucia)
 
-      assert_closed @ticket
+      assert_ticket_closed @ticket
       assert_equal @lucia, @ticket.closed_by
       assert_equal "none", @ticket.awaiting
       assert_nil @ticket.waiting_since
@@ -271,7 +271,7 @@ module SupportDesk
       @ticket.close!(by: @lucia)
       @ticket.reopen!(by: @alice)
 
-      assert_open @ticket
+      assert_ticket_open @ticket
       assert_equal 1, @ticket.reopen_count
       assert_predicate @ticket, :reopened?
       assert_assigned_to @ticket, @lucia
@@ -513,7 +513,7 @@ module SupportDesk
       @ticket.close!(by: @lucia)
 
       assert_nothing_raised { @ticket.reply!("una cosa más", by: @lucia) }
-      assert_closed @ticket
+      assert_ticket_closed @ticket
       assert_predicate @ticket.assignments.open, :empty?
     end
 

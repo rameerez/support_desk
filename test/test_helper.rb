@@ -15,14 +15,14 @@ ActiveRecord::MigrationContext.new(ActiveRecord::Migrator.migrations_paths).migr
 
 require "rails/test_help"
 require "minitest/mock"
-require "support_desk/test_helper"
+require "support_desk/test_helpers"
 
 Minitest.backtrace_filter = Minitest::BacktraceFilter.new
 
 module ActiveSupport
   class TestCase
     include ActiveJob::TestHelper
-    include SupportDesk::TestHelper
+    include SupportDesk::TestHelpers
 
     setup do
       # The badge is cached per agent for 30s in a process-wide memory

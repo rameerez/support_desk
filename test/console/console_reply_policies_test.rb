@@ -164,7 +164,7 @@ class ConsoleReplyPoliciesTest < ActionDispatch::IntegrationTest
 
     assert_response :redirect
     assert_predicate flash[:alert], :present?
-    assert_closed @ticket
+    assert_ticket_closed @ticket
     assert_not_includes @ticket.conversation.messages.map(&:body), "Una cosa más"
   end
 end

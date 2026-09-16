@@ -27,7 +27,7 @@ class ConsoleCsrfTest < ActionDispatch::IntegrationTest
   test "a verb posted without a token changes nothing" do
     post "/madmin/support_tickets/#{@ticket.id}/close"
 
-    assert_open @ticket, "a tokenless POST must not close a case"
+    assert_ticket_open @ticket, "a tokenless POST must not close a case"
     assert_not_equal "Case closed.", flash[:notice]
   end
 

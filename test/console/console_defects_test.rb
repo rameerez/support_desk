@@ -79,7 +79,7 @@ class ConsoleDefectsTest < ActionDispatch::IntegrationTest
     assert_response :redirect
     assert_equal "This case is closed. Reopen it first.", flash[:alert]
     assert_not_includes @ticket.conversation.messages.map(&:body), "Una cosa más"
-    assert_closed @ticket
+    assert_ticket_closed @ticket
   end
 
   test "assignee_only refuses a drop-in at the door, naming who holds it" do
@@ -136,7 +136,7 @@ class ConsoleDefectsTest < ActionDispatch::IntegrationTest
     post "/madmin/support_tickets/#{@ticket.id}/close"
 
     assert_response :forbidden
-    assert_open @ticket
+    assert_ticket_open @ticket
   end
 
   # `Rails.error.subscribe` takes an object that responds to #report, not a
@@ -189,7 +189,7 @@ class ConsoleDefectsTest < ActionDispatch::IntegrationTest
     assert_equal "text/vnd.turbo-stream.html", response.media_type
     assert_match(/<turbo-stream action="refresh">/, response.body)
     assert_equal "You don't have access to the support console.", flash[:alert]
-    assert_open @ticket
+    assert_ticket_open @ticket
   end
 
   test "a plain request still gets a plain 403" do
@@ -199,7 +199,7 @@ class ConsoleDefectsTest < ActionDispatch::IntegrationTest
 
     assert_response :forbidden
     assert_equal "You don't have access to the support console.", response.body
-    assert_open @ticket
+    assert_ticket_open @ticket
   end
 
   # --- Locale --------------------------------------------------------------------

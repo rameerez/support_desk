@@ -47,6 +47,12 @@ end
 #
 # Everything else is queues, presenters and events — see the README.
 module SupportDesk
+  # Assertions and builders for host test suites. Autoloaded, the way
+  # organizations and clickwrap expose theirs, so a host writes
+  # `include SupportDesk::TestHelpers` without a require and a production
+  # boot never loads the file.
+  autoload :TestHelpers, "support_desk/test_helpers"
+
   class << self
     include Events
 
