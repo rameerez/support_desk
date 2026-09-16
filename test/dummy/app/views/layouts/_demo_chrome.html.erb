@@ -1,31 +1,67 @@
 <%# Demo-only chrome for the README screenshots.
 
     The gem ships semantic `support-desk-*` / `chats-*` classes and documents
-    four CSS variables as the theming seam; the console's bundled views are
-    written in Tailwind utilities that a real host's build already has. This
-    partial is the HOST half of both contracts, wearing an invented food
-    delivery brand (Pepperbox) so the screenshots show what a themed desk
-    looks like rather than the unstyled default.
+    a handful of CSS variables as the theming seam; the console's bundled
+    views are written in Tailwind utilities that a real host's build already
+    has. This partial is the HOST half of both contracts, wearing an invented
+    food delivery brand (Pepperbox) so the screenshots show what a themed
+    desk looks like rather than the unstyled default.
 
     Nothing here is part of the gem. `screenshots/capture.rb` drives it. %>
 <style>
   html:root {
-    /* Pepperbox — invented brand, not modelled on any real delivery app. */
-    --pb-ink:        #1B1033;
-    --pb-brand:      #6D28D9;
-    --pb-brand-dark: #55199F;
-    --pb-brand-soft: #F1EBFF;
-    --pb-saffron:    #F5A623;
-    --pb-saffron-soft: #FFF4E0;
-    --pb-mint:       #0E9F6E;
-    --pb-mint-soft:  #E3F7EF;
-    --pb-chilli:     #D93838;
-    --pb-chilli-soft:#FDECEC;
-    --pb-line:       #E7E1F4;
-    --pb-muted:      #6B6383;
-    --pb-page:       #F6F3FC;
+    /* ---------------------------------------------------------------------
+       Pepperbox — invented brand, not modelled on any real delivery app.
 
-    /* The gem's documented theming seam: four variables and the desk is ours. */
+       One hue family carries the whole thing: a deep herbal green around
+       157°, dark enough to hold white text (5.44:1 on --pb-brand) and warm
+       enough to read as food rather than finance. Everything below is a
+       position on that one ramp, so the palette is a scale and not a set of
+       unrelated swatches:
+
+         ink      the darkest green there is, effectively black
+         body     long-form text
+         muted    second-rank text            5.64:1 on white
+         faint    timestamps, references      4.86:1 on white
+         line     hairlines
+         brand-soft / tint / page   three tinted grounds, lightest last
+
+       GREEN IS THE BRAND'S ALONE. Status never borrows it — a green "Open"
+       pill next to a green primary button says the same thing twice and
+       neither reads. So the state ladder below is hued AWAY from the
+       brand: steel blue for live, violet for parked, green-grey for done,
+       and the SLA clock keeps the traffic lights it needs (amber, red).
+       --------------------------------------------------------------------- */
+    --pb-ink:          #0C2019;
+    --pb-ink-lift:     #143528;   /* the bar's gradient partner */
+    --pb-body:         #37483E;
+    --pb-muted:        #5B6B61;
+    --pb-faint:        #66756C;
+    --pb-line:         #DBE7DF;
+
+    --pb-brand:        #12794A;   /* the green: buttons, links, the mark */
+    --pb-brand-bright: #2FB16E;   /* only ever the far end of a gradient */
+    --pb-brand-dark:   #0B5A37;   /* hover / pressed */
+    --pb-brand-soft:   #E4F2E9;   /* tinted surfaces, the official row */
+    --pb-brand-tint:   #EFF7F2;
+    --pb-page:         #F2F7F3;
+
+    /* State: live / parked / done. No green in it, on purpose. */
+    --pb-live:         #245C88;   --pb-live-soft:   #E4EDF5;   /* 5.99:1 */
+    --pb-parked:       #55429E;   --pb-parked-soft: #EDE9F9;
+    --pb-done:         #4A5B52;   --pb-done-soft:   #E7EDE9;   /* 6.15:1 */
+
+    /* The SLA clock, and the internal-note stationery. Amber survives the
+       green move: 157° against 40° is a clean split-complement, and the
+       note card is the one thing on the page that must not look like the
+       product. Both solids are darkened well past Tailwind's amber-500 so
+       white actually holds on them (5.16:1, not 2.53:1). */
+    --pb-amber:        #8A5A00;   --pb-amber-soft:  #FBF0DC;   /* 5.40:1 */
+    --pb-amber-solid:  #9A6000;   --pb-amber-line:  #E7C486;
+    --pb-red:          #A5291E;   --pb-red-soft:    #FBEAE7;   /* 6.13:1 */
+    --pb-red-solid:    #C4382A;                                /* 5.32:1 on white */
+
+    /* The gem's documented theming seam: the variables and the desk is ours. */
     --chats-accent:          var(--pb-brand);
     --chats-accent-contrast: #FFFFFF;
     --chats-surface:         var(--pb-brand-soft);
@@ -35,6 +71,14 @@
     --chats-bubble-bg:       #FFFFFF;
     --chats-radius:          1.25rem;
     --chats-max-width:       none;
+
+    /* --chats-verified is deliberately NOT overridden. The gem's #0284c7
+       clears WCAG 1.4.11's 3:1 on every ground it lands on here — 4.10:1 on
+       white, 3.81:1 on --pb-page, 3.55:1 on the row hover / official-row
+       ground --pb-brand-soft — and 200° sits close enough to the brand's
+       157° to read as the same cool family rather than a stray. It is also
+       the colour every person on earth already reads as "verified", which
+       is worth more to this mark than matching the palette. */
 
     --support-desk-accent:          var(--pb-brand);
     --support-desk-accent-contrast: #FFFFFF;
@@ -71,8 +115,8 @@
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    padding: 0.55rem 1.1rem;
-    background: var(--pb-ink);
+    padding: 0.55rem 1rem;
+    background: linear-gradient(100deg, var(--pb-ink) 0%, var(--pb-ink-lift) 100%);
     color: #FFFFFF;
   }
   .pb-bar__mark {
@@ -81,59 +125,101 @@
     width: 1.85rem;
     height: 1.85rem;
     border-radius: 0.6rem;
-    background: linear-gradient(140deg, var(--pb-brand) 0%, #9A5BFF 100%);
+    background: linear-gradient(140deg, var(--pb-brand) 0%, var(--pb-brand-bright) 100%);
     font-weight: 800;
     font-size: 1.05rem;
     letter-spacing: -0.03em;
   }
   .pb-bar__word { font-weight: 800; letter-spacing: -0.02em; font-size: 1.05rem; }
-  .pb-bar__word em { font-style: normal; color: #C4A6FF; }
+  .pb-bar__word em { font-style: normal; color: #6FD79E; }
   .pb-bar__tag {
     margin-left: auto;
     font-size: 0.78rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.68);
   }
 
-  /* --- Requester screens ------------------------------------------------ */
+  /* --- Requester screens ------------------------------------------------
+   *
+   * Portrait frames, so every requester screen is a PHONE screen: the shell
+   * is a full-height flex column and the last thing in it (the send button,
+   * the composer dock) sits on the bottom edge the way it would in the app,
+   * instead of floating in the middle of a tall empty frame.
+   */
 
-  .chats { flex: 1 1 auto; min-height: 0; background: #FFFFFF; }
-  .chats-thread { height: auto; }
-  .chats-inbox { background: #FFFFFF; }
-  .chats-inbox__header { padding: 0.8rem 1.15rem 0.2rem; }
+  .chats { flex: 1 1 auto; min-height: 0; background: #FFFFFF; display: flex; flex-direction: column; }
+  .chats > turbo-frame { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .chats-thread { height: auto; flex: 1 1 auto; min-height: 0; }
+  .chats-inbox { background: #FFFFFF; flex: 1 1 auto; }
+  .chats-inbox__header { padding: 0.8rem 1rem 0.2rem; }
   .chats-inbox__title { font-size: 1.7rem; letter-spacing: -0.03em; font-weight: 800; }
   .chats-inbox__list { padding: 0.15rem 0 0.6rem; }
-  .chats-search { padding: 0.4rem 1.15rem 0.5rem; }
-  .chats-search__input { padding: 0.55rem 0.9rem; font-size: 0.95rem; }
+  .chats-search { padding: 0.4rem 1rem 0.5rem; }
+  .chats-search__input { padding: 0.55rem 0.9rem; font-size: 0.95rem; background: var(--pb-brand-tint); }
 
-  .chats-row__link { padding: 0.75rem 1.15rem; gap: 0.75rem; align-items: center; }
+  .chats-row__link { padding: 0.72rem 1rem; gap: 0.7rem; align-items: center; }
   .chats-row + .chats-row .chats-row__link { border-top: 1px solid var(--pb-line); }
-  .chats-row__title { font-size: 1.02rem; font-weight: 700; letter-spacing: -0.01em; }
+  .chats-row__title { font-size: 1.02rem; font-weight: 700; letter-spacing: -0.01em; color: var(--pb-ink); }
   .chats-row__subject { font-size: 0.8rem; color: var(--pb-brand); font-weight: 650; }
-  .chats-row__preview { font-size: 0.92rem; }
-  .chats-row__time { font-size: 0.78rem; }
-  .chats-row--group .chats-row__link { background: var(--pb-brand-soft); }
+  .chats-row__preview { font-size: 0.92rem; color: var(--pb-body); }
+  .chats-row__time { font-size: 0.76rem; color: var(--pb-faint); }
   .chats-badge { min-width: 1.5rem; height: 1.5rem; font-size: 0.78rem; }
 
-  .chats-avatar {
-    background: linear-gradient(140deg, var(--pb-brand) 0%, #9A5BFF 100%);
-    color: #FFFFFF;
+  /* --- The official account ---------------------------------------------
+   *
+   * Three separate signals, because one is a decoration and three are a
+   * convention. A glance should sort "the company" from "a person I am
+   * talking to" before any of the words are read:
+   *
+   *   1. SHAPE. A person is a circle; an account with a real mark is a
+   *      squircle. That is the split every messaging app has trained people on,
+   *      and it falls out of the markup for free — chats renders an avatar
+   *      as <img> when the messager has one and as a <span> of initials when
+   *      it doesn't, so the rule needs no class of its own.
+   *   2. COLOUR. People are a quiet green-grey disc. The desk is the only
+   *      full-colour mark in the list.
+   *   3. GROUND. The desk's row is tinted and carries a brand rail down its
+   *      leading edge, so the row itself is legible as "official" even when
+   *      scrolled past at speed.
+   *
+   * The verified rosette is the fourth signal and the gem's own: chats
+   * renders it from `acts_as_messager verified: true` in the inbox row, the
+   * grouped row and the thread header.
+   */
+
+  .chats-avatar--initials {
+    background: #DDE8E1;
+    color: #2F4038;
     font-weight: 750;
   }
-  .chats-row .chats-avatar { width: 2.9rem; height: 2.9rem; font-size: 0.95rem; }
+  img.chats-avatar {
+    border-radius: 0.8rem;
+    box-shadow: 0 0 0 1px rgba(12, 32, 25, 0.06), 0 2px 6px rgba(12, 32, 25, 0.12);
+  }
+  .chats-row .chats-avatar { width: 2.85rem; height: 2.85rem; font-size: 0.95rem; }
+
+  .chats-row--group .chats-row__link {
+    background: var(--pb-brand-soft);
+    box-shadow: inset 3px 0 0 var(--pb-brand);
+  }
+  .chats-row--group .chats-row__title { letter-spacing: -0.02em; }
+  .chats-row--group .chats-row__subject { color: var(--pb-brand-dark); }
+  .chats-verified { margin-left: 0.1rem; }
 
   .chats-empty { padding: 2.25rem 1.5rem; }
   .chats-empty__title { font-size: 1.05rem; }
 
   .support-desk-door {
-    margin: 0.4rem 1.15rem 0.6rem;
+    margin: 0.4rem 1rem 0.6rem;
     padding: 0.85rem 1rem;
     border: 1px solid var(--pb-line);
     background: var(--pb-brand-soft);
+    box-shadow: inset 3px 0 0 var(--pb-brand);
   }
   .support-desk-door__icon {
-    background: var(--pb-brand);
+    background: linear-gradient(140deg, var(--pb-brand) 0%, var(--pb-brand-bright) 100%);
     color: #FFFFFF;
+    border-radius: 0.7rem;
     width: 2.4rem;
     height: 2.4rem;
     font-size: 1.25rem;
@@ -143,54 +229,58 @@
   .support-desk-door__hint { font-size: 0.85rem; }
   .support-desk-inbox-door { padding-bottom: 0; }
 
-  .support-desk-wizard__header { padding: 0.7rem 1.15rem 0.3rem; }
-  .support-desk-wizard__ask { font-size: 1.62rem; letter-spacing: -0.03em; line-height: 1.2; margin: 0 0 0.35rem; }
+  .support-desk-wizard__header { padding: 0.7rem 1rem 0.3rem; }
+  .support-desk-wizard__ask { font-size: 1.6rem; letter-spacing: -0.03em; line-height: 1.18; margin: 0 0 0.35rem; }
   .support-desk-wizard__back { font-size: 0.9rem; font-weight: 600; color: var(--pb-brand); }
 
   .support-desk-choices { padding: 0.1rem 0 0.75rem; }
   .support-desk-choice {
-    margin: 0.45rem 1.15rem;
-    padding: 0.95rem 1rem;
+    margin: 0.55rem 1rem;
+    padding: 1.05rem 1rem;
     border-color: var(--pb-line);
-    box-shadow: 0 1px 2px rgba(27, 16, 51, 0.05);
+    box-shadow: 0 1px 2px rgba(12, 32, 25, 0.05);
   }
   .support-desk-choice__icon { font-size: 1.35rem; }
   .support-desk-choice__label { font-size: 1.02rem; font-weight: 650; }
   .support-desk-choice__status {
-    background: var(--pb-mint-soft);
-    color: #0B7A55;
+    background: var(--pb-done-soft);
+    color: var(--pb-done);
     font-weight: 700;
     font-size: 0.76rem;
     padding: 0.2rem 0.55rem;
   }
   .support-desk-choice__chevron { font-size: 1.15rem; color: var(--pb-brand); }
-  .support-desk-choice__hint { color: var(--pb-brand); font-weight: 700; font-size: 0.78rem; max-width: 42%; text-align: right; }
-  .support-desk-choice--taken { background: var(--pb-brand-soft); }
+  .support-desk-choice__hint { color: var(--pb-brand); font-weight: 700; font-size: 0.78rem; max-width: 37%; text-align: right; }
+  .support-desk-choice--taken { background: var(--pb-brand-soft); border-color: #C6E0D0; }
 
   .support-desk-card {
-    margin: 0 1.15rem 0.7rem;
+    margin: 0 1rem 0.7rem;
     padding: 0.85rem 1rem;
     background: var(--pb-brand-soft);
-    border: 1px solid var(--pb-line);
+    border: 1px solid #C6E0D0;
   }
   .support-desk-card__label { font-size: 1rem; font-weight: 700; }
   .support-desk-card__status {
     background: #FFFFFF;
-    color: var(--pb-brand);
+    color: var(--pb-brand-dark);
     font-weight: 700;
     font-size: 0.76rem;
     padding: 0.2rem 0.55rem;
   }
 
-  .support-desk-form { padding: 0 1.15rem 1.25rem; gap: 0.6rem; }
+  /* The composer grows to the bottom of the frame: the message box takes
+     whatever is left over, and Send lands on the bottom edge. */
+  .support-desk-form { padding: 0 1rem 1.25rem; gap: 0.6rem; flex: 1 1 auto; min-height: 0; }
   .support-desk-form__input {
     padding: 0.9rem 1rem;
     font-size: 1rem;
-    height: 4.8rem;
+    flex: 1 1 auto;
+    min-height: 5rem;
     border-color: var(--pb-line);
-    box-shadow: 0 1px 2px rgba(27, 16, 51, 0.05);
+    color: var(--pb-ink);
+    box-shadow: 0 1px 2px rgba(12, 32, 25, 0.05);
   }
-  .support-desk-form__promise { font-size: 0.86rem; }
+  .support-desk-form__promise { font-size: 0.86rem; color: var(--pb-muted); }
   /* The bundled composer wraps its file input in its own <label>, so the
      label IS the click target and the raw control can go. `::file-selector
      -button` can be styled but its words ("Choose Files", "No file chosen")
@@ -210,7 +300,7 @@
     font-size: 0.88rem;
     font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 1px 2px rgba(27, 16, 51, 0.05);
+    box-shadow: 0 1px 2px rgba(12, 32, 25, 0.05);
   }
   .support-desk-form__attach::before { content: "📎"; font-size: 0.95rem; }
   .support-desk-form__attach::after { content: "Add a photo"; }
@@ -219,23 +309,23 @@
     padding: 0.8rem 1.5rem;
     font-size: 1rem;
     font-weight: 700;
-    box-shadow: 0 6px 16px rgba(109, 40, 217, 0.28);
+    box-shadow: 0 6px 16px rgba(18, 121, 74, 0.28);
   }
 
   /* --- Thread ------------------------------------------------------------ */
 
-  .chats-thread__header { padding: 0.55rem 1rem; border-bottom: 1px solid var(--pb-line); }
-  .chats-thread__title { font-size: 1.1rem; font-weight: 750; }
+  .chats-thread__header { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--pb-line); }
+  .chats-thread__title { font-size: 1.08rem; font-weight: 750; letter-spacing: -0.02em; }
   .chats-thread__subject { font-size: 0.82rem; color: var(--pb-brand); font-weight: 650; }
   .chats-thread__see-all { margin: 0; font-size: 0.74rem; }
-  .chats-thread__scroll { padding: 0.5rem 0.9rem; background: var(--pb-page); }
+  .chats-thread__scroll { padding: 0.5rem 0.85rem; background: var(--pb-page); }
   .chats-thread__unread-line { margin: 0.3rem 0; }
   .chats-message { margin: 0.28rem 0; }
   .chats-message__bubble {
     padding: 0.5rem 0.75rem;
     font-size: 0.93rem;
     border: 1px solid var(--pb-line);
-    box-shadow: 0 1px 2px rgba(27, 16, 51, 0.05);
+    box-shadow: 0 1px 2px rgba(12, 32, 25, 0.05);
   }
   .chats-message--own .chats-message__bubble { border-color: transparent; }
   .chats-message__signature {
@@ -244,6 +334,7 @@
     color: var(--pb-brand);
     margin-top: 0.15rem;
   }
+  .chats-message--own .chats-message__signature { color: var(--chats-accent-contrast); opacity: 0.85; }
   .chats-message__system {
     font-size: 0.78rem;
     background: #FFFFFF;
@@ -252,8 +343,8 @@
     padding: 0.22rem 0.7rem;
     color: var(--pb-muted);
   }
-  .chats-composer { padding: 0.55rem 0.9rem; border-top: 1px solid var(--pb-line); background: #FFFFFF; }
-  .chats-composer__input { font-size: 0.98rem; }
+  .chats-composer { padding: 0.55rem 0.85rem; border-top: 1px solid var(--pb-line); background: #FFFFFF; }
+  .chats-composer__input { font-size: 0.98rem; background: var(--pb-brand-tint); }
 
   /* --- Console ----------------------------------------------------------- *
    *
@@ -345,14 +436,14 @@
   .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
   .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
   .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
-  .py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+  .py-6 { padding-top: 1.25rem; padding-bottom: 1.25rem; }
   .py-10 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
   .pt-2 { padding-top: 0.5rem; }
 
   .text-xs { font-size: 0.78rem; line-height: 1.35; }
   .text-\[11px\] { font-size: 0.72rem; }
   .text-sm { font-size: 0.9rem; line-height: 1.45; }
-  .text-xl { font-size: 1.45rem; line-height: 1.2; }
+  .text-xl { font-size: 1.42rem; line-height: 1.2; }
 
   .rounded-md { border-radius: 0.6rem; }
   .rounded-t-md { border-top-left-radius: 0.6rem; border-top-right-radius: 0.6rem; }
@@ -362,44 +453,45 @@
   .border-b { border-bottom: 1px solid var(--pb-line); }
   .border-dashed { border-style: dashed; }
   .border-slate-200, .border-slate-300 { border-color: var(--pb-line); }
-  .border-amber-300 { border-color: #F3C77A; }
+  .border-amber-300 { border-color: var(--pb-amber-line); }
   .divide-y > * + * { border-top: 1px solid var(--pb-line); }
   .divide-slate-200 > * + * { border-color: var(--pb-line); }
 
   .bg-white { background-color: #FFFFFF; }
   .bg-slate-50 { background-color: var(--pb-page); }
-  .bg-slate-100 { background-color: #EFEBF8; }
-  .bg-slate-200 { background-color: #E2DCF2; }
+  .bg-slate-100 { background-color: var(--pb-done-soft); }
+  .bg-slate-200 { background-color: #D7E2DB; }
   .bg-slate-900 { background-color: var(--pb-brand); }
   .bg-white\/20 { background-color: rgba(255, 255, 255, 0.22); }
-  .bg-emerald-50 { background-color: var(--pb-mint-soft); }
-  .bg-indigo-50 { background-color: #E7EDFD; }
-  .bg-amber-50 { background-color: var(--pb-saffron-soft); }
-  .bg-amber-500 { background-color: var(--pb-saffron); }
-  .bg-red-50 { background-color: var(--pb-chilli-soft); }
-  .bg-red-600 { background-color: var(--pb-chilli); }
+  /* The state ladder. `bg-emerald-*` is the OPEN pill and `bg-indigo-*` the
+     snoozed one; both are re-pointed away from green so the brand keeps it. */
+  .bg-emerald-50 { background-color: var(--pb-live-soft); }
+  .bg-indigo-50 { background-color: var(--pb-parked-soft); }
+  .bg-amber-50 { background-color: var(--pb-amber-soft); }
+  .bg-amber-500 { background-color: var(--pb-amber-solid); }
+  .bg-red-50 { background-color: var(--pb-red-soft); }
+  .bg-red-600 { background-color: var(--pb-red-solid); }
 
   .text-white { color: #FFFFFF; }
-  .text-white\/60 { color: rgba(255, 255, 255, 0.72); }
-  .text-slate-400 { color: #9A93AE; }
+  .text-white\/60 { color: rgba(255, 255, 255, 0.75); }
+  .text-slate-400 { color: var(--pb-faint); }
   .text-slate-500 { color: var(--pb-muted); }
-  .text-slate-600 { color: #574F70; }
-  .text-slate-700 { color: #3D3557; }
+  .text-slate-600 { color: #47584E; }
+  .text-slate-700 { color: var(--pb-body); }
   .text-slate-900 { color: var(--pb-ink); }
-  .text-emerald-700 { color: #0B7A55; }
-  .text-indigo-700 { color: #3A54B8; }
-  .text-red-700 { color: #B32626; }
-  .text-amber-800 { color: #9A6100; }
+  .text-emerald-700 { color: var(--pb-live); }
+  .text-indigo-700 { color: var(--pb-parked); }
+  .text-red-700 { color: var(--pb-red); }
+  .text-amber-800 { color: var(--pb-amber); }
 
   .hover\:bg-slate-50:hover { background-color: var(--pb-page); }
-  .hover\:bg-slate-100:hover { background-color: #EFEBF8; }
+  .hover\:bg-slate-100:hover { background-color: var(--pb-done-soft); }
   .hover\:bg-slate-700:hover { background-color: var(--pb-brand-dark); }
-  .hover\:bg-amber-600:hover { background-color: #DB9114; }
+  .hover\:bg-amber-600:hover { background-color: #7E4E00; }
   .hover\:text-slate-900:hover { color: var(--pb-ink); }
 
   /* The console's two-column case view, at the width it earns one. Below
-     that it stacks, which is the same thing Tailwind's `lg:` prefix does —
-     and what makes the hand-off shot readable on a narrow frame. */
+     that it stacks, which is the same thing Tailwind's `lg:` prefix does. */
   /* minmax(0, …) rather than a bare fr, in both states: an `auto` grid column
      sizes to its content's max-content width, and one un-truncated timeline
      line is enough to push the whole console sideways. */
@@ -409,16 +501,33 @@
     .lg\:col-span-2 { grid-column: span 1 / span 1; }
   }
 
+  /* Stacked, the case answers "what is this about?" BEFORE it shows the
+     transcript — the same call a host makes for its own phone layout. The
+     <aside> becomes `display: contents` so its three cards are grid items in
+     their own right and the context card can be ordered above the
+     transcript column; the other two stay where they were. */
+  @media (max-width: 639.98px) {
+    .pb-console .grid > aside { display: contents; }
+    .pb-console .grid > aside > * + * { margin-top: 0; }
+    .pb-console .grid > aside > :first-child { order: -1; }
+  }
+
   /* Console polish the utilities alone don't carry: cards want a little
      lift, and the queue rows want breathing room at screenshot size. */
   .pb-console section,
   .pb-console details,
-  .pb-console ul.divide-y { box-shadow: 0 1px 3px rgba(27, 16, 51, 0.07); }
+  .pb-console ul.divide-y { box-shadow: 0 1px 3px rgba(12, 32, 25, 0.07); }
   .pb-console input[type="submit"],
   .pb-console select,
   .pb-console input[type="text"],
-  .pb-console textarea { font: inherit; font-size: 0.9rem; }
+  .pb-console textarea { font: inherit; font-size: 0.9rem; color: var(--pb-ink); }
   .pb-console input[type="submit"] { cursor: pointer; }
+  /* The gem ships the note button as `bg-amber-500 text-white`, which is
+     2.53:1 in Tailwind's own palette; darkening the amber until white holds
+     turns it brown. So the host does what a host does — keeps the amber
+     bright and puts the dark end of the same ramp on top of it: 6.69:1. */
+  .pb-console input[type="submit"].bg-amber-500 { background-color: #E8A32B; color: #3A2600; }
+  .pb-console input[type="submit"].bg-amber-500:hover { background-color: #D9911A; }
   .pb-console h2 { font-size: 0.95rem; letter-spacing: -0.01em; }
   .pb-console form { margin: 0; }
   .pb-console input[type="file"] { font-size: 0.78rem; color: var(--pb-muted); }
