@@ -1,0 +1,27 @@
+<%# The dummy host's OWN queue screen — deliberately nothing like the one
+    the generator writes. Layer 2's promise is that the verbs, the scoping
+    and the authorization work under whatever UI a host brings, so the test
+    host brings ten lines of unstyled ERB and the suite proves the promise
+    against that. %>
+<%= turbo_stream_from support_desk_record, :queue %>
+
+<h1>Cola de <%= support_desk_record.name %></h1>
+
+<p id="scope"><%= @scope %></p>
+<p id="badge"><%= @queue.badge %></p>
+
+<ul id="tabs">
+  <% @queue.tabs.each do |tab, label, count| %>
+    <li id="tab-<%= tab %>"><%= link_to "#{label} (#{count})", console_tickets_path(:index, tab: tab) %></li>
+  <% end %>
+</ul>
+
+<ul id="tickets">
+  <% @tickets.each do |ticket| %>
+    <li id="<%= dom_id(ticket) %>">
+      <%= link_to ticket.summary.to_s, console_ticket_path(ticket) %>
+    </li>
+  <% end %>
+</ul>
+
+<%= link_to "Siguiente", console_tickets_path(:next), id: "next-case" %>

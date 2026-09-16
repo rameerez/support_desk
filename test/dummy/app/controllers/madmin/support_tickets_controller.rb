@@ -1,0 +1,43 @@
+# frozen_string_literal: true
+
+module Madmin
+  # The support console, yours to edit.
+  #
+  # Everything an agent can do arrives through two concerns:
+  #
+  #   SupportDesk::Console         the verbs — reply, take, assign, hand_off,
+  #                                release, close, reopen, note, change_topic,
+  #                                next — each one finding the ticket inside
+  #                                `config.visible_desks_for`, asking
+  #                                `config.authorize_console`, and turning
+  #                                every refusal into a flash
+  #   SupportDesk::Console::Index  @queue, @scope and @tickets from params
+  #
+  # The routes come from the `:support_console` routing concern:
+  #
+  #   namespace :madmin do
+  #     resources :support_tickets, only: %i[index show], concerns: :support_console
+  #   end
+  #
+  # Both `index` and `show` are yours — the gem deliberately doesn't own the
+  # screens. Everything they need is plain Ruby: `SupportDesk::Queue`,
+  # `ticket.context_card`, `ticket.timeline`, `ticket.actions_for(agent)`.
+  class SupportTicketsController < Madmin::ApplicationController
+    include SupportDesk::Console
+    include SupportDesk::Console::Index
+
+    # One case. `@ticket` is already set (and already scoped to the desks
+    # this agent may work) by the concern.
+    def show
+      @context_card = @ticket.context_card
+      @actions = @ticket.actions_for(current_agent)
+    end
+
+    private
+
+    # Who is answering. Point this at whatever your admin already uses;
+    # `config.current_agent_method` is the alternative if you'd rather not
+    # write the method at all.
+    def current_agent = current_user
+  end
+end
