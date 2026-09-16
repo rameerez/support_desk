@@ -11,11 +11,11 @@ Here is the whole thing — the kind of support desk a DoorDash, an Uber Eats or
 
 | One row, every case | Pick a topic | Which order? |
 |:---:|:---:|:---:|
-| ![The chats inbox, with every support conversation folded into a single row](screenshots/01-inbox.png) | ![The wizard's first step: a list of support topics](screenshots/02-topics.png) | ![The wizard's second step: the requester's own orders](screenshots/03-subject.png) |
+| ![The chats inbox, with every support conversation folded into a single row](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/01-inbox.png) | ![The wizard's first step: a list of support topics](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/02-topics.png) | ![The wizard's second step: the requester's own orders](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/03-subject.png) |
 | **Say what happened** | **Signed by a human** | **The agent queue** |
-| ![The composer, with a card naming the order the case is about](screenshots/04-compose.png) | ![The conversation, with an agent's answer signed by name](screenshots/05-thread.png) | ![The agent queue, with tabs, counts and waiting chips](screenshots/06-queue.png) |
+| ![The composer, with a card naming the order the case is about](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/04-compose.png) | ![The conversation, with an agent's answer signed by name](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/05-thread.png) | ![The agent queue, with tabs, counts and waiting chips](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/06-queue.png) |
 | **The whole case** | **Notes stay inside** | **Hand it over** |
-| ![One case: transcript on the left, context card on the right](screenshots/07-case.png) | ![The internal note composer, which never reaches the customer](screenshots/08-note.png) | ![The timeline: assigned, noted, answered, handed off](screenshots/09-handoff.png) |
+| ![One case: transcript on the left, context card on the right](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/07-case.png) | ![The internal note composer, which never reaches the customer](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/08-note.png) | ![The timeline: assigned, noted, answered, handed off](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/09-handoff.png) |
 
 It is a product gem on the [`chats`](https://github.com/rameerez/chats) kernel: chats owns the transcript, realtime, attachments, read state and moderation; `support_desk` owns the case — topics, assignment, SLA clocks, events and the console API.
 

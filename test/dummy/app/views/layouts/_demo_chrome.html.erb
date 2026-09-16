@@ -191,18 +191,30 @@
     box-shadow: 0 1px 2px rgba(27, 16, 51, 0.05);
   }
   .support-desk-form__promise { font-size: 0.86rem; }
-  .support-desk-form__attach input[type="file"] { font-size: 0.8rem; color: var(--pb-muted); }
-  .support-desk-form__attach input[type="file"]::file-selector-button {
+  /* The bundled composer wraps its file input in its own <label>, so the
+     label IS the click target and the raw control can go. `::file-selector
+     -button` can be styled but its words ("Choose Files", "No file chosen")
+     are the browser's, and next to a rounded composer they are the one thing
+     on the screen that looks unfinished. A host owns this wording; here it is
+     a quiet secondary button that says what it does. */
+  .support-desk-form__attach {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 0.4rem;
+    padding: 0.45rem 0.95rem;
     border: 1px solid var(--pb-line);
     border-radius: 999px;
     background: #FFFFFF;
     color: var(--pb-brand);
-    font: inherit;
+    font-size: 0.88rem;
     font-weight: 700;
-    padding: 0.3rem 0.8rem;
-    margin-right: 0.55rem;
     cursor: pointer;
+    box-shadow: 0 1px 2px rgba(27, 16, 51, 0.05);
   }
+  .support-desk-form__attach::before { content: "📎"; font-size: 0.95rem; }
+  .support-desk-form__attach::after { content: "Add a photo"; }
+  .support-desk-form__attach input[type="file"] { display: none; }
   .support-desk-button {
     padding: 0.8rem 1.5rem;
     font-size: 1rem;

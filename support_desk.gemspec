@@ -25,7 +25,9 @@ Gem::Specification.new do |spec|
   spec.files = IO.popen(%w[git ls-files -z], chdir: __dir__, err: IO::NULL) do |ls|
     ls.readlines("\x0", chomp: true).reject do |f|
       (f == gemspec) ||
-        f.start_with?(*%w[bin/ test/ spec/ features/ docs/ .git .github appveyor Gemfile])
+        # `screenshots/` is README furniture — ~750 KB of PNGs that the README
+        # loads over https from the repo, so nothing inside the gem needs them.
+        f.start_with?(*%w[bin/ test/ spec/ features/ docs/ screenshots/ .git .github appveyor Gemfile])
     end
   end
   spec.bindir = "exe"
