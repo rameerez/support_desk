@@ -109,6 +109,13 @@ First release: the whole core of a support desk, on top of `chats` 0.2.
 
 ### Notes
 
+- **The desk registers itself with chats at boot.** `acts_as_messager`
+  registers a class when it loads, and `Chats::Inbox` folds support threads
+  into one row only for registered grouped messagers, so under lazy
+  autoloading the inbox showed every support conversation as its own row
+  until something happened to reference `SupportDesk::Desk`. The engine's
+  `to_prepare` now touches the desk the way it already touches the helper
+  (#2). Eager-loading production hosts never saw it; development did.
 - **`jsonb` on PostGIS.** The install migration decides jsonb-or-json by
   adapter name, and activerecord-postgis-adapter answers `"PostGIS"`, not
   `"PostgreSQL"` — the first cut matched the full word and silently gave

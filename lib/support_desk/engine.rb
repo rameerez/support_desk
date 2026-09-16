@@ -123,6 +123,18 @@ module SupportDesk
       # (Assigned to appease Lint/Void — the constant REFERENCE is the point.)
       _loaded = SupportDesk::EngineHelper
 
+      # Touch the desk for the same reason, on the CHATS side. `acts_as_messager`
+      # registers a class with chats when that class LOADS, and `Chats::Inbox`
+      # reads that registry (`Chats.grouped_messager_types`) to decide which
+      # messager types fold into one inbox row. Under lazy autoloading nothing
+      # has referenced SupportDesk::Desk by the time a requester opens their
+      # inbox, so the registry is empty, the stacking prefilter matches nothing,
+      # and every support conversation renders as its own row — the exact noise
+      # the grouped row exists to prevent. Eager-loading hosts (production)
+      # never see it; development does, and "works in prod, wrong locally" is
+      # the worst shape for a bug. Found by the CarHey integration (#2).
+      _desk = SupportDesk::Desk
+
       SupportDesk.config.validate_classes! if SupportDesk.configured?
     end
   end

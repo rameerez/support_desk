@@ -40,4 +40,33 @@ class EngineAutoloadTest < ActiveSupport::TestCase
                     "REFERENCE SupportDesk::EngineHelper, or nothing triggers its on_load(:action_view) hook " \
                     "in a host that autoloads.\n#{output}"
   end
+
+  # Same shape, on the chats side. `acts_as_messager` registers a class with
+  # chats when the class LOADS, and `Chats::Inbox` folds support threads into
+  # one row only for registered grouped messagers. In a host that autoloads,
+  # nothing references SupportDesk::Desk before the first inbox render, so
+  # the registry is empty and every support conversation is its own row (#2).
+  # The inbox is asked BEFORE anything here names the desk, which is the
+  # order a real host's first request sees.
+  REGISTRY_BOOT = <<~RUBY_SRC
+    ENV["RAILS_ENV"] = "test"
+    require File.expand_path("test/dummy/config/environment", Dir.pwd)
+
+    raise "expected this boot NOT to eager load" if Rails.application.config.eager_load
+
+    puts "GROUPED: \#{Chats.grouped_messager_types.sort.join(",")}"
+  RUBY_SRC
+
+  test "the desk is a registered grouped messager in an app that does not eager load" do
+    output, status = Open3.capture2e(
+      { "SUPPORT_DESK_EAGER_LOAD" => "false" },
+      RbConfig.ruby, "-e", REGISTRY_BOOT, chdir: Rails.root.join("../..").to_s
+    )
+
+    assert_predicate status, :success?, "the dummy app failed to boot without eager loading:\n#{output}"
+    assert_match(/^GROUPED: .*SupportDesk::Desk/, output,
+                 "SupportDesk::Desk was not registered with chats before the first inbox could be rendered. " \
+                 "The engine's to_prepare has to REFERENCE SupportDesk::Desk, or a lazily loading host shows " \
+                 "every support conversation as its own inbox row.\n#{output}")
+  end
 end
