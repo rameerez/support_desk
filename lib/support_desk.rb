@@ -165,6 +165,20 @@ module SupportDesk
     def requester_class?(klass) = registered?(requester_class_names, klass)
     def agent_class?(klass) = registered?(agent_class_names, klass)
 
+    # --- Macro conditions -----------------------------------------------------------
+
+    # Whether +record+ passes an `if:` condition from a macro — nil is always
+    # yes. Both `has_support_tickets if:` (may this person ask for help, and
+    # be written to) and `acts_as_support_agent if:` (may this person answer)
+    # are read through here, so the two conditions can never drift into two
+    # meanings of the same option.
+    def eligible?(record, condition)
+      return true if condition.nil?
+      return !!record.public_send(condition) if condition.is_a?(Symbol)
+
+      !!condition.call(record)
+    end
+
     # --- The chats seam -------------------------------------------------------------
 
     # Subscribe the gem's own `:message_created` listener, which is what
@@ -255,6 +269,22 @@ module SupportDesk
                    "Pull to refresh is off — it would throw away what the requester has typed."
         }
       ]
+    end
+
+    # A duration in the reader's own language ("1 día", "4 hours") — the
+    # answer promise in the wizard's line, the wait in a console summary, and
+    # the `%{reply_within}` an opening line can interpolate.
+    #
+    # Duration#inspect is English whatever the locale, which is what left one
+    # untranslatable string in an otherwise Spanish console.
+    def humanize_duration(duration)
+      return duration.inspect unless defined?(ActionView::Helpers::DateHelper)
+
+      @duration_words ||= Object.new.extend(ActionView::Helpers::DateHelper)
+      words = @duration_words.distance_of_time_in_words(duration.to_i).to_s
+      # An app whose locale has no date translations (no rails-i18n) would
+      # otherwise show "Translation missing" to a customer.
+      words.start_with?("Translation missing") ? duration.inspect : words
     end
 
     # A stable, URL-safe key for an actor (agent, requester, desk), used in

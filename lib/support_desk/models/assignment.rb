@@ -11,7 +11,9 @@ module SupportDesk
   class Assignment < ApplicationRecord
     self.table_name = "support_desk_assignments"
 
-    REASONS = %w[taken assigned handed_off routed drop_in_takeover escalated reopened].freeze
+    # `opened`: the agent who wrote first holds the case. It is a seat nobody
+    # was told about — see Ticket.open!(by:) — not an assignment somebody made.
+    REASONS = %w[taken assigned handed_off routed drop_in_takeover escalated reopened opened].freeze
     RELEASE_REASONS = %w[handed_off released shift_end closed escalated].freeze
 
     belongs_to :ticket, class_name: "SupportDesk::Ticket", inverse_of: :assignments

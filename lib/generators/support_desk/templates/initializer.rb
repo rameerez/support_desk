@@ -105,6 +105,19 @@ SupportDesk.configure do |config|
   #
   # config.announce_assignments = :first_only
   #
+  # The system line a thread opens with, posted inside the opening
+  # transaction and before the first message. A String with %{label},
+  # %{desk} and %{reply_within}, a Symbol naming an I18n key, a block given
+  # the ticket, or nil for no line at all.
+  #
+  # The second one is for a case the DESK opened
+  # (`lucia.open_support_conversation_with!(alice, "Vimos que…")`): it has a
+  # default, because a message from a desk somebody never wrote to has to
+  # explain itself.
+  #
+  # config.opening_line = "Has abierto una conversación sobre «%{label}». Te contestamos aquí."
+  # config.opening_line_from_support = "%{desk} ha abierto esta conversación contigo sobre «%{label}»."
+  #
   # What a requester writing into a closed ticket does:
   #   :reopen_on_reply  the case comes back (no wall, no dead end)
   #   :locked           the composer is replaced by a notice

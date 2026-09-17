@@ -119,4 +119,31 @@ class DoctorTest < ActiveSupport::TestCase
       assert_match(/isn't mounted/, report.warnings.map(&:message).join)
     end
   end
+  test "a case waiting on the desk that only the desk has spoken in fails the invariant too" do
+    # The NULL leg: `last_agent_message_at > last_requester_message_at` is
+    # NULL when the requester has never written, so a plain comparison walks
+    # straight past this row.
+    ticket = ticket_for(create_user)
+    ticket.update_columns(awaiting: "agent", last_agent_message_at: Time.current,
+                          last_requester_message_at: nil)
+
+    assert_match(/after the desk already answered/, SupportDesk.doctor.failures.map(&:message).join)
+  end
+
+  test "provenance: half an opened_by fails, and a legacy row asks for the backfill" do
+    healthy = ticket_for(create_user)
+
+    assert_predicate SupportDesk.doctor, :ok?
+
+    legacy = ticket_for(create_user)
+    legacy.update_columns(opened_by_type: nil, opened_by_id: nil)
+    report = SupportDesk.doctor
+
+    assert_predicate report, :ok?, "a row to backfill is a warning, not a failure"
+    assert_match(/backfill_opened_by/, report.warnings.map(&:message).join)
+
+    healthy.update_columns(opened_by_id: nil)
+
+    assert_match(/half an opened_by/, SupportDesk.doctor.failures.map(&:message).join)
+  end
 end

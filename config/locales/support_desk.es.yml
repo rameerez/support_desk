@@ -8,6 +8,11 @@ es:
       closed_notice: "Esta conversación está cerrada. Abre una nueva si necesitas algo más."
       reopened_notice: "Hemos vuelto a abrir esta conversación."
       promise: "Normalmente respondemos en menos de %{time}"
+      # La línea con la que se abre un hilo que ha empezado el equipo: quien
+      # recibe un mensaje de un sitio al que nunca ha escrito necesita saber
+      # qué es esto.
+      opened_by_support: "%{desk} ha abierto esta conversación contigo sobre «%{label}». Puedes responder aquí mismo."
+      unavailable_notice: "Esta cuenta ya no puede enviar ni recibir mensajes. La conversación se queda aquí para consultarla."
     notifications:
       # Generic on purpose: una pantalla de bloqueo no debe contar de qué va
       # el caso de nadie. El detalle va en el cuerpo.

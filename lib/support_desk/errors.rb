@@ -17,6 +17,11 @@ module SupportDesk
   # agent (no `acts_as_support_agent`, or its `if:` said no).
   class NotAnAgent < Error; end
 
+  # Raised when the record handed to a requester-side operation isn't an
+  # eligible requester (no `has_support_tickets`, or its `if:` said no) — a
+  # closed account, for instance, can neither ask nor be written to.
+  class NotARequester < Error; end
+
   # Raised by `hand_off!` when the actor doesn't currently hold the ticket.
   class NotTheAssignee < Error; end
 

@@ -27,6 +27,18 @@ class BackfillOpenedByTaskTest < ActiveSupport::TestCase
     assert_equal @alice.id.to_s, ticket.opened_by_id.to_s
   end
 
+  test "it never rewrites provenance somebody already recorded" do
+    lucia = create_agent(name: "Lucía")
+    written_first = open_support_ticket(for: @alice, by: lucia, message: "Vimos que…")
+    legacy = ticket_for(create_user, topic: :account)
+    legacy.update_columns(opened_by_type: nil, opened_by_id: nil)
+
+    run_task
+
+    assert_equal lucia, written_first.reload.opened_by
+    assert_equal legacy.requester, legacy.reload.opened_by
+  end
+
   test "running it twice is running it once" do
     ticket = ticket_for(@alice)
     ticket.update_columns(opened_by_type: nil, opened_by_id: nil)

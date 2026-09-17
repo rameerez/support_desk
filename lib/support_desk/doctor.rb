@@ -185,8 +185,33 @@ module SupportDesk
 
           ok_with("assignee matches the open assignment")
         end,
+        check("provenance") do
+          next warn_with("no opened_by column — run `rails g support_desk:upgrade` and migrate") unless
+            Ticket.column_names.include?("opened_by_id")
+
+          half = Ticket.where(opened_by_type: nil).where.not(opened_by_id: nil)
+                       .or(Ticket.where.not(opened_by_type: nil).where(opened_by_id: nil)).count
+          next fail_with("#{half} ticket(s) with half an opened_by (a type and no id, or the reverse)") if
+            half.positive?
+
+          # NULL is not automation: nothing in this version writes it, so
+          # every one of these is a row 0.1 opened, or one an old process
+          # wrote during the upgrade window.
+          legacy = Ticket.where(opened_by_id: nil).count
+          next warn_with("#{legacy} case(s) don't say who opened them — run " \
+                         "`rake support_desk:backfill_opened_by`") if legacy.positive?
+
+          ok_with("every case says who opened it")
+        end,
         check("awaiting") do
-          stale = Ticket.awaiting_reply.where("last_agent_message_at > last_requester_message_at").count
+          # The NULL leg is not decoration: `last_agent_message_at >
+          # last_requester_message_at` is NULL when the requester has never
+          # written, so a case waiting on the desk that only the desk has
+          # spoken in slips past a plain comparison.
+          stale = Ticket.awaiting_reply.where(
+            "last_agent_message_at > last_requester_message_at OR " \
+            "(last_agent_message_at IS NOT NULL AND last_requester_message_at IS NULL)"
+          ).count
           next fail_with("#{stale} ticket(s) waiting on the desk after the desk already answered") if stale.positive?
 
           ok_with("awaiting agrees with the transcript")

@@ -38,11 +38,46 @@ module SupportDesk
     # Whether this record may answer tickets right now — the `if:` condition
     # from the macro, honoured.
     def support_agent?
-      condition = self.class.support_desk_agent_options[:if]
-      return true if condition.nil?
-      return !!public_send(condition) if condition.is_a?(Symbol)
+      SupportDesk.eligible?(self, self.class.support_desk_agent_options[:if])
+    end
 
-      !!condition.call(self)
+    # Write first, as the desk — the mirror of Requester#ask_support!.
+    #
+    #   lucia.open_support_conversation_with!(alice, "Vimos que tu retirada rebotó", about: withdrawal)
+    #   lucia.open_support_conversation_with!(alice, "Tu DNI no se lee bien", topic: :verification)
+    #
+    # Not `message!`: that is a personal chat from Lucía. This speaks as the
+    # desk, signs the message with her name, seats her on the case, and lands
+    # in Alice's inbox as "Soporte". If Alice already has this conversation
+    # open, the message joins it as an ordinary reply, under the desk's reply
+    # policy — which can leave the case with whoever already holds it.
+    # Returns the SupportDesk::Ticket.
+    #
+    # Raises NotARequester (nobody to write to), NotAllowed (including an
+    # agent aiming at themselves: an agent who needs help asks for it),
+    # NotSupportable, UnknownTopic.
+    def open_support_conversation_with!(requester, message, about: nil, topic: nil, files: [], via: :in_app,
+                                        desk: nil, request: nil)
+      SupportDesk::Ticket.ensure_requester!(requester)
+
+      if SupportDesk::Ticket.same_actor?(requester, self)
+        raise SupportDesk::NotAllowed,
+              "#{self.class}##{id} can't open a support conversation with themselves — an agent who needs " \
+              "help asks for it (ask_support!), and the case would be theirs to answer"
+      end
+
+      SupportDesk::Ticket.open!(
+        requester: requester,
+        by: self,
+        message: message,
+        about: about,
+        topic: topic,
+        files: files,
+        via: via,
+        desk: desk || requester.support_desk,
+        requester_role: requester.class.support_desk_requester_options[:as],
+        request: request
+      )
     end
 
     # :human or :ai. Bots disclose themselves through this (04).

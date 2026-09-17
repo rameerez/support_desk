@@ -132,7 +132,7 @@ module SupportDesk
         :insert_ticket!,
         requester: @alice, desk: SupportDesk.desk, node: SupportDesk.find_topic("order"), about: @order,
         via: :in_app, requester_role: nil, title: nil, metadata: {},
-        cardinality_key: winner.cardinality_key
+        cardinality_key: winner.cardinality_key, opened_by: @alice
       )
 
       assert_equal winner.id, loser.id
@@ -497,6 +497,208 @@ module SupportDesk
 
       assert_equal ticket, Ticket.for_conversation(ticket.conversation)
       assert_nil Ticket.for_conversation(nil)
+    end
+    # --- Writing first ----------------------------------------------------------
+
+    test "open! by an agent writes the case, the seat and the message in one transaction, or nothing at all" do
+      too_long = "x" * (Chats.config.max_message_length + 1)
+
+      assert_no_difference [ -> { Ticket.count }, -> { Chats::Conversation.count },
+                             -> { Assignment.count }, -> { Event.count } ] do
+        assert_raises(ActiveRecord::RecordInvalid) do
+          @lucia.open_support_conversation_with!(@alice, too_long, about: @order)
+        end
+      end
+    end
+
+    test "a case the desk opened is waiting on the requester from its first committed state" do
+      ticket = @lucia.open_support_conversation_with!(@alice, "Vimos que tu pedido no llegó", about: @order)
+
+      # No reload, on purpose: the row that committed is already true, and
+      # the clocks were folded in on THIS instance inside the transaction.
+      # (assert_awaiting_requester would reload and prove nothing.)
+      assert_equal "requester", ticket.awaiting
+      assert_equal ticket.last_agent_message_at, ticket.waiting_since
+      assert_nil ticket.last_requester_message_at
+      assert_equal "requester", Ticket.find(ticket.id).awaiting
+
+      # And again once chats' after-commit subscriber has had its go: it
+      # finds the message already registered and changes nothing.
+      assert_equal "requester", ticket.reload.awaiting
+      assert_equal ticket.messages.last.id.to_s, ticket.last_registered_message_id.to_s
+    end
+
+    test "the limits are on asking, not on being asked" do
+      SupportDesk.config.max_open_tickets = 2
+      SupportDesk.config.open_rate_limit = { to: 2, within: 1.hour }
+      hers = @alice.ask_support!("una", topic: :account)
+      @alice.ask_support!("dos", about: @order)
+
+      assert_raises(RateLimited) { @alice.ask_support!("tres", topic: :other) }
+
+      assert_nothing_raised do
+        @lucia.open_support_conversation_with!(@alice, "Vimos que…", topic: :other)
+        @lucia.open_support_conversation_with!(@alice, "Y otra cosa", about: create_invoice(user: @alice))
+      end
+
+      # Three open cases and a cap of two — but only ONE of them is hers, so
+      # she still has room to ask. Outreach never spends an allowance that
+      # exists to stop somebody hammering the button.
+      SupportDesk.config.open_rate_limit = nil
+      hers.close!(by: @lucia)
+
+      assert_equal 3, Ticket.not_closed.where(requester: @alice).count
+      assert_nothing_raised { @alice.ask_support!("otra pregunta", topic: :account) }
+    end
+
+    test "opened_by records the requester or agent; automation follows decision 17" do
+      asked = @alice.ask_support!("no llega", about: @order)
+      written = @lucia.open_support_conversation_with!(@alice, "Vimos que…", topic: :other)
+
+      assert_equal @alice, asked.opened_by
+      assert_equal @lucia, written.opened_by
+
+      error = assert_raises(NotAnAgent) do
+        Ticket.open!(requester: @alice, message: "hola", topic: :account, by: :system)
+      end
+
+      assert_match(/automation/, error.message)
+      assert_equal 2, Ticket.count
+    end
+
+    test "opened_by_support and opened_by_requester partition every case, NULL included" do
+      asked = @alice.ask_support!("no llega", about: @order)
+      written = @lucia.open_support_conversation_with!(@alice, "Vimos que…", topic: :other)
+      legacy = ticket_for(create_user)
+      legacy.update_columns(opened_by_type: nil, opened_by_id: nil)
+
+      assert_predicate asked, :opened_by_requester?
+      assert_predicate written, :opened_by_support?
+      # A 0.1 row is not automation and not the requester: it is a row
+      # somebody has to come and backfill, which is what `doctor` says.
+      assert_predicate legacy.reload, :opened_by_support?
+
+      assert_equal [ asked ], Ticket.opened_by_requester.to_a
+      assert_equal [ written, legacy ].sort_by(&:id), Ticket.opened_by_support.sort_by(&:id)
+      assert_equal Ticket.count, Ticket.opened_by_requester.count + Ticket.opened_by_support.count
+
+      # An actor whose record is gone is unavailable, never automation.
+      written.update_columns(opened_by_type: "User", opened_by_id: 0)
+
+      assert_predicate written.reload, :opened_by_support?
+      assert_nil written.opened_by
+    end
+
+    test "an agent may file onto a topic the requester isn't offered, but a subject-required topic still needs about:" do
+      fresh = create_user(onboarded: false)
+
+      ticket = @lucia.open_support_conversation_with!(fresh, "Sobre tu cuenta", topic: :account)
+
+      assert_equal "account", ticket.topic.path
+      assert_raises(NotAllowed) { fresh.ask_support!("hola", topic: :account) }
+
+      SupportDesk.config.topics do
+        topic :order, about: "Order", subject: :required
+        other
+      end
+      error = assert_raises(NotAllowed) { @lucia.open_support_conversation_with!(@alice, "hola", topic: :order) }
+
+      assert_match(/needs something to be about/, error.message)
+    end
+
+    test "writing first about someone else's record is refused the same way asking would be" do
+      theirs = create_order(user: create_user)
+
+      assert_raises(NotAllowed) { @lucia.open_support_conversation_with!(@alice, "hola", about: theirs) }
+      assert_raises(NotSupportable) { @lucia.open_support_conversation_with!(@alice, "hola", about: create_user) }
+      assert_equal 0, Ticket.count
+    end
+
+    test "writing first to a person with this conversation already open is a reply into it, under the desk's reply policy" do
+      existing = @alice.ask_support!("no llega", about: @order)
+
+      ticket = @lucia.open_support_conversation_with!(@alice, "Lo estamos mirando", about: @order)
+
+      assert_equal existing.id, ticket.id
+      assert_predicate ticket, :opened_by_requester?, "reuse never rewrites who opened the case"
+      assert_assigned_to ticket, @lucia
+      assert_equal "taken", ticket.assignments.order(:assigned_at).last.reason
+      assert_equal [ "no llega", "Lo estamos mirando" ],
+                   ticket.messages.where(kind: "text").oldest_first.map(&:body)
+
+      pedro = create_agent(name: "Pedro")
+      held = create_user(name: "Bea").ask_support!("hola", topic: :account)
+      held.assign!(to: pedro, by: pedro)
+
+      with_support_config(reply_policy: :assignee_only) do
+        assert_raises(NotAllowed) do
+          @lucia.open_support_conversation_with!(held.requester, "Te escribimos", topic: :account)
+        end
+      end
+
+      assert_equal 1, held.reload.messages.where(kind: "text").count, "a refusal writes nothing"
+      assert_assigned_to held, pedro
+    end
+
+    test "the desk's opening message announces nobody: no assignment line, no :agent_replied, no :ticket_assigned" do
+      ticket = nil
+
+      events = capture_support_events(:ticket_opened, :ticket_assigned, :agent_replied, :requester_replied) do
+        ticket = @lucia.open_support_conversation_with!(@alice, "Vimos que tu pedido no llegó", about: @order)
+      end
+
+      assert_equal [ :ticket_opened ], events.map(&:first)
+      # The opening line and the message, and nothing else: no "Lucía se
+      # ocupa de tu consulta" about a conversation Lucía herself just started.
+      assert_equal %w[system text], ticket.messages.oldest_first.pluck(:kind)
+      assert_equal I18n.t("support_desk.thread.opened_by_support", desk: ticket.desk.name, label: ticket.label),
+                   ticket.messages.oldest_first.first.body
+      assert_not_includes ticket.messages.map(&:body), I18n.t("support_desk.system.assigned", agent: "Lucía")
+      refute_ticket_event ticket, :assigned
+      assert_assigned_to ticket, @lucia
+      assert_equal "opened", ticket.assignments.sole.reason
+      assert_equal SupportDesk.actor_key(@lucia), ticket.events.of_kind(:opened).sole.payload["assignee"]
+      assert_equal @lucia, ticket.events.of_kind(:opened).sole.actor
+    end
+
+    test "time_to_first_reply is nil for a case the desk opened" do
+      ticket = @lucia.open_support_conversation_with!(@alice, "Vimos que…", topic: :other)
+      ask_again ticket, "ah, no lo sabía"
+      ticket.reload.reply!("te contamos", by: @lucia)
+
+      assert_nil ticket.reload.time_to_first_reply
+      assert_not_nil ticket.first_agent_reply_at, "the clock itself is still kept honest"
+
+      # The same exchange on a case SHE opened does have an answer.
+      asked = @alice.ask_support!("y esto?", topic: :account)
+      asked.reply!("ahora mismo", by: @lucia)
+
+      assert_not_nil asked.reload.time_to_first_reply
+    end
+
+    test "an ineligible requester can neither ask nor be written to" do
+      @alice.update!(support_blocked: true)
+
+      assert_raises(NotARequester) { @alice.ask_support!("hola", topic: :account) }
+      assert_raises(NotARequester) { @lucia.open_support_conversation_with!(@alice, "Vimos que…", topic: :other) }
+      assert_equal 0, Ticket.count
+
+      @alice.update!(support_blocked: false)
+
+      assert_nothing_raised { @alice.ask_support!("hola", topic: :account) }
+    end
+
+    test "an agent can't write first to themselves, and by: the requester is still asking" do
+      # A dual-role account (an admin who is also a customer) asking for help
+      # is inbound, whichever way the caller spells it.
+      inbound = Ticket.open!(requester: @lucia, message: "yo también necesito ayuda", topic: :account, by: @lucia)
+
+      assert_predicate inbound, :opened_by_requester?
+      assert_predicate inbound, :unassigned?
+
+      error = assert_raises(NotAllowed) { @lucia.open_support_conversation_with!(@lucia, "hola") }
+
+      assert_match(/themselves/, error.message)
     end
   end
 end

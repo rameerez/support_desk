@@ -75,7 +75,7 @@ module SupportDesk
       within = SupportDesk.config.desk(desk_key).reply_within
       return nil if within.nil?
 
-      t("support_desk.thread.promise", time: SupportDesk::Wizard.humanize_duration(within))
+      t("support_desk.thread.promise", time: SupportDesk.humanize_duration(within))
     end
 
     # The status line under a case in the requester's list: who owes the next

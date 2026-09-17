@@ -6,6 +6,7 @@ module SupportDesk
   #   include SupportDesk::TestHelpers
   #
   #   ticket = open_support_ticket(for: users(:alice), about: rides(:sevilla), message: "No aparece")
+  #   ticket = open_support_ticket(for: users(:alice), by: users(:lucia), message: "Vimos que…")
   #   reply_as users(:lucia), ticket, "Lo miramos"
   #   assert_awaiting_requester ticket
   #   assert_ticket_event ticket, :handed_off, from: users(:lucia), to: users(:pedro)
@@ -15,10 +16,14 @@ module SupportDesk
   # The assertions read the same way the gem's own suite does, which is the
   # point: your acceptance tests and ours describe the same behaviour.
   module TestHelpers
-    # Open a ticket the way a requester would, and hand it back.
-    def open_support_ticket(message: "Necesito ayuda", about: nil, topic: nil, **options)
+    # Open a ticket the way a requester would — or, with `by:`, the way the
+    # desk does when it writes first. Through the public sugar in both cases,
+    # so this helper exercises what hosts actually type.
+    def open_support_ticket(message: "Necesito ayuda", about: nil, topic: nil, by: nil, **options)
       requester = options.fetch(:for) { raise ArgumentError, "open_support_ticket needs for: a requester" }
-      requester.ask_support!(message, about: about, topic: topic)
+      return requester.ask_support!(message, about: about, topic: topic) if by.nil? || by == requester
+
+      by.open_support_conversation_with!(requester, message, about: about, topic: topic)
     end
 
     # Answer as an agent. Returns the Chats::Message.

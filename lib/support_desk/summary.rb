@@ -46,7 +46,7 @@ module SupportDesk
       # this speaks the reader's language. Duration#inspect is English
       # whatever the locale, which left one untranslatable string in an
       # otherwise Spanish console.
-      Wizard.humanize_duration(duration)
+      SupportDesk.humanize_duration(duration)
     end
 
     # The whole line.
