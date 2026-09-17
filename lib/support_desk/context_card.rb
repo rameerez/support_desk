@@ -66,13 +66,17 @@ module SupportDesk
     # the record still resolves, the desk's name in front of it when WE
     # wrote first, and an honest label when there is no record to name.
     #
-    # The three unnameable cases are not the same thing and must not read
-    # the same way: no provenance at all (a row from before 0.2, or
-    # automation the day it ships), an actor whose record is gone, and a
+    # The three unnameable cases are not the same thing and must not read the
+    # same way: no provenance at all, an actor whose record is gone, and a
     # requester-opened case, which is just their name.
+    #
+    # "Not recorded" rather than "automation": 0.2 opens every case as a
+    # record (automation openers are refused — docs/12-open-questions.md
+    # Q17), so a NULL pair is a row 0.1 wrote and nobody has backfilled yet,
+    # which is exactly what `SupportDesk.doctor` asks somebody to do.
     def opened_by_label
       opener = ticket.opened_by
-      return I18n.t("support_desk.console.context.automation") if ticket.opened_by_id.blank?
+      return I18n.t("support_desk.console.context.not_recorded") if ticket.opened_by_id.blank?
       return I18n.t("support_desk.console.context.unavailable") if opener.nil?
 
       name = opener.try(:support_agent_name) || Chats.display_name_for(opener)

@@ -208,6 +208,18 @@ class ConsoleConversationsTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_entity
     assert_equal 0, SupportDesk::Ticket.count
+
+    # `desk` is read by EVERY console screen, so a crafted one answers the
+    # way an unknown key does — the first visible desk — rather than taking
+    # the console down with it.
+    get "/madmin/support_tickets/new", params: { desk: { a: 1 }, requester: @alice.to_global_id.to_s }
+
+    assert_response :success
+    assert_select "#requester", "Alice"
+
+    get "/madmin/support_tickets/next", params: { desk: { a: 1 } }
+
+    assert_response :redirect
   end
 
   test "an agent can't open a support conversation with themselves" do

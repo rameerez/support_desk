@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require "test_helper"
+# `$CHILD_STATUS` is English's name for `$?`, and nothing in this file
+# would otherwise load it.
+require "English"
 
 # `require "support_desk"` outside Rails — a rake task, a script, a boot that
 # has not reached the models yet — loads the spine, and the console concern is

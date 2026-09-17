@@ -40,7 +40,7 @@ class LocalesTest < ActiveSupport::TestCase
     support_desk.console.errors.attachments_again
     support_desk.console.row.opened_by_support
     support_desk.console.context.opened_by
-    support_desk.console.context.automation
+    support_desk.console.context.not_recorded
     support_desk.console.context.unavailable
   ].freeze
 

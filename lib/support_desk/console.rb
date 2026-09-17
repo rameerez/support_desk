@@ -657,7 +657,12 @@ module SupportDesk
     def support_desk_record
       return @support_desk_record if defined?(@support_desk_record)
 
-      requested = params[:desk].presence&.to_sym
+      # A desk key is text. A Hash or an Array here is not a desk anybody has
+      # — it is a crafted parameter — and every console screen reads this, so
+      # it answers the way an unknown key does (the first visible desk)
+      # rather than taking the whole console down with a NoMethodError.
+      requested = params[:desk]
+      requested = requested.is_a?(String) ? requested.presence&.to_sym : nil
       @support_desk_record =
         (requested && support_visible_desks.detect { |desk| desk.key.to_sym == requested }) ||
         support_visible_desks.first

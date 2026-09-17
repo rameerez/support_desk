@@ -14,7 +14,7 @@ en:
       context:
         title: "Context"
         opened_by: "Opened by"
-        automation: "automation"
+        not_recorded: "not recorded"
         unavailable: "account unavailable"
         requester: "Requester"
         open_tickets: "Open cases"

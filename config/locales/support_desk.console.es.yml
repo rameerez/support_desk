@@ -14,7 +14,7 @@ es:
       context:
         title: "Contexto"
         opened_by: "Abierta por"
-        automation: "automático"
+        not_recorded: "sin registrar"
         unavailable: "cuenta no disponible"
         requester: "Cliente"
         open_tickets: "Casos abiertos"
