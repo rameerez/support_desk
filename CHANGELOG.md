@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reading an authorized console transcript marks the desk's read horizon through the last displayed message.
 - Topics resolve within their ticket's desk; wizard routing and response promises honor nondefault desks.
 - The requester upload form uses multipart encoding, and its send budget is shared with chats.
-- Requires chats 0.2.1, including authors who need no messaging capabilities.
+- Requires chats >= 0.3.2, whose authors need no messaging capabilities of
+  their own, so staff sign a desk reply without becoming messagers.
 
 ## [0.1.2] - 2026-09-16
 
