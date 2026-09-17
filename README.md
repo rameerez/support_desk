@@ -36,10 +36,12 @@ class Order < ApplicationRecord
   supportable topic: :order           # can be asked about
 end
 
-ticket = alice.ask_support!("My order never arrived", about: order)
+ticket = alice.ask_support!("My order never arrived", about: order)   # she asks
 ticket.assign!(to: lucia, by: lucia)
-ticket.reply!("We're on it", by: lucia)
+ticket.reply!("We're on it", by: lucia)                               # you answer
 ticket.close!(by: lucia)
+
+lucia.open_support_conversation_with!(alice, "We saw your refund bounced", about: order)   # you write first
 ```
 
 That's a ticket, a conversation, an assignment history, an append-only audit trail and four events your app can subscribe to.
@@ -52,13 +54,17 @@ Add the gem:
 gem "support_desk"
 ```
 
-Install it (creates the migration + an annotated initializer):
+Install it (creates the migrations + an annotated initializer):
 
 ```bash
 bundle install
 rails generate support_desk:install
 rails db:migrate
 ```
+
+Already on 0.1? `rails generate support_desk:upgrade` copies only the
+migrations a version bump needs (0.2.0: who opened each case) and nothing
+you own. Migrate before you deploy the new code — see the CHANGELOG.
 
 Three model lines and one route line:
 
@@ -103,16 +109,20 @@ Desk records are memoised for the life of the process, so anything that has to c
 
 ## The model macros
 
-### `has_support_tickets(desk: :default, as: nil)`
+### `has_support_tickets(desk: :default, as: nil, if: nil)`
 
-Adds exactly four methods to whoever asks for help:
+Adds six methods to whoever asks for help:
 
 | method | what it does |
 |---|---|
 | `support_tickets` | `has_many`, newest first. Chain the scopes: `alice.support_tickets.open.about(order)` |
 | `ask_support!(message, about:, topic:, files:, via:)` | opens the ticket, posts the first message, emits `ticket_opened`, and hands back the `Ticket` — or the open one they already have about the same thing |
+| `support_requester?` | may this person ask for help, and be written to, right now? |
+| `support_desk` | the desk record their tickets go to |
 | `awaiting_support_reply?` | is the desk holding any of their questions? |
 | `unread_support_count` | for a nav badge, counted against the chats read horizon |
+
+`if:` is a method name or a callable, and it is a **write** rule rather than a screen rule. `has_support_tickets if: :kept?` means a closed account can neither ask nor be written to, on every path — while its history stays readable, its cases stay in the queue, and agents can still take notes on them and close them.
 
 ### `supportable(topic:, candidates: nil, one_open_ticket: true)`
 
@@ -129,7 +139,7 @@ Makes a domain record something people can ask about. Every method has a working
 
 ### `acts_as_support_agent(if: nil, kind: :human)`
 
-Makes someone able to answer. Agents are never chats participants — the desk sends, the agent *authors* — so this needs no messaging setup at all. It adds `support_agent?`, `support_agent_name`, `support_agent_avatar`, `on_duty?`, `support_capacity` and `support_queue`, and **no verbs**: the ticket is the subject of every sentence.
+Makes someone able to answer. Agents are never chats participants — the desk sends, the agent *authors* — so this needs no messaging setup at all. It adds `support_agent?`, `support_agent_name`, `support_agent_avatar`, `on_duty?`, `support_capacity`, `support_queue` and exactly one verb — `open_support_conversation_with!`, the only agent action with no ticket yet (see [Writing first](#writing-first)). Everywhere else the ticket is the subject of the sentence.
 
 ## Tickets
 
@@ -397,6 +407,86 @@ route. It takes its layout and authentication from
 
 Generate when you have an admin to put this inside and want the files;
 mount when you don't. They render the same templates either way.
+
+## Writing first
+
+Most cases start with somebody asking. Some start with you:
+
+```ruby
+lucia.open_support_conversation_with!(alice, "We saw your refund bounced", about: withdrawal)
+```
+
+That is not a personal message from Lucía. It speaks as the desk, signs the
+message with her name, lands in Alice's inbox as "Support", and seats Lucía
+on the case from its first committed state — silently, because "Lucía is
+taking care of your request" in a thread Alice never opened answers a
+question nobody asked. It is the same seam `ask_support!` uses, so there is
+one algorithm for cardinality, topics, subjects, conversations, events and
+clocks:
+
+```ruby
+SupportDesk::Ticket.open!(requester: alice, message: "…", by: lucia)   # what the sugar calls
+```
+
+If Alice already has this conversation open, the message joins it as an
+ordinary **reply** — under your desk's reply policy, which may well leave
+the case with whoever holds it. Nothing about that is guessed from a count:
+the opener knows whether it inserted, and the console says one true thing
+either way.
+
+Every case now records who opened it:
+
+```ruby
+ticket.opened_by             # => alice · lucia — a record, like closed_by
+ticket.opened_by_requester?  # she asked
+ticket.opened_by_support?    # we wrote first
+
+SupportDesk::Ticket.opened_by_support.awaiting_requester
+```
+
+Her abuse limits stay hers: `open_rate_limit` and `max_open_tickets` count
+only the cases she opened, so five conversations you started can never stop
+her asking her first question. And `time_to_first_reply` is nil for a case
+you opened — nobody was waiting for it.
+
+### The line a thread opens with
+
+```ruby
+config.opening_line              = "You opened a conversation about “%{label}”. We usually reply within %{reply_within}."
+config.opening_line_from_support = "%{desk} started this conversation with you about “%{label}”."
+```
+
+Both are posted inside the opening transaction, one database tick above the
+message they introduce — so the line can never arrive after it, or not at
+all. A String (with `%{label}`, `%{desk}`, `%{reply_within}`), an I18n key,
+a block given the ticket, or nil. `opening_line` defaults to nil, so
+existing threads open exactly as they do today; `opening_line_from_support`
+has the gem's own copy as its default, because a message from a desk
+somebody never wrote to has to explain itself.
+
+### From the console
+
+Add `new` to your routes and the queue grows a "Write to someone" button:
+
+```ruby
+resources :support_tickets, only: %i[index show new], concerns: :support_console
+```
+
+Tell the console how to find people and it grows a search box too;
+otherwise it takes a GlobalID from one of your own pages (a user's admin
+screen, an order) and says so:
+
+```ruby
+config.find_requester { |query| User.find_by(email: query.to_s.strip.downcase) }
+```
+
+### Who can be written to
+
+`has_support_tickets if: :kept?` is the whole policy. When it turns false
+the person can neither ask nor be written to, on every path — the console,
+the model, a direct chats write — and nothing is hidden or deleted: the
+transcript stays readable, the case stays in the queue, and agents can
+still take notes and close it.
 
 ## The wizard
 
