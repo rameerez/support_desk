@@ -10,8 +10,9 @@ class MacrosTest < ActiveSupport::TestCase
 
   # --- has_support_tickets -----------------------------------------------------
 
-  test "has_support_tickets adds exactly four methods" do
-    added = %i[support_tickets ask_support! awaiting_support_reply? unread_support_count]
+  test "has_support_tickets adds exactly six methods" do
+    added = %i[support_tickets support_requester? support_desk ask_support! awaiting_support_reply?
+               unread_support_count]
 
     added.each { |method| assert_respond_to @alice, method }
   end
@@ -264,7 +265,11 @@ class MacrosTest < ActiveSupport::TestCase
     assert_match(/unknown acts_as_support_agent option :when/, error.message)
   end
 
-  test "no verbs are added to the agent model" do
+  test "the ticket is still the subject of every sentence but the one that has no ticket yet" do
+    # `open_support_conversation_with!` is the exception, and the only one:
+    # there is no case to say it to until it says it.
+    assert_respond_to @lucia, :open_support_conversation_with!
+
     %i[close take reply_to hand_off release].each { |verb| assert_not_respond_to @lucia, verb }
   end
 end

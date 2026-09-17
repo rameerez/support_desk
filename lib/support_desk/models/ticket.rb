@@ -587,6 +587,12 @@ module SupportDesk
 
         anchor = posted&.created_at || ticket.opened_at
         notice.update_columns(created_at: anchor - ordering_tick)
+        # When there IS a first message it owns the conversation's
+        # last-message pointer and nothing needs repairing. When there isn't,
+        # the notice is that pointer, and chats denormalised its timestamp
+        # before we moved it — so the inbox would sort this conversation by a
+        # moment its only message doesn't have.
+        ticket.conversation.recompute_last_message! if posted.nil?
       end
 
       # One tick of the messages table's own timestamp column: the smallest

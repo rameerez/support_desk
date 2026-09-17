@@ -202,6 +202,10 @@ module SupportDesk
         assert_operator notice.reload.created_at, :<, ticket.opened_at
         assert_equal "agent", ticket.awaiting
         assert_equal ticket.opened_at, ticket.waiting_since
+        # With no human message the notice IS the conversation's last
+        # message, so the denormalised pointer has to follow it back.
+        assert_equal notice.created_at, ticket.conversation.reload.last_message_at
+        assert_equal notice.id, ticket.conversation.last_message_id
 
         # And the first reply still lands after it.
         message = ticket.reply!("¿en qué te ayudamos?", by: @lucia)
