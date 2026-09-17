@@ -15,7 +15,7 @@ Rails.application.routes.draw do
   # console uses only the public API" is a claim that needs a second
   # implementation to be worth anything.
   namespace :madmin do
-    resources :support_tickets, only: %i[index show], concerns: :support_console
+    resources :support_tickets, only: %i[index show new], concerns: :support_console
   end
 
   # Test-only session endpoint so integration tests can act as a user

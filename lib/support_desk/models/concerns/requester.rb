@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 module SupportDesk
-  # Included by `has_support_tickets`. Adds exactly four methods — the whole
-  # requester side of the gem:
+  # Included by `has_support_tickets`. The whole requester side of the gem:
   #
   #   alice.ask_support!("El viaje no aparece verificado", about: ride)
   #   alice.support_tickets.open.about(ride)
+  #   alice.support_requester?
+  #   alice.support_desk
   #   alice.awaiting_support_reply?
   #   alice.unread_support_count
   module Requester
@@ -13,7 +14,7 @@ module SupportDesk
 
     included do
       class_attribute :support_desk_requester_options, instance_writer: false,
-                                                       default: { desk: :default, as: nil }.freeze
+                                                       default: { desk: :default, as: nil, if: nil }.freeze
 
       has_many :support_tickets,
                class_name: "SupportDesk::Ticket",
@@ -26,6 +27,26 @@ module SupportDesk
       def support_desk_key = support_desk_requester_options[:desk]
     end
 
+    # Whether this record may ask for help — or be written to — right now:
+    # the `if:` condition from `has_support_tickets`, honoured. A closed
+    # account answers false and can do neither, while its history stays
+    # readable (see Ticket#chat_locked?).
+    def support_requester?
+      SupportDesk.eligible?(self, self.class.support_desk_requester_options[:if])
+    end
+
+    # The desk this requester writes to (`has_support_tickets desk:`), as a
+    # record. Raises ConfigurationError naming the fix when that desk isn't
+    # configured — its tickets would otherwise silently land on the default
+    # desk.
+    def support_desk
+      key = self.class.support_desk_key
+      SupportDesk.desk(key) ||
+        raise(SupportDesk::ConfigurationError,
+              "#{self.class} writes to desk #{key.inspect}, which isn't configured — " \
+              "its tickets would silently land on the default desk")
+    end
+
     # Open a ticket and say the first thing. Returns the SupportDesk::Ticket
     # — the existing open one when this requester already has a ticket about
     # the same record (or, for free-form tickets, the same topic).
@@ -33,15 +54,9 @@ module SupportDesk
     #   alice.ask_support!("No me han pagado", about: withdrawal)
     #   alice.ask_support!("¿Cómo borro mi cuenta?", topic: :account)
     #
-    # Raises NotSupportable, UnknownTopic, NotAllowed, RateLimited,
-    # TooManyOpenTickets.
+    # Raises NotARequester, NotSupportable, UnknownTopic, NotAllowed,
+    # RateLimited, TooManyOpenTickets.
     def ask_support!(message, about: nil, topic: nil, files: [], via: :in_app)
-      key = self.class.support_desk_requester_options[:desk]
-      desk = SupportDesk.desk(key) ||
-             raise(SupportDesk::ConfigurationError,
-                   "#{self.class} writes to desk #{key.inspect}, which isn't configured — " \
-                   "its tickets would silently land on the default desk")
-
       SupportDesk::Ticket.open!(
         requester: self,
         message: message,
@@ -49,7 +64,7 @@ module SupportDesk
         topic: topic,
         files: files,
         via: via,
-        desk: desk,
+        desk: support_desk,
         requester_role: self.class.support_desk_requester_options[:as]
       )
     end

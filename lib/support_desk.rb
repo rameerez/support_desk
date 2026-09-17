@@ -158,12 +158,37 @@ module SupportDesk
     # Every class that has declared itself able to answer.
     def agent_class_names = @agent_class_names ||= Set.new
 
+    # The registered classes themselves, for the places that have to restrict
+    # a lookup to them — the console's GlobalID allow-lists, where a raw
+    # token is an identifier and never an authorization to call `find` on
+    # whatever class name it names.
+    #
+    # Names that no longer resolve are dropped rather than raised on: the
+    # registries store names so they survive reloads, and a class that went
+    # away is simply not one of the classes people can be looked up as.
+    def requester_classes = resolve_all(requester_class_names)
+    def supportable_classes = resolve_all(supportable_class_names)
+
     # Whether +klass+ (a Class, an instance, or a class name) is supportable.
     def supportable_class?(klass) = registered?(supportable_class_names, klass)
     # Whether +klass+ asks for support / answers it. Ancestor-aware, so an
     # STI subclass of a registered class counts.
     def requester_class?(klass) = registered?(requester_class_names, klass)
     def agent_class?(klass) = registered?(agent_class_names, klass)
+
+    # --- Macro conditions -----------------------------------------------------------
+
+    # Whether +record+ passes an `if:` condition from a macro — nil is always
+    # yes. Both `has_support_tickets if:` (may this person ask for help, and
+    # be written to) and `acts_as_support_agent if:` (may this person answer)
+    # are read through here, so the two conditions can never drift into two
+    # meanings of the same option.
+    def eligible?(record, condition)
+      return true if condition.nil?
+      return !!record.public_send(condition) if condition.is_a?(Symbol)
+
+      !!condition.call(record)
+    end
 
     # --- The chats seam -------------------------------------------------------------
 
@@ -257,6 +282,22 @@ module SupportDesk
       ]
     end
 
+    # A duration in the reader's own language ("1 día", "4 hours") — the
+    # answer promise in the wizard's line, the wait in a console summary, and
+    # the `%{reply_within}` an opening line can interpolate.
+    #
+    # Duration#inspect is English whatever the locale, which is what left one
+    # untranslatable string in an otherwise Spanish console.
+    def humanize_duration(duration)
+      return duration.inspect unless defined?(ActionView::Helpers::DateHelper)
+
+      @duration_words ||= Object.new.extend(ActionView::Helpers::DateHelper)
+      words = @duration_words.distance_of_time_in_words(duration.to_i).to_s
+      # An app whose locale has no date translations (no rails-i18n) would
+      # otherwise show "Translation missing" to a customer.
+      words.start_with?("Translation missing") ? duration.inspect : words
+    end
+
     # A stable, URL-safe key for an actor (agent, requester, desk), used in
     # cache keys and event payloads. GlobalID params already encode class +
     # id, so two classes can never collide.
@@ -272,6 +313,10 @@ module SupportDesk
     def register(registry, klass)
       registry << klass.name if klass.name
       klass
+    end
+
+    def resolve_all(registry)
+      registry.filter_map { |name| name.safe_constantize }
     end
 
     def registered?(registry, klass)

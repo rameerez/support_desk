@@ -1,0 +1,25 @@
+<%# Writing first: the desk starting a conversation with somebody who hasn't
+    written to us.
+
+    It is a whole page rather than a modal on purpose — the 422 that a bad
+    email or a refused message comes back as has to render the form again
+    with everything still typed into it, and a stream refresh would throw
+    that away. %>
+<div class="mx-auto max-w-2xl px-4 py-6 text-slate-900">
+  <header class="mb-5">
+    <h1 class="text-xl font-semibold"><%= t("support_desk.console.new_conversation.title") %></h1>
+    <p class="text-sm text-slate-500"><%= support_desk_record.name %></p>
+  </header>
+
+  <%# The refusal is rendered HERE rather than left to your layout: this
+      screen answers 422 with itself, and an agent has to read why on the
+      page that came back. If your layout already prints flashes, delete
+      this block when you eject the views. %>
+  <% if flash[:alert] %>
+    <p class="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+      <%= flash[:alert] %>
+    </p>
+  <% end %>
+
+  <%= render "new_conversation_form" %>
+</div>

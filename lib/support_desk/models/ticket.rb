@@ -47,6 +47,12 @@ module SupportDesk
     belongs_to :assignee, polymorphic: true, optional: true
     belongs_to :conversation, class_name: "Chats::Conversation", optional: true
     belongs_to :closed_by, polymorphic: true, optional: true
+    # Who opened the case: the requester when they asked, the agent when the
+    # desk wrote first. A record, exactly like `closed_by`. Nullable only for
+    # rows written by 0.1, which had no way to open a case as anybody else —
+    # the upgrade migration backfills them to their requester and `doctor`
+    # reports any that are left.
+    belongs_to :opened_by, polymorphic: true, optional: true
 
     has_many :assignments, class_name: "SupportDesk::Assignment", inverse_of: :ticket, dependent: :destroy
     # :delete_all, not :destroy — an Event is readonly once written, and a
@@ -71,6 +77,7 @@ module SupportDesk
     validates :awaiting, inclusion: { in: AWAITING_STATES }
     validates :opened_via, inclusion: { in: CHANNELS }
     validates :reference, presence: true
+    validate :opened_by_must_be_a_whole_record
 
     # --- Scopes ---------------------------------------------------------------
 
@@ -87,6 +94,26 @@ module SupportDesk
 
     scope :awaiting_reply, -> { where(awaiting: "agent") }
     scope :awaiting_requester, -> { where(awaiting: "requester") }
+
+    # The two halves of every case: the requester asked, or the desk wrote
+    # first. They partition the table, NULL provenance included — a 0.1 row
+    # nobody backfilled reads as "not the requester", which is exactly what
+    # `doctor` wants somebody to come and look at.
+    #
+    # Built lazily, in a method rather than a constant: an Arel comparison
+    # evaluated at class definition would consult the schema before
+    # `db:migrate` had added the columns it names.
+    def self.opened_by_requester_condition # :nodoc:
+      identity = arel_table[:opened_by_type].eq(arel_table[:requester_type])
+                       .and(arel_table[:opened_by_id].eq(arel_table[:requester_id]))
+      # Only 0.1 writes a NULL pair: automation openers are not supported.
+      # Keep those inbound cases correct while the catch-up backfill runs.
+      legacy = arel_table[:opened_by_type].eq(nil).and(arel_table[:opened_by_id].eq(nil))
+      identity.or(legacy)
+    end
+
+    scope :opened_by_requester, -> { where(opened_by_requester_condition) }
+    scope :opened_by_support, -> { where.not(opened_by_requester_condition) }
 
     # Waiting longer than +duration+ for whoever owes the next word.
     scope :waiting_over, lambda { |duration|
@@ -159,36 +186,83 @@ module SupportDesk
       end
 
       # Open a ticket and post its first message. Usually called as
-      # `requester.ask_support!(…)`; this is the seam channels and jobs use.
+      # `requester.ask_support!(…)` — or, when the desk writes first, as
+      # `agent.open_support_conversation_with!(…)`. This is the seam under
+      # both, and the one channels and jobs use.
+      #
+      # `by:` is whoever is opening it and defaults to the requester; an
+      # explicit nil means the same thing. An AGENT there is the desk writing
+      # first: the message is the desk's, signed by them, they hold the case
+      # from its first committed state, nobody is told "se ocupa de tu
+      # consulta", and the requester's asking limits don't apply — those
+      # limit asking, not being asked.
       #
       # Returns the existing open ticket when one already covers the same
       # subject (or, for free-form tickets, the same topic) — posting the
-      # message into it, because somebody just typed it.
+      # message into it as an ordinary reply, because somebody just typed it.
       def open!(requester:, message: nil, about: nil, topic: nil, files: [], via: :in_app,
-                desk: nil, requester_role: nil, title: nil, metadata: {})
+                desk: nil, requester_role: nil, title: nil, metadata: {}, by: nil, request: nil)
+        open_or_reply!(requester: requester, message: message, about: about, topic: topic, files: files,
+                       via: via, desk: desk, requester_role: requester_role, title: title,
+                       metadata: metadata, by: by, request: request)
+      end
+
+      # `open!`, plus the console's authorization seam. `authorize_reuse` is
+      # called with the case this turned out to be a reply INTO — under its
+      # row lock, before any policy side effect — so a host that allows
+      # writing to somebody but not answering that particular case refuses
+      # before anything is written, and a raise there takes the whole
+      # operation with it. Everything else is `open!`; that is the method to
+      # call.
+      def open_or_reply!(requester:, message: nil, about: nil, topic: nil, files: [], via: :in_app,
+                         desk: nil, requester_role: nil, title: nil, metadata: {}, by: nil, request: nil,
+                         authorize_reuse: nil) # :nodoc:
+        ensure_requester!(requester)
         desk ||= SupportDesk.desk
+        opener = by.nil? ? requester : by
+        # By persisted identity, never by ambient state: who asked is not
+        # something to infer from Current.actor, and an agent passed as their
+        # own requester is asking for help, not writing to themselves.
+        by_support = !same_actor?(opener, requester)
+        ensure_opener!(opener) if by_support
+
         # The subject is checked BEFORE the topic: "this isn't supportable" is
         # the useful error, and an unsupportable record has no topic to find.
         validate_subject!(about, requester)
-        node = resolve_topic!(topic, about, desk, requester, about)
+        node = resolve_topic!(topic, about, desk, requester, about, by_support: by_support)
 
         cardinality = cardinality_key_for(requester: requester, subject: about, topic: node)
         existing = existing_for(requester: requester, desk: desk, subject: about, topic: node)
-        return post_opening_message(existing, message, files) if existing
+        enforce_asking_limits!(requester, desk) unless existing || by_support
 
-        enforce_rate_limit!(requester, desk)
-        enforce_open_ticket_cap!(requester, desk)
+        # ONE savepoint around the WHOLE operation, reuse included. A joined
+        # transaction is not enough: a caller who rescues our failure and
+        # commits its own would keep the ticket, the seat and the conversation
+        # and lose only the message that was supposed to justify them.
+        transaction(requires_new: true) do
+          next reply_into!(existing, message, files: files, by: opener, by_support: by_support,
+                           request: request, authorize_reuse: authorize_reuse) if existing
 
-        ticket = transaction do
           created, inserted = insert_ticket!(
-            requester: requester, desk: desk, node: node, about: about, via: via,
-            requester_role: requester_role, title: title, metadata: metadata, cardinality_key: cardinality
+            requester: requester, desk: desk, node: node, about: about, via: via, opened_by: opener,
+            by_support: by_support, requester_role: requester_role, title: title, metadata: metadata,
+            cardinality_key: cardinality, request: request
           )
-          post_opening_message(created, message, files)
-          SupportDesk.emit_after_commit(:ticket_opened, created) if inserted
-          created
+
+          # `inserted` is the only thing that knows whether THIS call opened
+          # the case. Not the assignment, not the message count, not
+          # `previously_new_record?` — the update two lines down resets it.
+          if inserted
+            post_opening!(created, message, files: files, by: opener, by_support: by_support)
+            SupportDesk.emit_after_commit(:ticket_opened, created)
+            created
+          else
+            # Somebody else's INSERT won by a millisecond. Theirs is the case
+            # that exists, so this is a reply into it, policy and all.
+            reply_into!(created, message, files: files, by: opener, by_support: by_support,
+                        request: request, authorize_reuse: authorize_reuse)
+          end
         end
-        ticket.reload
       end
 
       # A human-friendly, unguessable-enough reference: "T-AB12CD".
@@ -233,7 +307,77 @@ module SupportDesk
         scope.newest_first.first
       end
 
+      # The record on the requester side of every operation: saved, declared
+      # with `has_support_tickets`, and eligible RIGHT NOW.
+      #
+      # Eligibility is re-read rather than taken from the record in hand: the
+      # instance a caller is holding may have been loaded before the account
+      # was closed, and "not yours" and "not eligible" must look the same from
+      # outside. (It does not lock the host's closure transaction — see
+      # #requester_unavailable?.)
+      def ensure_requester!(record) # :nodoc:
+        unless record.respond_to?(:support_requester?)
+          raise NotARequester, "#{describe_record(record)} can't ask for support or be written to — " \
+                               "declare `has_support_tickets` on #{record.class}"
+        end
+        unless record.persisted?
+          raise NotARequester, "an unsaved #{record.class} can't ask for support — save it first"
+        end
+
+        current = record.class.uncached { record.class.find_by(id: record.id) }
+        return if current&.support_requester?
+
+        raise NotARequester, "#{record.class}##{record.id} can't ask for support or be written to right now " \
+                             "(`has_support_tickets if:` says no, or the record is gone)"
+      end
+
+      # A loaded instance may predate revocation or deletion. Check the row,
+      # just as requester eligibility does; this does not serialize revocation.
+      def ensure_agent_record!(record) # :nodoc:
+        if record.respond_to?(:persisted?) && record.persisted? && record.respond_to?(:support_agent?)
+          current = record.class.uncached { record.class.find_by(id: record.id) }
+          return if current&.support_agent?
+        end
+
+        raise NotAnAgent, "#{record.class} is not a currently eligible, persisted support agent — " \
+                         "declare `acts_as_support_agent` and check its if: condition"
+      end
+
+      # Whether two actors are the same record. Not `==`: either side can be
+      # nil, a Symbol or an unsaved record, and all of those must answer "no"
+      # rather than raise or match on a nil id. STI subclasses compare by
+      # their base name, because that is the identity the polymorphic columns
+      # store — and two rows in one table can't share an id anyway.
+      def same_actor?(one, other) # :nodoc:
+        return false if one.nil? || other.nil? || one.is_a?(Symbol) || other.is_a?(Symbol)
+        return false unless one.respond_to?(:persisted?) && other.respond_to?(:persisted?)
+        return false unless one.persisted? && other.persisted?
+
+        one.class.polymorphic_name == other.class.polymorphic_name && one.id.to_s == other.id.to_s
+      end
+
       private
+
+      # Who may speak for the desk: a saved, currently eligible agent.
+      # Automation (`by: :system`) is refused by name rather than by
+      # NoMethodError three frames in — it is deferred work, not a typo (see
+      # docs/12-open-questions.md Q17).
+      def ensure_opener!(opener)
+        if opener.is_a?(Symbol)
+          raise NotAnAgent, "can't open a ticket as #{opener.inspect} — a case is opened by somebody who can " \
+                            "answer it, and automation openers aren't supported yet; pass an agent record"
+        end
+        unless opener.respond_to?(:persisted?) && opener.persisted?
+          raise NotAnAgent, "can't open a ticket as an unsaved #{opener.class} — save the agent first"
+        end
+        ensure_agent_record!(opener)
+      end
+
+      def describe_record(record)
+        return record.inspect if record.nil? || record.is_a?(Symbol)
+
+        "#{record.class}##{record.id}"
+      end
 
       # "on this desk, and waiting longer than its own threshold" — with an
       # upper bound when the caller wants the band between two thresholds
@@ -249,9 +393,14 @@ module SupportDesk
         ceiling ? clause.and(arel_table[:waiting_since].gt(ceiling.ago)) : clause
       end
 
-      def resolve_topic!(topic, about, desk, requester, subject)
+      def resolve_topic!(topic, about, desk, requester, subject, by_support: false)
         node = locate_topic!(topic, about, desk)
-        unless node.visible_for?(requester)
+        # An agent may file onto any topic in the tree, including ones no
+        # requester is offered (`only:`) — the same latitude `change_topic!`
+        # has, and the reason it exists: the desk knows what this is about.
+        # The tree's other rule stands for everybody: a topic that needs
+        # something to be about still needs it.
+        if !by_support && !node.visible_for?(requester)
           raise NotAllowed, "#{requester.class}##{requester.id} may not open a ticket under topic " \
                             "#{node.path.inspect} (its only: condition says no)"
         end
@@ -299,12 +448,20 @@ module SupportDesk
         not_closed.find_by(requester: requester, desk: desk, cardinality_key: cardinality_key)
       end
 
+      # The two walls a requester can hit, and only they can: both count the
+      # cases this person ASKED for. Five conversations the desk started must
+      # never be what stops somebody asking their first question.
+      def enforce_asking_limits!(requester, desk)
+        enforce_rate_limit!(requester, desk)
+        enforce_open_ticket_cap!(requester, desk)
+      end
+
       def enforce_rate_limit!(requester, desk)
         limit = desk.config.open_rate_limit
         return if limit.nil?
 
         window = Time.current - limit[:within].to_i
-        recent = where(requester: requester, desk: desk).where(opened_at: window..).count
+        recent = opened_by_requester.where(requester: requester, desk: desk).where(opened_at: window..).count
         return if recent < limit[:to]
 
         raise RateLimited, "#{requester.class}##{requester.id} has opened #{recent} tickets in the last " \
@@ -321,7 +478,7 @@ module SupportDesk
         cap = desk.config.max_open_tickets
         return if cap.nil?
 
-        current = not_closed.where(requester: requester, desk: desk).count
+        current = not_closed.opened_by_requester.where(requester: requester, desk: desk).count
         return if current < cap
 
         raise TooManyOpenTickets, "#{requester.class}##{requester.id} already has #{current} open tickets " \
@@ -336,7 +493,7 @@ module SupportDesk
       # from "I found this": they are the same ticket, and a very different
       # thing to announce.
       def insert_ticket!(requester:, desk:, node:, about:, via:, requester_role:, title:, metadata:,
-                         cardinality_key:)
+                         cardinality_key:, opened_by:, by_support: false, request: nil)
         attempts = 0
         begin
           attempts += 1
@@ -346,20 +503,37 @@ module SupportDesk
             ticket = create!(
               desk: desk, requester: requester, requester_role: requester_role, subject: about,
               topic: node, title: title.presence, reference: unique_reference, status: "open",
-              awaiting: "agent", priority: node.priority, opened_via: via.to_s,
+              awaiting: "agent", priority: node.priority, opened_via: via.to_s, opened_by: opened_by,
               opened_at: Time.current, cardinality_key: cardinality_key, metadata: metadata
             )
-            conversation = Chats::Conversation.direct_between!(requester, desk, about: ticket)
+            # The pair is symmetric; the host's `can_message?` policy is not.
+            # A conversation the DESK opens has to be asked about in that
+            # direction, or a host that lets support write to anyone and
+            # strangers write to nobody would refuse its own outreach.
+            conversation = if by_support
+              Chats::Conversation.direct_between!(desk, requester, about: ticket)
+            else
+              Chats::Conversation.direct_between!(requester, desk, about: ticket)
+            end
             ticket.update!(conversation_id: conversation.id, waiting_since: ticket.opened_at)
+            # The agent who wrote first holds the case from its first
+            # committed state — silently. No `assign!`, so no "Lucía se ocupa
+            # de tu consulta" in a thread the requester never started, and no
+            # :ticket_assigned to page a team about their own message.
+            if by_support
+              Assignment.open!(ticket: ticket, agent: opened_by, by: opened_by, reason: :opened)
+              ticket.update!(assignee: opened_by)
+            end
             # Through the same writer every other transition uses (`send`
             # because it is private and we are the class, not the record),
             # so opening a ticket reaches `ticket_transitioned` too.
-            opened = ticket.send(:record_transition!, :opened, actor: requester) do
-              { "topic" => node.path, "via" => via.to_s }
+            opened = ticket.send(:record_transition!, :opened, actor: opened_by) do
+              { "topic" => node.path, "via" => via.to_s,
+                "assignee" => (SupportDesk.actor_key(opened_by) if by_support) }
             end
             [ ticket, opened ]
           end
-          ticket.send(:publish_transition, opened, :opened, requester, nil)
+          ticket.send(:publish_transition, opened, :opened, opened_by, request)
           [ ticket, true ]
         rescue ActiveRecord::RecordNotUnique
           existing = open_ticket_for(requester: requester, desk: desk, cardinality_key: cardinality_key)
@@ -379,15 +553,90 @@ module SupportDesk
         raise Error, "couldn't generate a free ticket reference in #{REFERENCE_ATTEMPTS} attempts"
       end
 
-      def post_opening_message(ticket, message, files)
-        return ticket if message.blank? && files.blank?
+      # The first words of a brand new case, inside the transaction that
+      # created it: the desk's opening line, the actual message, and the
+      # clocks — folded in on THIS instance, so the row that commits is
+      # already true and the caller needs no reload. chats' after-commit
+      # subscriber then finds the message already registered and does
+      # nothing.
+      def post_opening!(ticket, message, files:, by:, by_support:)
+        notice = post_opening_line!(ticket)
 
-        ticket.post_requester_message!(message, files: files)
-        # Posting the first message is what starts the clocks, and it does
-        # that through chats' after-commit subscriber — on a DIFFERENT
-        # instance of this row. Without the reload the caller gets a ticket
-        # whose `waiting_since` is nil while the database's is not.
-        ticket.reload
+        posted = if by_support
+          # Never the inbound "no message, hand the ticket back" shortcut: a
+          # desk that writes first with nothing to say is a chats validation
+          # error, and this whole transaction goes with it.
+          ticket.post_agent_message!(message, files: files, by: by)
+        elsif message.present? || files.present?
+          ticket.post_requester_message!(message, files: files)
+        end
+
+        ticket.send(:record_registration!, posted) if posted
+        pin_opening_line!(ticket, notice, posted)
+        ticket
+      end
+
+      def post_opening_line!(ticket)
+        line = ticket.desk_config.opening_line_for(ticket)
+        return nil if line.blank?
+
+        ticket.conversation.post_system_message!(line)
+      end
+
+      # chats orders a transcript by (created_at, id), and inserting one row
+      # after another does NOT guarantee two different timestamps: frozen
+      # time in a test, a coarse column, a clock that doesn't move between
+      # two very fast inserts. Where ids are UUIDs there is then nothing
+      # useful to break the tie with, and the notice can sort BELOW the
+      # message it introduces.
+      #
+      # So the notice is pinned one database tick before that message, inside
+      # the same transaction, using the timestamp the message actually got.
+      # Only this new notice moves, never anybody's real message, and the
+      # human message still owns the conversation's last-message pointer, so
+      # nothing has to be recomputed afterwards.
+      def pin_opening_line!(ticket, notice, posted)
+        return if notice.nil?
+
+        anchor = posted&.created_at || ticket.opened_at
+        notice.update_columns(created_at: anchor - ordering_tick)
+        # When there IS a first message it owns the conversation's
+        # last-message pointer and nothing needs repairing. When there isn't,
+        # the notice is that pointer, and chats denormalised its timestamp
+        # before we moved it — so the inbox would sort this conversation by a
+        # moment its only message doesn't have.
+        ticket.conversation.recompute_last_message! if posted.nil?
+      end
+
+      # One tick of the messages table's own timestamp column: the smallest
+      # difference this database will still store.
+      def ordering_tick
+        precision = Chats::Message.columns_hash["created_at"]&.precision || 6
+        (10**-precision).seconds
+      end
+
+      # Reuse is a reply, never a second opening. Both ways in — the case the
+      # pre-check found and the one this call lost the insert race to — come
+      # through here, so an existing case is answered under its row lock,
+      # under the desk's reply policy, with the console's authorization hook
+      # running before any of it.
+      def reply_into!(ticket, message, files:, by:, by_support:, request:, authorize_reuse:)
+        if by_support
+          ticket.send(:reply_under_lock!, message, by: by, files: files, request: request,
+                                                   authorize: authorize_reuse)
+        else
+          ticket.with_lock(requires_new: true) do
+            authorize_reuse&.call(ticket)
+            # A requester opening the same case again with nothing to say is
+            # the old API's "hand it back": supported, and it writes nothing.
+            next if message.blank? && files.blank?
+
+            posted = ticket.post_requester_message!(message, files: files)
+            ticket.send(:record_registration!, posted)
+          end
+        end
+
+        ticket
       end
     end
 
@@ -402,15 +651,47 @@ module SupportDesk
     # chats' context line for the conversation behind the ticket.
     def chat_subject_label = label
 
-    # Whether chats should refuse new messages in this conversation. Only
-    # true for closed tickets on a desk configured `closed_tickets:
-    # :locked` — the default lets a requester's reply reopen the case.
+    # Whether chats should refuse new messages in this conversation: because
+    # there is nobody to write to any more, or because the case is closed on
+    # a desk configured `closed_tickets: :locked` (the default lets a
+    # requester's reply reopen it instead).
+    #
+    # The first reason is a WRITE rule, not a screen rule: the transcript
+    # stays readable, the case stays in the queue, and nothing is deleted —
+    # only new messages stop. `open!` alone could not do this, because the
+    # account can be closed long after the case was opened.
     def chat_locked?
-      closed? && desk_config.closed_tickets == :locked
+      requester_unavailable? || (closed? && desk_config.closed_tickets == :locked)
     end
 
+    # The reasons in the same order the refusal takes them, so the notice
+    # under a composer and the error behind it never tell different stories.
     def chat_locked_notice
+      return I18n.t("support_desk.thread.unavailable_notice") if requester_unavailable?
+
       I18n.t("support_desk.thread.closed_notice")
+    end
+
+    # Whether the person this case belongs to can be written to at all right
+    # now: their record is gone, or `has_support_tickets if:` says no (a
+    # closed account, a ban).
+    #
+    # Read FRESH from the database on purpose — the requester this instance
+    # is holding may have been loaded before they closed their account, and a
+    # cached association is not evidence about now. It still doesn't
+    # serialize against the host's own closure transaction: an account closed
+    # between this read and the write gets one more message in.
+    def requester_unavailable?
+      return true if requester_type.blank? || requester_id.blank?
+
+      model = requester_type.safe_constantize
+      current = model&.uncached { model.find_by(id: requester_id) }
+      return true if current.nil?
+      # A requester class that never declared the macro (an import, a legacy
+      # row) has no opinion to honour, so it isn't "unavailable".
+      return false unless current.respond_to?(:support_requester?)
+
+      !current.support_requester?
     end
 
     def open? = status == "open"
@@ -419,6 +700,18 @@ module SupportDesk
     def assigned? = assignee_id.present?
     def unassigned? = !assigned?
     def reopened? = reopen_count.to_i.positive?
+
+    # Who started this conversation. Read from the stored identity rather
+    # than the association, so neither predicate loads a record to answer —
+    # and so a case whose opener has since been deleted still answers.
+    def opened_by_requester?
+      return true if opened_by_id.nil? && opened_by_type.nil?
+
+      opened_by_id.present? && opened_by_type == requester_type && opened_by_id.to_s == requester_id.to_s
+    end
+
+    # NULL provenance is a legacy requester, never an automation opener.
+    def opened_by_support? = !opened_by_requester?
 
     # True when the desk owes the next word.
     def awaiting_reply? = awaiting == "agent"
@@ -458,8 +751,13 @@ module SupportDesk
       waiting_for >= desk_config.reply_within
     end
 
-    # How long the requester waited for a first human answer.
+    # How long the requester waited for a first human answer. Nil for a case
+    # the desk opened: nobody was waiting for it, and "how long from our own
+    # first word to our own first word" is not a service level. Metrics (0.4)
+    # is where that case gets a number, measured from the requester's first
+    # message.
     def time_to_first_reply
+      return nil if opened_by_support?
       return nil if first_agent_reply_at.nil? || opened_at.nil?
 
       ActiveSupport::Duration.build((first_agent_reply_at - opened_at).to_i)
@@ -509,16 +807,7 @@ module SupportDesk
       actor = resolve_actor(by)
       ensure_agent!(actor)
 
-      # One transaction, because taking the ticket and announcing it are
-      # part of answering: a reply that raises (an empty body, a locked
-      # conversation, a rate limit) must not leave the agent holding a case
-      # they never answered, or "Lucía se ocupa de tu consulta" sitting in
-      # the requester's thread with no reply under it.
-      with_lock do
-        ensure_writable!
-        apply_reply_policy!(actor, request: request)
-        desk.message!(conversation, body, files: files, author: actor)
-      end
+      reply_under_lock!(body, by: actor, files: files, request: request)
     end
 
     # An internal note: in the timeline and the console, never in the
@@ -711,53 +1000,14 @@ module SupportDesk
     # double-counts, and safe to call by hand after importing a transcript.
     def register!(message)
       return self if registered?(message)
+      # System messages move nothing, however they arrive. chats never
+      # delivers them here (Chats::Message#notify_host returns early for
+      # them), so this guards direct calls and replayed imports — including
+      # the opening line, which is posted inside the opening transaction and
+      # must never be mistaken for somebody's first word.
+      return self if role_of(message) == :system
 
-      role = nil
-      opening = false
-      reopened = false
-      applied = false
-      reopen_event = nil
-
-      with_lock do
-        # Re-check under the lock: the same message can reach us twice (a
-        # redelivered event, a hand-written replay), and an SLA clock that
-        # moves twice for one message is a lie.
-        next if registered?(message)
-
-        role = role_of(message)
-        opening = opening_message?
-        applied = true
-
-        attributes = { last_registered_message_id: message.id }
-        case role
-        when :requester
-          attributes[:last_requester_message_at] = message.created_at
-          if closed? && message.created_at > closed_at && desk_config.closed_tickets == :reopen_on_reply
-            attributes.merge!(status: "open", closed_at: nil, closed_by: nil,
-                              reopen_count: reopen_count.to_i + 1, cardinality_key: "reopened:#{id}")
-            reopened = true
-          end
-        when :agent
-          attributes[:last_agent_message_at] = message.created_at
-          attributes[:first_agent_reply_at] = message.created_at if first_agent_reply_at.nil?
-          # A closed case owes nobody anything. An agent adding one last
-          # word keeps the clocks honest without putting the case back in a
-          # queue that `close!` just took it out of.
-        end
-
-        assign_attributes(attributes)
-        self.awaiting = closed? ? "none" : awaiting_from_clocks
-        self.waiting_since = waiting_since_from_clocks
-        save!
-
-        if reopened
-          restore_assignment!(by: :system)
-          reopen_event = record_transition!(:reopened, actor: requester) { { "via" => "requester_reply" } }
-        end
-      end
-
-      publish_transition(reopen_event, :reopened, requester, nil) if reopen_event
-      announce_registration(message, role: role, opening: opening, reopened: reopened) if applied
+      with_lock(requires_new: true) { record_registration!(message) }
       self
     end
 
@@ -811,7 +1061,10 @@ module SupportDesk
       if closed?
         actions << :reopen
       else
-        actions << :reply if may_reply?(agent)
+        # Nobody to write to is not the same as nothing to do: the transcript,
+        # the notes and closing the case are all still here, and only the
+        # thing that would speak to the requester is taken away.
+        actions << :reply if may_reply?(agent) && !requester_unavailable?
         actions << :assign
         actions << :hand_off if assigned_to?(agent)
         actions << :release if assigned?
@@ -876,6 +1129,13 @@ module SupportDesk
       requester.message!(conversation, body, files: files)
     end
 
+    # Post a message as the DESK, signed by the agent who wrote it — every
+    # answer, and the desk's first word when it writes first. One place knows
+    # "the desk sends, the human signs".
+    def post_agent_message!(body, files: [], by:) # :nodoc:
+      desk.message!(conversation, body, files: files, author: by)
+    end
+
     def inspect
       "#<SupportDesk::Ticket #{reference} #{topic&.path} #{label.to_s.inspect} #{status}" \
         "#{" → #{describe_actor(assignee)}" if assigned?}#{waiting_description}>"
@@ -914,10 +1174,7 @@ module SupportDesk
 
     def ensure_agent!(actor)
       return if actor.is_a?(Symbol)
-      return if actor.respond_to?(:support_agent?) && actor.support_agent?
-
-      raise NotAnAgent, "#{describe_actor(actor)} is not a support agent — declare " \
-                        "`acts_as_support_agent` on #{actor.class}"
+      self.class.ensure_agent_record!(actor)
     end
 
     def describe_actor(actor)
@@ -928,10 +1185,41 @@ module SupportDesk
 
     # --- Transition plumbing -------------------------------------------------------
 
+    # The two reasons a case takes no more messages, in the order the notice
+    # under the composer gives them: there is nobody to write to, and only
+    # then the closed-and-locked case.
     def ensure_writable!
+      if requester_unavailable?
+        raise Locked, "ticket #{reference} can't be written to: #{requester_type}##{requester_id} is no " \
+                      "longer an eligible support requester. The case stays readable."
+      end
       return unless chat_locked?
 
       raise Locked, "ticket #{reference} is closed and this desk locks closed tickets — reopen it first"
+    end
+
+    # Everything `reply!` does, under ONE lock and ONE savepoint: check that
+    # the conversation still takes messages, apply the desk's reply policy,
+    # post, and fold the message into the clocks before anything commits.
+    #
+    # The savepoint is not belt and braces: taking the ticket and announcing
+    # it are part of answering, so a reply that raises (an empty body, a
+    # locked conversation, a host policy) must not leave the agent holding a
+    # case they never answered — not even when the caller rescues the raise
+    # and commits its own transaction.
+    #
+    # `authorize:` is the console's hook (see Ticket.open_or_reply!): it runs
+    # under this lock, before any policy side effect, and a raise there rolls
+    # the whole thing back.
+    def reply_under_lock!(body, by:, files:, request:, authorize: nil)
+      with_lock(requires_new: true) do
+        authorize&.call(self)
+        ensure_writable!
+        apply_reply_policy!(by, request: request)
+        posted = post_agent_message!(body, files: files, by: by)
+        record_registration!(posted)
+        posted
+      end
     end
 
     def apply_reply_policy!(actor, request: nil)
@@ -1011,6 +1299,66 @@ module SupportDesk
 
     # --- Registration plumbing ------------------------------------------------------
 
+    # The half that writes, for callers who ALREADY hold the row: `reply!`
+    # under its lock, and `Ticket.open!` while it still owns the uncommitted
+    # row it just created. That is what keeps ONE method in charge of the
+    # clocks — the opening message is folded in on the same instance, before
+    # commit, so the row that lands is already true and nothing has to
+    # reload.
+    #
+    # Everything is re-checked here rather than in the caller, because the
+    # caller is not always the lock holder it thinks it is.
+    def record_registration!(message) # :nodoc:
+      return self if role_of(message) == :system
+      # Re-check under the lock: the same message can reach us twice (a
+      # redelivered event, a hand-written replay), and an SLA clock that
+      # moves twice for one message is a lie.
+      return self if registered?(message)
+
+      role = role_of(message)
+      opening = opening_message?
+      reopened = false
+      reopen_event = nil
+
+      attributes = { last_registered_message_id: message.id }
+      case role
+      when :requester
+        attributes[:last_requester_message_at] = message.created_at
+        if closed? && message.created_at > closed_at && desk_config.closed_tickets == :reopen_on_reply
+          attributes.merge!(status: "open", closed_at: nil, closed_by: nil,
+                            reopen_count: reopen_count.to_i + 1, cardinality_key: "reopened:#{id}")
+          reopened = true
+        end
+      when :agent
+        attributes[:last_agent_message_at] = message.created_at
+        # A first REPLY answers something. An agent message with no earlier
+        # requester message is the desk opening the conversation, or a word
+        # into an empty case — neither is a reply, and a requester clock that
+        # is LATER (an out-of-order replay) is not evidence of one either.
+        if first_agent_reply_at.nil? && last_requester_message_at.present? &&
+           last_requester_message_at <= message.created_at
+          attributes[:first_agent_reply_at] = message.created_at
+        end
+        # A closed case owes nobody anything. An agent adding one last
+        # word keeps the clocks honest without putting the case back in a
+        # queue that `close!` just took it out of.
+      end
+
+      assign_attributes(attributes)
+      self.awaiting = closed? ? "none" : awaiting_from_clocks
+      self.waiting_since = waiting_since_from_clocks
+      save!
+
+      if reopened
+        restore_assignment!(by: :system)
+        reopen_event = record_transition!(:reopened, actor: requester) { { "via" => "requester_reply" } }
+      end
+
+      publish_transition(reopen_event, :reopened, requester, nil) if reopen_event
+      announce_registration(message, role: role, opening: opening, reopened: reopened)
+      self
+    end
+
     # Whether this message is already folded in. The last-id check catches
     # the common redelivery; the clock check catches the rest, because a
     # REPLAY can arrive in any order and an older message must never rewind
@@ -1049,6 +1397,16 @@ module SupportDesk
       return false if record.nil? || type.nil?
 
       type == record.class.polymorphic_name && id.to_s == record.id.to_s
+    end
+
+    # Provenance is a record or it is nothing: half a polymorphic pair points
+    # at a class with no row, or a row with no class, and every predicate and
+    # scope over it would have to guess. (Legacy rows have NEITHER, which is
+    # a shape we can read and `doctor` can report.)
+    def opened_by_must_be_a_whole_record
+      return if opened_by_type.nil? == opened_by_id.nil?
+
+      errors.add(:opened_by, "needs both a type and an id, or neither")
     end
 
     # What "one open ticket about this" means for this ticket, recomputed
@@ -1108,7 +1466,13 @@ module SupportDesk
       when :requester
         SupportDesk.emit_after_commit(:requester_replied, self, message) unless opening
       when :agent
-        SupportDesk.emit_after_commit(:agent_replied, self, message)
+        # The desk's OWN first word announces nothing: it is the start of a
+        # conversation the requester never asked for, not an answer to one,
+        # and `:ticket_opened` has already said it. An agent's first message
+        # into an old empty case the REQUESTER opened is a reply, which is
+        # why this asks who opened the case and not just whether the clocks
+        # are empty.
+        SupportDesk.emit_after_commit(:agent_replied, self, message) unless opening && opened_by_support?
       end
     end
 

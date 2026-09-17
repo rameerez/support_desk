@@ -119,4 +119,66 @@ class DoctorTest < ActiveSupport::TestCase
       assert_match(/isn't mounted/, report.warnings.map(&:message).join)
     end
   end
+  test "a case waiting on the desk that only the desk has spoken in fails the invariant too" do
+    # The NULL leg: `last_agent_message_at > last_requester_message_at` is
+    # NULL when the requester has never written, so a plain comparison walks
+    # straight past this row.
+    ticket = ticket_for(create_user)
+    ticket.update_columns(awaiting: "agent", last_agent_message_at: Time.current,
+                          last_requester_message_at: nil)
+
+    assert_match(/after the desk already answered/, SupportDesk.doctor.failures.map(&:message).join)
+  end
+
+  test "provenance: half an opened_by fails, and a legacy row asks for the backfill" do
+    healthy = ticket_for(create_user)
+
+    assert_predicate SupportDesk.doctor, :ok?
+
+    legacy = ticket_for(create_user)
+    legacy.update_columns(opened_by_type: nil, opened_by_id: nil)
+    report = SupportDesk.doctor
+
+    assert_predicate report, :ok?, "a row to backfill is a warning, not a failure"
+    assert_match(/backfill_opened_by/, report.warnings.map(&:message).join)
+
+    healthy.update_columns(opened_by_id: nil)
+
+    assert_match(/half an opened_by/, SupportDesk.doctor.failures.map(&:message).join)
+  end
+  test "an opening line naming a translation nobody wrote is a failed check" do
+    SupportDesk.config.opening_line = :"support_desk.thread.nope"
+
+    report = SupportDesk.doctor
+
+    assert_not_predicate report, :ok?
+    assert_match(/no .* translation/, report.failures.map(&:message).join)
+  end
+
+  test "a block opening line is left alone: running a host's callback is not a diagnostic" do
+    called = false
+    SupportDesk.config.opening_line { |_ticket| called = true }
+
+    assert_predicate SupportDesk.doctor, :ok?
+    assert_not called
+  end
+
+  test "find_requester is checked by its shape, never by calling it" do
+    called = false
+
+    assert_match(/not set/, SupportDesk.doctor.checks.find { |check| check.name == "find_requester" }.message)
+
+    SupportDesk.config.find_requester { |_query| called = true }
+
+    assert_predicate SupportDesk.doctor, :ok?
+    assert_not called
+
+    SupportDesk.config.find_requester = -> { nil }
+
+    assert_match(/calls it with one/, SupportDesk.doctor.failures.map(&:message).join)
+
+    SupportDesk.config.find_requester = Class.new { def call(query) = query }.new
+
+    assert_predicate SupportDesk.doctor, :ok?
+  end
 end

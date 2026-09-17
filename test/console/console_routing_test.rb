@@ -123,4 +123,36 @@ class ConsoleRoutingTest < ActionDispatch::IntegrationTest
     assert_equal "pinged", set.recognize_path("/sessions/pinged", method: :get)[:action]
     assert_raises(ActionController::RoutingError) { set.recognize_path("/sessions/7/reply", method: :post) }
   end
+
+  test "the concern draws open_conversation as a collection POST" do
+    assert_routing({ method: "post", path: "/madmin/support_tickets/open_conversation" },
+                   { controller: "madmin/support_tickets", action: "open_conversation" })
+  end
+
+  test "new is not swallowed by show" do
+    recognized = Rails.application.routes.recognize_path("/madmin/support_tickets/new", method: :get)
+
+    assert_equal "new", recognized[:action]
+    assert_nil recognized[:id]
+  end
+
+  test "the collection verbs come from one table" do
+    SupportDesk::Console::COLLECTION_VERBS.each do |verb, method|
+      recognized = Rails.application.routes.recognize_path("/madmin/support_tickets/#{verb}", method: method)
+
+      assert_equal verb.to_s, recognized[:action], "#{verb} is not drawn as a #{method.to_s.upcase}"
+    end
+  end
+
+  test "the routing concern reads the console's own tables, not a second copy" do
+    assert_same SupportDesk::Console::MEMBER_VERBS, SupportDesk::ConsoleRoutes::MEMBER_VERBS
+    assert_same SupportDesk::Console::MEMBER_VERBS, SupportDesk::Console::TRANSITIONS
+  end
+
+  test "the mounted console engine draws the collection verbs too" do
+    routes = SupportDesk::ConsoleEngine.routes
+
+    assert_equal "new", routes.recognize_path("/new", method: :get)[:action]
+    assert_equal "open_conversation", routes.recognize_path("/open_conversation", method: :post)[:action]
+  end
 end

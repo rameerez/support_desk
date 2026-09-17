@@ -27,6 +27,11 @@
     <% end %>
 
     <div class="flex justify-between gap-3">
+      <dt class="text-slate-500"><%= t("support_desk.console.context.opened_by") %></dt>
+      <dd class="text-right"><%= card.opened_by_label %></dd>
+    </div>
+
+    <div class="flex justify-between gap-3">
       <dt class="text-slate-500"><%= t("support_desk.console.context.topic") %></dt>
       <dd class="text-right"><%= card.topic_label %></dd>
     </div>

@@ -50,10 +50,21 @@ module SupportDesk
       # fails at boot instead of silently leaving tickets unassigned.
       UNRELEASED_ROUTING_STRATEGIES = %i[round_robin least_loaded].freeze
 
+      # The sample a static opening line is interpolated against the moment it
+      # is assigned, so a typo'd %{labe} is a boot failure and not a 3am
+      # exception in the middle of somebody opening a case.
+      LINE_INTERPOLATIONS = { label: "…", desk: "…", reply_within: "…" }.freeze
+
       DEFAULTS = {
         name: nil,
         avatar: nil,
         email: nil,
+        opening_line: nil,
+        # A message from a desk you never wrote to has to explain itself, so
+        # this one has a default and `opening_line` does not: existing hosts'
+        # threads keep opening exactly as they do today.
+        opening_line_from_support: :"support_desk.thread.opened_by_support",
+        find_requester: nil,
         reply_policy: :anyone,
         announce_assignments: :first_only,
         closed_tickets: :reopen_on_reply,
@@ -114,6 +125,109 @@ module SupportDesk
         end
 
         @settings[:email] = value&.to_s
+      end
+
+      # --- What a thread opens with ---------------------------------------------
+
+      # The system line every thread opens with, posted INSIDE the opening
+      # transaction and before the first message, so it can never arrive
+      # after the message it introduces (or not at all).
+      #
+      # A String with %{label}, %{desk} and %{reply_within}; a Symbol naming
+      # an I18n key that takes the same interpolations; a block given the
+      # ticket; or nil for no line at all, which is the default.
+      #
+      #   config.opening_line = "Has abierto una conversación sobre «%{label}»."
+      #   config.opening_line { |ticket| ticket.subject ? … : … }
+      def opening_line(&block)
+        return @settings[:opening_line] = block if block
+
+        read(:opening_line)
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def opening_line=(value)
+        @settings[:opening_line] = ensure_line(value, "opening_line")
+      end
+
+      # The same line for a case the DESK opened. Defaults to the gem's own
+      # I18n key, because somebody who never wrote to you needs to be told
+      # what this is.
+      def opening_line_from_support(&block)
+        return @settings[:opening_line_from_support] = block if block
+
+        read(:opening_line_from_support)
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def opening_line_from_support=(value)
+        @settings[:opening_line_from_support] = ensure_line(value, "opening_line_from_support")
+      end
+
+      # How a console finds the person an agent types: email, phone, handle,
+      # whatever this host lets staff search by. Given the typed string,
+      # returns a requester record or nil.
+      #
+      #   config.find_requester { |query| User.find_by(email: query.to_s.strip.downcase) }
+      #
+      # nil (the default) means the console accepts only a GlobalID from one
+      # of your own pages. Multi-tenant hosts scope BOTH ways in — this hook
+      # is a lookup, never an authorization.
+      def find_requester(&block)
+        return @settings[:find_requester] = block if block
+
+        read(:find_requester)
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def find_requester=(value)
+        @settings[:find_requester] = value.nil? ? nil : ensure_callable(value, "find_requester")
+      end
+
+      # What's wrong with this desk's opening lines, as sentences — what
+      # `doctor` reports. A String is interpolated against the sample, a
+      # Symbol has to exist in the current locale, and a block is left alone:
+      # it needs a ticket, and running a host's callback as a diagnostic is
+      # not a diagnostic.
+      def opening_line_problems # :nodoc:
+        %i[opening_line opening_line_from_support].filter_map do |setting|
+          value = public_send(setting)
+          next if value.nil? || value.respond_to?(:call)
+
+          if value.is_a?(Symbol)
+            next if I18n.exists?(value)
+
+            "#{setting} names #{value.inspect}, which has no #{I18n.locale} translation"
+          else
+            begin
+              interpolate_line(value, LINE_INTERPOLATIONS, setting.to_s)
+              nil
+            rescue ConfigurationError => e
+              e.message
+            end
+          end
+        end
+      end
+
+      # What to post for THIS ticket, resolved and interpolated in the
+      # current locale. nil or blank means post nothing.
+      def opening_line_for(ticket)
+        setting = ticket.opened_by_support? ? opening_line_from_support : opening_line
+        return nil if setting.nil?
+
+        line = case setting
+        when Symbol then I18n.t(setting, **line_interpolations(ticket), raise: true)
+        when String then interpolate_line(setting, line_interpolations(ticket), "opening_line")
+        else setting.call(ticket)
+        end
+        return nil if line.nil?
+
+        unless line.is_a?(String)
+          raise ConfigurationError,
+                "an opening_line block must return a String or nil, got #{line.inspect}"
+        end
+
+        line
       end
 
       # --- Who answers ----------------------------------------------------------
@@ -372,14 +486,46 @@ module SupportDesk
 
         value
       end
+
+      # nil, a String, an I18n key, or something to call. A String is
+      # interpolated here and now against the sample, so an unknown
+      # placeholder fails at boot rather than inside a transaction.
+      def ensure_line(value, name)
+        return value if value.nil? || value.is_a?(Symbol) || value.respond_to?(:call)
+        if value.is_a?(String)
+          interpolate_line(value, LINE_INTERPOLATIONS, name)
+          return value
+        end
+
+        raise ConfigurationError,
+              "#{name} must be a String, an I18n key (Symbol), a block, or nil, got #{value.inspect}"
+      end
+
+      # Named interpolation, NOT String#%: "100% ready" is ordinary copy in
+      # any language, and `%` would read that as a format directive and
+      # raise. I18n.interpolate leaves a literal percent alone and only
+      # touches %{named} placeholders.
+      def interpolate_line(line, interpolations, name)
+        I18n.interpolate(line, interpolations)
+      rescue KeyError, ArgumentError => e
+        raise ConfigurationError,
+              "#{name} can't be interpolated (#{e.class}: #{e.message}). The placeholders it can use are " \
+              "#{LINE_INTERPOLATIONS.keys.map { |key| "%{#{key}}" }.join(", ")}."
+      end
+
+      def line_interpolations(ticket)
+        { label: ticket.label, desk: ticket.desk.name,
+          reply_within: (SupportDesk.humanize_duration(reply_within) if reply_within) }
+      end
     end
 
     # Settings that belong to a desk rather than the installation. The
     # top-level accessors forward to the `:default` desk, which is also what
     # every other desk falls back to.
     DESK_SETTINGS = %i[
-      name avatar email reply_policy announce_assignments closed_tickets reply_within at_risk_after
-      open_rate_limit max_open_tickets inbox_entry routing mirror_replies_by_email auto_close_after
+      name avatar email opening_line opening_line_from_support find_requester reply_policy
+      announce_assignments closed_tickets reply_within at_risk_after open_rate_limit max_open_tickets
+      inbox_entry routing mirror_replies_by_email auto_close_after
     ].freeze
 
     delegate(*DESK_SETTINGS, *DESK_SETTINGS.map { |setting| :"#{setting}=" }, to: :default_desk)

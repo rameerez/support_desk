@@ -201,6 +201,38 @@ class ConsoleAuthorizationTest < ActionDispatch::IntegrationTest
     assert_match(/config\.current_agent_method/, error.message)
   end
 
+  # --- The two actions with no ticket ------------------------------------------
+
+  test "authorize_console is asked about new and open_conversation with no ticket" do
+    login_as @lucia
+    asked = []
+    SupportDesk.config.authorize_console = lambda do |agent, ticket, action|
+      asked << [ agent.name, ticket, action ]
+      true
+    end
+
+    get "/madmin/support_tickets/new", params: { requester: @alice.to_global_id.to_s }
+
+    assert_response :success
+
+    post "/madmin/support_tickets/open_conversation",
+         params: { requester: @alice.to_global_id.to_s, body: "Vimos que…" }
+
+    assert_response :see_other
+    assert_equal [ [ "Lucía", nil, :new ], [ "Lucía", nil, :open_conversation ] ], asked
+  end
+
+  test "a host policy that refuses the collection action refuses the send" do
+    login_as @lucia
+    SupportDesk.config.authorize_console = ->(_agent, _ticket, action) { action != :open_conversation }
+
+    post "/madmin/support_tickets/open_conversation",
+         params: { requester: @alice.to_global_id.to_s, body: "Vimos que…" }
+
+    assert_response :forbidden
+    assert_equal 1, SupportDesk::Ticket.count, "only the one from setup"
+  end
+
   private
 
   # A case on a second desk, so "which desks may I work" has an answer that

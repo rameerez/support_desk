@@ -8,10 +8,14 @@ es:
         tabs_label: "Pestañas de la cola"
         empty: "Aquí no hay nada ahora mismo."
       row:
+        opened_by_support: "Escrita por soporte"
         waiting: "%{duration}"
         unassigned: "Sin asignar"
       context:
         title: "Contexto"
+        opened_by: "Abierta por"
+        not_recorded: "sin registrar"
+        unavailable: "cuenta no disponible"
         requester: "Cliente"
         open_tickets: "Casos abiertos"
         member_since: "Cliente desde"
@@ -21,6 +25,17 @@ es:
       transcript:
         title: "Conversación"
         empty: "Todavía no se ha dicho nada."
+      new_conversation:
+        title: "Escribir por soporte"
+        requester: "Para"
+        requester_query: "Email de la persona"
+        requester_hint: "Configura `config.find_requester` para buscar a alguien desde aquí"
+        about: "Sobre %{subject}"
+        topic: "Tema"
+        message: "Mensaje"
+        send: "Enviar como %{desk}"
+        cancel: "Cancelar"
+        signed_as: "Firmado «%{agent}»."
       composer:
         reply: "Responder"
         note: "Nota interna"
@@ -53,6 +68,7 @@ es:
           note: "Nota interna"
       actions:
         back: "Volver a la cola"
+        new_conversation: "Escribir a alguien"
         next: "Siguiente caso"
         reply: "Enviar"
         note: "Guardar nota"
@@ -64,6 +80,7 @@ es:
         reopen: "Reabrir"
         change_topic: "Cambiar tema"
       flashes:
+        message_sent: "Mensaje enviado a %{requester}."
         replied: "Respuesta enviada."
         taken: "El caso es tuyo."
         assigned: "Asignado a %{agent}."
@@ -90,4 +107,13 @@ es:
         take_it_first: "Toma el caso antes de responder: en esta mesa solo responde quien lo lleva."
         held_by_somebody_else: "Lo lleva %{holder}."
         unavailable_action: "Ahora mismo no puedes hacer eso en este caso."
+        unknown_requester: "No encontramos a esa persona."
+        not_a_requester: "Esa cuenta no puede recibir mensajes de soporte."
+        invalid_requester: "Ese enlace no apunta a nadie a quien podamos escribir."
+        invalid_subject: "Ese enlace no apunta a nada sobre lo que podamos abrir la conversación."
+        invalid_input: "Algo en el formulario no se ha enviado bien. Vuelve a intentarlo."
+        no_requester_lookup: "Abre este formulario desde la ficha de la persona: aquí no podemos buscarla."
+        writing_to_yourself: "No puedes abrir una conversación de soporte contigo. Si necesitas ayuda, pídela como cliente."
+        off_duty: "No estás de guardia, así que no puedes escribir a nadie ahora mismo."
+        attachments_again: "Si adjuntas archivos y algo falla, tendrás que volver a seleccionarlos."
         generic: "No ha funcionado."

@@ -134,4 +134,22 @@ class TestHelpersApiTest < ActiveSupport::TestCase
     assert_not_nil ticket.last_requester_message_at
     assert_equal ticket.conversation.messages.first.id.to_s, ticket.last_registered_message_id.to_s
   end
+
+  test "open_support_ticket by: opens as the desk" do
+    ticket = open_support_ticket(for: @alice, by: @lucia, message: "Vimos que tu pedido no llegó")
+
+    assert_predicate ticket, :opened_by_support?
+    assert_equal @lucia, ticket.opened_by
+    assert_assigned_to ticket, @lucia
+    assert_awaiting_requester ticket
+    assert_equal "Vimos que tu pedido no llegó", ticket.messages.where(kind: "text").sole.body
+  end
+
+  test "open_support_ticket by: the requester is the requester asking" do
+    ticket = open_support_ticket(for: @alice, by: @alice, message: "necesito ayuda")
+
+    assert_predicate ticket, :opened_by_requester?
+    assert_predicate ticket, :unassigned?
+    assert_awaiting_reply ticket
+  end
 end

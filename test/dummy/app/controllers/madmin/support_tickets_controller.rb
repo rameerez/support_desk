@@ -16,7 +16,7 @@ module Madmin
   # The routes come from the `:support_console` routing concern:
   #
   #   namespace :madmin do
-  #     resources :support_tickets, only: %i[index show], concerns: :support_console
+  #     resources :support_tickets, only: %i[index show new], concerns: :support_console
   #   end
   #
   # Both `index` and `show` are yours — the gem deliberately doesn't own the

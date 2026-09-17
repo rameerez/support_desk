@@ -13,7 +13,7 @@ class ConsoleGeneratorTest < Rails::Generators::TestCase
   VIEWS = %w[
     index.html.erb show.html.erb _tabs.html.erb _ticket_row.html.erb _context_card.html.erb
     _transcript.html.erb _message.html.erb _composer.html.erb _assignment.html.erb _actions.html.erb
-    _timeline.html.erb _nav_badge.html.erb
+    _timeline.html.erb _nav_badge.html.erb new.html.erb _new_conversation_form.html.erb
   ].freeze
 
   test "it writes a controller, an admin resource and the whole view set" do
@@ -132,7 +132,7 @@ class ConsoleGeneratorTest < Rails::Generators::TestCase
   test "it prints the route line, the badge line and the settings to check" do
     output = run_generator
 
-    assert_match(/resources :support_tickets, only: %i\[index show\], concerns: :support_console/, output)
+    assert_match(/resources :support_tickets, only: %i\[index show new\], concerns: :support_console/, output)
     assert_match(%r{madmin/support_tickets/nav_badge}, output)
     assert_match(/config\.visible_desks_for/, output)
     assert_match(/config\.authorize_console/, output)

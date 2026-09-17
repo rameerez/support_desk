@@ -1,0 +1,39 @@
+<%# The dummy host's OWN compose screen — ten lines of unstyled ERB, like
+    its queue. Layer 2's promise is that `new` and `open_conversation` work
+    under whatever UI a host brings, so the suite drives them against this
+    rather than against the views the gem ships. %>
+<% %i[notice alert].each do |kind| %>
+  <% if flash[kind] %><p id="flash-<%= kind %>"><%= flash[kind] %></p><% end %>
+<% end %>
+
+<h1>Escribir por <%= support_desk_record.name %></h1>
+
+<%= form_with url: console_tickets_path(:open_conversation, desk: support_desk_record.key),
+      method: :post, html: { multipart: true, id: "new_conversation" } do %>
+  <% if @requester %>
+    <p id="requester"><%= Chats.display_name_for(@requester) %></p>
+    <%= hidden_field_tag :requester, @requester.to_global_id.to_s %>
+  <% elsif support_desk_record.config.find_requester %>
+    <%= text_field_tag :requester_query, @requester_query, id: "requester_query" %>
+  <% else %>
+    <p id="requester_hint"><%= t("support_desk.console.new_conversation.requester_hint") %></p>
+  <% end %>
+
+  <% if @about %>
+    <p id="about"><%= @about.support_label %></p>
+    <%= hidden_field_tag :about, @about.to_global_id.to_s %>
+  <% end %>
+
+  <%= select_tag :topic,
+        options_for_select(support_conversation_topics.map { |topic| [ topic.full_label, topic.path ] }, @topic),
+        id: "topic" %>
+  <%= text_area_tag :body, @body, id: "body" %>
+  <%= file_field_tag "files[]", multiple: true %>
+  <p id="attachments_hint"><%= t("support_desk.console.errors.attachments_again") %></p>
+
+  <% if !support_conversation_available? %>
+    <p id="off_duty"><%= t("support_desk.console.errors.off_duty") %></p>
+  <% elsif support_conversation_sendable? && (@requester || support_desk_record.config.find_requester) %>
+    <%= submit_tag t("support_desk.console.new_conversation.send", desk: support_desk_record.name), id: "send" %>
+  <% end %>
+<% end %>

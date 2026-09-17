@@ -8,10 +8,14 @@ en:
         tabs_label: "Queue tabs"
         empty: "Nothing here right now."
       row:
+        opened_by_support: "Written by support"
         waiting: "%{duration}"
         unassigned: "Unassigned"
       context:
         title: "Context"
+        opened_by: "Opened by"
+        not_recorded: "not recorded"
+        unavailable: "account unavailable"
         requester: "Requester"
         open_tickets: "Open cases"
         member_since: "Member since"
@@ -21,6 +25,17 @@ en:
       transcript:
         title: "Conversation"
         empty: "Nothing has been said yet."
+      new_conversation:
+        title: "Write as support"
+        requester: "To"
+        requester_query: "Their email"
+        requester_hint: "Set `config.find_requester` to look people up from here"
+        about: "About %{subject}"
+        topic: "Topic"
+        message: "Message"
+        send: "Send as %{desk}"
+        cancel: "Cancel"
+        signed_as: "Signed “%{agent}”."
       composer:
         reply: "Reply"
         note: "Internal note"
@@ -53,6 +68,7 @@ en:
           note: "Internal note"
       actions:
         back: "Back to the queue"
+        new_conversation: "Write to someone"
         next: "Next case"
         reply: "Send"
         note: "Save note"
@@ -64,6 +80,7 @@ en:
         reopen: "Reopen"
         change_topic: "Refile"
       flashes:
+        message_sent: "Message sent to %{requester}."
         replied: "Answer sent."
         taken: "This case is yours."
         assigned: "Assigned to %{agent}."
@@ -90,4 +107,13 @@ en:
         take_it_first: "Take this case first — this desk only lets the assignee reply."
         held_by_somebody_else: "%{holder} is handling this case."
         unavailable_action: "You can't do that on this case right now."
+        unknown_requester: "We can't find that person."
+        not_a_requester: "That account can't receive support messages."
+        invalid_requester: "That link doesn't point at anybody we can write to."
+        invalid_subject: "That link doesn't point at anything we can open a conversation about."
+        invalid_input: "Something in the form didn't come through. Try again."
+        no_requester_lookup: "Open this form from the person's own page: there's no way to look them up from here."
+        writing_to_yourself: "You can't open a support conversation with yourself. Ask for help as a customer instead."
+        off_duty: "You're off duty, so you can't write to anybody right now."
+        attachments_again: "If you attach files and something goes wrong, you'll have to pick them again."
         generic: "That didn't work."

@@ -10,8 +10,9 @@ class MacrosTest < ActiveSupport::TestCase
 
   # --- has_support_tickets -----------------------------------------------------
 
-  test "has_support_tickets adds exactly four methods" do
-    added = %i[support_tickets ask_support! awaiting_support_reply? unread_support_count]
+  test "has_support_tickets adds exactly six methods" do
+    added = %i[support_tickets support_requester? support_desk ask_support! awaiting_support_reply?
+               unread_support_count]
 
     added.each { |method| assert_respond_to @alice, method }
   end
@@ -57,6 +58,70 @@ class MacrosTest < ActiveSupport::TestCase
     ticket_for(@alice)
 
     assert_not @alice.destroy
+  end
+
+  test "has_support_tickets if: decides who may ask and who may be written to" do
+    assert_predicate @alice, :support_requester?
+
+    @alice.update!(support_blocked: true)
+
+    assert_not_predicate @alice, :support_requester?
+    assert_raises(SupportDesk::NotARequester) { @alice.ask_support!("hola") }
+  end
+
+  test "has_support_tickets if: also takes a callable" do
+    klass = Class.new(User) do
+      def self.name = "CallableRequester"
+      has_support_tickets if: ->(user) { user.name.start_with?("A") }
+    end
+
+    assert_predicate klass.create!(name: "Ana"), :support_requester?
+    assert_not_predicate klass.create!(name: "Bea"), :support_requester?
+  end
+
+  test "has_support_tickets refuses options it doesn't have" do
+    error = assert_raises(SupportDesk::ConfigurationError) do
+      Class.new(User) do
+        def self.name = "BadRequester"
+        has_support_tickets when: :kept?
+      end
+    end
+
+    assert_match(/unknown has_support_tickets option :when/, error.message)
+  end
+
+  test "has_support_tickets if: must be a method name or something callable" do
+    error = assert_raises(SupportDesk::ConfigurationError) do
+      Class.new(User) do
+        def self.name = "WorseRequester"
+        has_support_tickets if: "kept?"
+      end
+    end
+
+    assert_match(/must be a method name or a callable/, error.message)
+  end
+
+  test "support_desk is the desk this requester writes to" do
+    assert_equal SupportDesk.desk, @alice.support_desk
+
+    SupportDesk.config.desk(:billing) { |desk| desk.name = "Facturación" }
+    klass = Class.new(User) do
+      def self.name = "BillingRequester"
+      has_support_tickets desk: :billing
+    end
+
+    assert_equal "billing", klass.create!(name: "B").support_desk.key
+  end
+
+  test "a requester whose desk isn't configured says so instead of landing on the default" do
+    klass = Class.new(User) do
+      def self.name = "GhostDeskRequester"
+      has_support_tickets desk: :ghost
+    end
+
+    error = assert_raises(SupportDesk::ConfigurationError) { klass.create!(name: "G").support_desk }
+
+    assert_match(/isn't configured/, error.message)
   end
 
   test "desk: routes a requester's tickets to another desk" do
@@ -200,7 +265,11 @@ class MacrosTest < ActiveSupport::TestCase
     assert_match(/unknown acts_as_support_agent option :when/, error.message)
   end
 
-  test "no verbs are added to the agent model" do
+  test "the ticket is still the subject of every sentence but the one that has no ticket yet" do
+    # `open_support_conversation_with!` is the exception, and the only one:
+    # there is no case to say it to until it says it.
+    assert_respond_to @lucia, :open_support_conversation_with!
+
     %i[close take reply_to hand_off release].each { |verb| assert_not_respond_to @lucia, verb }
   end
 end

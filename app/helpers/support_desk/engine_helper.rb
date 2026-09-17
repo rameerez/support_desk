@@ -75,13 +75,19 @@ module SupportDesk
       within = SupportDesk.config.desk(desk_key).reply_within
       return nil if within.nil?
 
-      t("support_desk.thread.promise", time: SupportDesk::Wizard.humanize_duration(within))
+      t("support_desk.thread.promise", time: SupportDesk.humanize_duration(within))
     end
 
     # The status line under a case in the requester's list: who owes the next
     # word, or that it's over.
     def support_ticket_state(ticket)
       return t("support_desk.tickets.state.closed") if ticket.closed?
+      # A conversation the desk started, before they have said anything back:
+      # "we replied" would be a lie about a thread they never opened, and
+      # "we're on it" is worse — there is nothing of theirs to be on.
+      if ticket.opened_by_support? && ticket.last_requester_message_at.nil?
+        return t("support_desk.tickets.state.opened_by_support")
+      end
 
       ticket.awaiting_reply? ? t("support_desk.tickets.state.awaiting_reply") : t("support_desk.tickets.state.answered")
     end

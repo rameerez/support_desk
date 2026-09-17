@@ -19,6 +19,23 @@ SupportDesk.configure do |config|
   #
   # config.agents { User.where(admin: true) }
 
+  # Who may ask, and who may answer, record by record — the macros' `if:`:
+  #
+  #   class User < ApplicationRecord
+  #     has_support_tickets if: :kept?          # a closed account can neither
+  #     acts_as_support_agent if: :admin?       # ask nor be written to
+  #   end
+  #
+  # `has_support_tickets if:` is a WRITE rule, not a screen rule: the thread
+  # and its history stay readable when it turns false.
+
+  # How the console finds the person an agent types in "Write to someone":
+  # email, phone, handle — your call. Given the typed string, return a
+  # requester record or nil. Without it the console accepts only a GlobalID
+  # from one of your own pages.
+  #
+  # config.find_requester { |query| User.find_by(email: query.to_s.strip.downcase) }
+
   # ==========================================================================
   # CONTROLLER INTEGRATION
   # ==========================================================================
@@ -104,6 +121,19 @@ SupportDesk.configure do |config|
   #   :never
   #
   # config.announce_assignments = :first_only
+  #
+  # The system line a thread opens with, posted inside the opening
+  # transaction and before the first message. A String with %{label},
+  # %{desk} and %{reply_within}, a Symbol naming an I18n key, a block given
+  # the ticket, or nil for no line at all.
+  #
+  # The second one is for a case the DESK opened
+  # (`lucia.open_support_conversation_with!(alice, "Vimos que…")`): it has a
+  # default, because a message from a desk somebody never wrote to has to
+  # explain itself.
+  #
+  # config.opening_line = "Has abierto una conversación sobre «%{label}». Te contestamos aquí."
+  # config.opening_line_from_support = "%{desk} ha abierto esta conversación contigo sobre «%{label}»."
   #
   # What a requester writing into a closed ticket does:
   #   :reopen_on_reply  the case comes back (no wall, no dead end)

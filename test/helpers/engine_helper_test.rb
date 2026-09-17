@@ -134,4 +134,19 @@ class EngineHelperTest < ActionView::TestCase
     assert_includes html, "chats-avatar--initials"
     assert_includes html, ">S<"
   end
+
+  test "a case the desk opened reads 'we wrote to you' until the requester answers" do
+    lucia = create_agent(name: "Lucía")
+    written = lucia.open_support_conversation_with!(@alice, "Vimos que tu pedido no llegó")
+
+    assert_equal "We wrote to you", support_ticket_state(written)
+
+    ask_again written, "ah, no lo sabía"
+
+    assert_equal "We're on it", support_ticket_state(written.reload)
+
+    written.reply!("te contamos", by: lucia)
+
+    assert_equal "We replied", support_ticket_state(written.reload)
+  end
 end

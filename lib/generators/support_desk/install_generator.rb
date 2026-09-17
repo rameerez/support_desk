@@ -27,6 +27,15 @@ module SupportDesk
                            File.join(db_migrate_path, "create_support_desk_tables.rb")
       end
 
+      # Who opened each case. A SEPARATE migration, copied from the same
+      # template `support_desk:upgrade` hands an existing install, so one
+      # file owns those two columns and their index wherever they came from
+      # — and a fresh install's `down` removes exactly what its `up` added.
+      def create_opened_by_migration
+        migration_template "add_opened_by_to_support_desk_tickets.rb.erb",
+                           File.join(db_migrate_path, "add_opened_by_to_support_desk_tickets.rb")
+      end
+
       # The annotated initializer — every setting the gem has, with what it
       # means and what it defaults to.
       def create_initializer
@@ -71,6 +80,11 @@ module SupportDesk
         say "\n  Email (0.2): when the channel lands, route inbound mail with"
         say "  # app/mailboxes/application_mailbox.rb"
         say "  #   routing(/^support@/i => :support_desk)"
+
+        say "\n  Already installed and bumping the version? 'rails g support_desk:upgrade' copies"
+        say "  only the migrations the new version needs (0.2.0: who opened the case), and"
+        say "  nothing you own. Follow the CHANGELOG's drained cutover: migrate, pause"
+        say "  support traffic, drain old web/workers, backfill, then serve only 0.2."
 
         say "\nCheck your work any time with SupportDesk.doctor.print"
         say "You now have support tickets that are real conversations. 🚀\n", :green

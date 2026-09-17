@@ -7,6 +7,8 @@ en:
       closed_notice: "This conversation is closed. Start a new one if you need anything else."
       reopened_notice: "We reopened this conversation."
       promise: "We usually reply in under %{time}"
+      opened_by_support: "%{desk} opened this conversation with you about “%{label}”. You can reply right here."
+      unavailable_notice: "This account can no longer send or receive messages. The conversation stays here to read."
     notifications:
       title: "%{desk} · new message"
     queue:
@@ -41,6 +43,7 @@ en:
       state:
         awaiting_reply: "We're on it"
         answered: "We replied"
+        opened_by_support: "We wrote to you"
         closed: "Closed"
     doors:
       new: "Need help?"

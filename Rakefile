@@ -21,6 +21,22 @@ end
 APP_RAKEFILE = File.expand_path("test/dummy/Rakefile", __dir__)
 load "rails/tasks/engine.rake"
 
+# `db:migrate:reset` — the command the README and CI give for the PostgreSQL
+# leg — is `["db:drop", "db:create", "db:schema:dump", "db:migrate"]` in
+# ActiveRecord's own databases.rake. That third step is hardwired: it ignores
+# the dummy's `config.active_record.dump_schema_after_migration = false`,
+# which is why plain `rake db:migrate` leaves no dump and this task does.
+#
+# The dump is stamped with the Rails version that wrote it
+# (`ActiveRecord::Schema[8.1]`), and every later leg's `db:test:load_schema`
+# prefers a schema.rb over the migrations — so one PostgreSQL run made the
+# 7.2 Appraisal die with "Unknown migration version 8.1" until the file was
+# deleted by hand. The dummy migrates from db/migrate and never from a dump,
+# so the artifact has no reader: throw it away where it is made.
+if Rake::Task.task_defined?("db:migrate:reset")
+  Rake::Task["db:migrate:reset"].enhance { rm_f "test/dummy/db/schema.rb" }
+end
+
 require "rake/testtask"
 
 Rake::TestTask.new(:test) do |t|

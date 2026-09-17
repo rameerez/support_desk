@@ -4,6 +4,64 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-17
+
+**The desk can write first.** Until now a case could only start with somebody
+asking; now it can start with you, through the same seam and the same
+algorithm.
+
+### Added
+
+- `agent.open_support_conversation_with!(requester, message, about:, topic:, files:, via:, desk:)` — write first, as the desk: the message is the desk's, signed by the agent, and it lands in the requester's inbox as the desk. The only agent-side verb in the gem, because it is the only action with no ticket yet.
+- `SupportDesk::Ticket.open!(…, by: an_agent)` — the seam under it. `by:` defaults to the requester; an agent there is the desk writing first. A Symbol (`by: :system`) is refused with `NotAnAgent`: automation is deferred (docs 12, Q17).
+- `opened_by` on every case — a polymorphic record, exactly like `closed_by` — with `opened_by_requester?` / `opened_by_support?` and the `opened_by_requester` / `opened_by_support` scopes, which partition the table.
+- `config.opening_line` and `config.opening_line_from_support`: the system line a thread opens with, posted inside the opening transaction. A String (with `%{label}`, `%{desk}`, `%{reply_within}`), an I18n key, a block, or nil. The first defaults to nil; the second to the gem's own copy, because a message from a desk somebody never wrote to has to explain itself.
+- `config.find_requester`: how a console turns something an agent typed into the person they meant. Without it the console accepts only a GlobalID from one of your own pages.
+- `has_support_tickets if:` — who may ask, and who may be written to — with `support_requester?` and `support_desk` on the requester model.
+- Console: `new` (the form) and `open_conversation` (the send) as collection actions, with the "Write to someone" door in the mounted console and the generated one. `SupportDesk::Console::COLLECTION_VERBS` is the table the router reads.
+- Generators: `rails g support_desk:upgrade` copies the additive `opened_by` migration (the same file a fresh install runs), and `rake support_desk:backfill_opened_by` runs its catch-up after draining old processes and before admitting 0.2 traffic.
+- `SupportDesk::NotARequester`, and `SupportDesk.humanize_duration` (moved off `Wizard`, which keeps a delegation).
+
+### Changed
+
+Behaviour changes, not refactors. Read them before upgrading:
+
+- **System messages are never folded into the clocks.** They never reached the clocks through chats anyway; now a hand-written `register!` ignores them too, and so does a message from somebody who is neither the requester nor the desk. Neither moves `awaiting`, an SLA clock or the last-registered marker.
+- **`first_agent_reply_at` is only set when a requester message came first.** An agent writing into a case with nothing in it is not answering anything, and an out-of-order replay whose requester clock is later is not evidence either.
+- **`:agent_replied` is not emitted for the desk's own opening message** on a case the desk opened. An agent's first message into an old empty case the REQUESTER opened is still a reply, and still emits.
+- **The asking limits count only requester-opened cases.** `open_rate_limit` and `max_open_tickets` limit asking, not being asked, so cases you opened no longer spend somebody's allowance.
+- **Requester eligibility is checked at every message write.** `chat_locked?` is now "the requester can't be written to, or the case is closed on a desk that locks closed cases", re-read from the database rather than taken from a cached association. The thread, the queue row, the notes and the close are all unchanged; only new messages stop, and `actions_for` stops offering `:reply`.
+- **`reply!` registers its message inside its own lock**, in a savepoint that owns the whole operation — so a caller who rescues its failure and commits their own transaction commits none of ours. `open!` does the same for opening and for the reply a reused case turns into.
+- **The opening line is the gem's, and it is posted inside the opening transaction**, pinned one database tick above the message it introduces. Hosts that posted their own line after commit can delete that code.
+- **`Console::ERROR_KEYS` is gone**, replaced by the error's own name (`NotTheAssignee` → `not_the_assignee`) with a generic fallback. Every key the table listed is a name it derives to, so a host that overrode one keeps its wording.
+- `Console::TRANSITIONS` and `ConsoleRoutes::MEMBER_VERBS` are aliases of `Console::MEMBER_VERBS` for one release.
+- `Chats::Error` is rescued into a console flash; `Chats::ConfigurationError` is deliberately not.
+
+### Fixed
+
+- Stale revoked/deleted agents are refused using an uncached eligibility read, shared by opening and ordinary ticket transitions.
+- Malformed attachment inputs return the compose form with 422; signed blob failures do not discard the draft. Invalid explicit desks cannot silently change the sender, and host finder errors are not hidden as bad GlobalIDs.
+- Legacy NULL provenance remains requester-originated for quotas and reply metrics. The documented upgrade drains old web/workers before the catch-up and new traffic.
+- Rake tasks are discovered once across the two engines; migration collision guidance preserves existing provenance.
+- Valid draft fields survive malformed sibling fields, and unavailable recipients are explained before offering send.
+- `Ticket.open!` no longer reloads the case it just opened. The clocks are folded in on the same instance, inside the transaction, so the row that commits is already true.
+
+### Upgrading from 0.1
+
+**This upgrade requires a drained cutover, not a rolling deployment.** Old
+processes cannot release assignments with the new `opened` reason.
+
+1. Copy the upgrade migration with `rails generate support_desk:upgrade` and migrate before 0.2 serves traffic. The additive, nullable columns are compatible with 0.1.
+2. Pause incoming support writes and background producers. Stop and drain **all old web requests and workers**, including jobs already running; verify none remain. Keep support traffic paused. Do not start serving 0.2 alongside 0.1.
+3. With the 0.2 artifact available but traffic still paused, run `rake support_desk:backfill_opened_by`. Verify `SupportDesk::Ticket.where(opened_by_id: nil).count` is zero and inspect `SupportDesk.doctor`. The task is idempotent; repeating it is safe in this release because automation openers are not supported.
+4. Start only 0.2 web/workers, then resume support traffic. Writing-first may now be used. Add `new` to console routes and regenerate/customize views as needed.
+
+NULL-provenance cases are treated as requester-opened even before the backfill,
+so quotas, labels and reply metrics stay correct. This read compatibility does
+**not** make old assignment writers compatible with 0.2; the drain is still required.
+
+Rolling back is a host code rollback, not a Gemfile pin: 0.1 does not know the new settings, routes or predicates. Keep the columns and the provenance already written — but note that 0.1's `Assignment#release!` revalidates `reason` and rejects `opened`, so closing, releasing or handing off a case the desk opened will fail under 0.1 until a compatibility patch accepts that reason. Prefer disabling the entry point (drop `new`/`open_conversation` from your routes) over downgrading with active desk-opened cases.
+
 ## [0.1.3] - 2026-09-17
 
 ### Fixed

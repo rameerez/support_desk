@@ -103,6 +103,13 @@ module SupportDesk
           ok_with("#{tree.count} topic(s), #{tree.leaves.size} leaf/leaves")
         end
 
+        checks << check("opening lines (#{desk.key})") do
+          problems = desk.opening_line_problems
+          next fail_with(problems.join("; ")) if problems.any?
+
+          ok_with("resolve")
+        end
+
         checks << check("supportables (#{desk.key})") do
           missing = desk.topics.about_class_names.reject do |name|
             klass = name.safe_constantize
@@ -112,6 +119,24 @@ module SupportDesk
 
           ok_with("every about: class is supportable")
         end
+      end
+
+      checks << check("find_requester") do
+        callable = SupportDesk.config.find_requester
+        next ok_with("not set — the console takes a GlobalID from your own pages") if callable.nil?
+        next fail_with("find_requester must respond to #call") unless callable.respond_to?(:call)
+
+        # Asked of the SHAPE, never by calling it: a diagnostic that runs a
+        # host's lookup is a diagnostic that queries production. A callable
+        # object is as valid as a lambda, so `arity` (Proc-only) is out.
+        parameters = callable.respond_to?(:parameters) ? callable.parameters : callable.method(:call).parameters
+        required = parameters.count { |type, _| type == :req }
+        open_ended = parameters.any? { |type, _| %i[opt rest].include?(type) }
+        unless required <= 1 && (required == 1 || open_ended)
+          next fail_with("find_requester takes #{required} required argument(s); the console calls it with one")
+        end
+
+        ok_with("the console can look people up")
       end
 
       checks << check("engine mount") do
@@ -185,8 +210,33 @@ module SupportDesk
 
           ok_with("assignee matches the open assignment")
         end,
+        check("provenance") do
+          next warn_with("no opened_by column — run `rails g support_desk:upgrade` and migrate") unless
+            Ticket.column_names.include?("opened_by_id")
+
+          half = Ticket.where(opened_by_type: nil).where.not(opened_by_id: nil)
+                       .or(Ticket.where.not(opened_by_type: nil).where(opened_by_id: nil)).count
+          next fail_with("#{half} ticket(s) with half an opened_by (a type and no id, or the reverse)") if
+            half.positive?
+
+          # NULL is not automation: nothing in this version writes it, so
+          # every one of these is a row 0.1 opened, or one an old process
+          # wrote during the upgrade window.
+          legacy = Ticket.where(opened_by_id: nil).count
+          next warn_with("#{legacy} case(s) don't say who opened them — run " \
+                         "`rake support_desk:backfill_opened_by`") if legacy.positive?
+
+          ok_with("every case says who opened it")
+        end,
         check("awaiting") do
-          stale = Ticket.awaiting_reply.where("last_agent_message_at > last_requester_message_at").count
+          # The NULL leg is not decoration: `last_agent_message_at >
+          # last_requester_message_at` is NULL when the requester has never
+          # written, so a case waiting on the desk that only the desk has
+          # spoken in slips past a plain comparison.
+          stale = Ticket.awaiting_reply.where(
+            "last_agent_message_at > last_requester_message_at OR " \
+            "(last_agent_message_at IS NOT NULL AND last_requester_message_at IS NULL)"
+          ).count
           next fail_with("#{stale} ticket(s) waiting on the desk after the desk already answered") if stale.positive?
 
           ok_with("awaiting agrees with the transcript")

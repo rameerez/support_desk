@@ -188,18 +188,10 @@ module SupportDesk
     # The promise as a Duration, for hosts that want to phrase it themselves.
     def promise_within = target_desk.config.reply_within
 
-    # "1 day", "4 horas" — through ActionView's date helper so it speaks the
-    # requester's language, falling back to Duration#inspect in the (rare)
-    # app that has no ActionView.
-    def self.humanize_duration(duration)
-      return duration.inspect unless defined?(ActionView::Helpers::DateHelper)
-
-      @duration_words ||= Object.new.extend(ActionView::Helpers::DateHelper)
-      words = @duration_words.distance_of_time_in_words(duration.to_i).to_s
-      # An app whose locale has no date translations (no rails-i18n) would
-      # otherwise show "Translation missing" to a customer.
-      words.start_with?("Translation missing") ? duration.inspect : words
-    end
+    # "1 day", "4 horas" — the summary, the helper and an opening line's
+    # `%{reply_within}` all say it too, so it lives on SupportDesk now. Kept
+    # here as a delegation: it has been public since 0.1.
+    def self.humanize_duration(duration) = SupportDesk.humanize_duration(duration)
 
     # The open case this would land in, when the requester already has one
     # about this thing — so the wizard can say "you already have a

@@ -1,15 +1,20 @@
 # frozen_string_literal: true
 
 module SupportDesk
-  # The `:support_console` routing concern — the one line that turns two
+  # The `:support_console` routing concern — the one line that turns a few
   # RESTful actions into a working console:
   #
   #   namespace :madmin do
-  #     resources :support_tickets, only: %i[index show], concerns: :support_console
+  #     resources :support_tickets, only: %i[index show new], concerns: :support_console
   #   end
   #
-  # It draws the collection route first and the member routes after, which is
-  # what keeps `/madmin/support_tickets/next` from being swallowed by
+  # `new` stays yours — add it to `only:` when you render the form the
+  # console's `open_conversation` posts to ("Write to someone"). The concern
+  # draws the collection routes (`next`, `open_conversation`) and every
+  # member verb.
+  #
+  # It draws the collection routes first and the member routes after, which
+  # is what keeps `/madmin/support_tickets/next` from being swallowed by
   # `/madmin/support_tickets/:id` (a `resources` block draws its concerns
   # before its own member mappings, so "next" wins).
   #
@@ -26,8 +31,11 @@ module SupportDesk
     # The name a host writes in their routes file.
     CONCERN = :support_console
 
-    # The member verbs, in the order an agent uses them.
-    MEMBER_VERBS = %i[reply take assign hand_off release close reopen note change_topic].freeze
+    # The verbs, from the ONE table that has them: the concern that answers
+    # them owns it, so a verb can never be routed without an action or
+    # answered without a route. Kept here as an alias for a release, because
+    # a host may have read it.
+    MEMBER_VERBS = SupportDesk::Console::MEMBER_VERBS
 
     # Rails' own message for this ("can't use collection outside resource(s)
     # scope") is true and says nothing about which concern caused it, which
@@ -82,12 +90,16 @@ module SupportDesk
       # to every route, which is how `concerns :support_console, path: "t"`
       # keeps working.
       def call(mapper, options = {})
+        # Read at DRAW time, from SupportDesk::Console — which is loaded by
+        # the spine long before any routes file runs, so there is no
+        # load-order risk in taking the verbs from the concern that answers
+        # them rather than keeping a second list here.
         mapper.collection do
-          mapper.get :next, **options
+          SupportDesk::Console::COLLECTION_VERBS.each { |verb, method| mapper.public_send(method, verb, **options) }
         end
 
         mapper.member do
-          MEMBER_VERBS.each { |verb| mapper.post verb, **options }
+          SupportDesk::Console::MEMBER_VERBS.each { |verb| mapper.post verb, **options }
         end
       rescue ArgumentError => e
         raise unless e.message.include?("outside resource")

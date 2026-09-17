@@ -48,6 +48,8 @@ module SupportDesk
     # that makes a later precedence bug much harder to read. SupportDesk
     # ::Engine already ships them for both namespaces.
     paths["config/locales"] = []
+    # The requester engine owns task discovery too; both share this root.
+    paths["lib/tasks"] = []
 
     # `concerns: :support_console` in the HOST's routes file. Registered from
     # an initializer, which is early enough: the app's routes are not drawn
