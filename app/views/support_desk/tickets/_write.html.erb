@@ -20,6 +20,7 @@
   <%= render "support_desk/tickets/context_card", subject: wizard.subject if wizard.subject %>
 
   <%= form_with url: support_desk_routes.tickets_path,
+                multipart: true,
                 method: :post,
                 class: "support-desk-form",
                 data: { turbo_frame: "_top" } do %>

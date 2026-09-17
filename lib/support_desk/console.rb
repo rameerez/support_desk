@@ -102,6 +102,7 @@ module SupportDesk
       before_action :set_support_ticket, only: MEMBER_ACTIONS
       before_action :authorize_support_console!
       before_action :require_offered_action!, only: TRANSITIONS
+      after_action :mark_support_transcript_read, only: :show
 
       helper_method :current_agent, :support_desk_record, :support_queue, :support_transcript,
                     :console_ticket_path, :console_tickets_path, :console_file_path
@@ -218,7 +219,10 @@ module SupportDesk
     # Override to paginate a long one.
     def support_transcript(ticket = @ticket)
       scope = ticket.messages.visible.oldest_first.includes(:sender, :author)
-      scope.respond_to?(:with_attached_files) ? scope.with_attached_files : scope
+      scope = scope.with_attached_files if scope.respond_to?(:with_attached_files)
+      scope.load
+      @support_read_through = scope.last&.created_at if ticket == @ticket
+      scope
     end
 
     # The default queue tab and the tickets behind it, for hosts that want
@@ -275,6 +279,12 @@ module SupportDesk
     end
 
     private
+
+    def mark_support_transcript_read
+      return unless response.successful? && @support_read_through
+
+      @ticket.conversation.participant_for(@ticket.desk)&.read!(at: @support_read_through)
+    end
 
     # --- Who is asking ------------------------------------------------------------
 

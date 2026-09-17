@@ -248,15 +248,15 @@ class TopicsTest < ActiveSupport::TestCase
   test "the type casts symbols, strings and topics, and serializes to the path" do
     type = SupportDesk::Topic::Type.new
 
-    assert_equal "order", type.cast(:order).path
-    assert_equal "order", type.cast("order").path
+    assert_equal "order", type.cast(:order)
+    assert_equal "order", type.cast("order")
     assert_equal "order", type.serialize(type.cast("order"))
     assert_equal "order", type.serialize(:order)
     assert_nil type.cast(nil)
   end
 
   test "an unknown path reads as a null object that still renders" do
-    unknown = SupportDesk::Topic::Type.new.cast("gone/away")
+    unknown = SupportDesk::Ticket.new(topic: "gone/away").topic
 
     assert_predicate unknown, :unknown?
     assert_predicate unknown, :retired?

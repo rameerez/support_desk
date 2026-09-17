@@ -70,6 +70,15 @@ class ConsoleEngineTest < ActionDispatch::IntegrationTest
 
   # --- One case --------------------------------------------------------------------
 
+  test "reading a transcript advances the desk receipt to the last rendered message" do
+    seat = @ticket.conversation.participant_for(@ticket.desk)
+    assert_predicate seat, :unread?
+    get "/admin/support/#{@ticket.id}"
+    assert_response :success
+    assert_not_predicate seat.reload, :unread?
+    assert_equal @ticket.messages.visible.maximum(:created_at), seat.last_read_at
+  end
+
   test "the case renders the context card, the transcript, the composer and the timeline" do
     @ticket.note!("Cliente VIP", by: @lucia)
 
