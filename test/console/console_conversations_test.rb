@@ -136,6 +136,7 @@ class ConsoleConversationsTest < ActionDispatch::IntegrationTest
          params: { requester: @alice.to_global_id.to_s, body: "   " }
 
     assert_response :unprocessable_entity
+    assert_select "#flash-alert", "Write something before sending."
     assert_select "#requester", "Alice"
 
     post "/madmin/support_tickets/open_conversation",

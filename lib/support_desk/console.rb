@@ -428,6 +428,11 @@ module SupportDesk
 
     def conversation_arguments
       raise InvalidInput, :unknown_requester if @requester.nil?
+      # The same answer the member `reply` action gives, for the same
+      # mistake. The MODEL refuses a blank staff message too (and rolls the
+      # case back with it), but "Escribe algo antes de enviar" is what an
+      # agent needs to read, not a validation error about a message body.
+      raise InvalidInput, :blank_message if @body.strip.empty? && @files.empty?
       # A dual-role account (an admin who is also a customer) writing to
       # themselves is ambiguous: the low-level API would read it as them
       # asking for help, which is not what this form is for.
