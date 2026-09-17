@@ -35,13 +35,18 @@ class ConsoleConversationTest < ApplicationSystemTestCase
     fill_in "body", with: "Vimos que tu pedido no llegó"
     click_on "Send as Soporte"
 
-    # Wait for the page the browser landed on BEFORE reading the database:
-    # `sole` waits for nothing, and the POST is still in flight.
-    assert_text "Vimos que tu pedido no llegó"
+    # Wait for the page the browser LANDED ON before reading the database:
+    # `sole` waits for nothing, and the POST is still in flight. The wait has
+    # to be on something only the case page has — the message is also sitting
+    # in the form's own textarea as the draft, so waiting on that text is
+    # satisfied by the page we are leaving.
+    assert_current_path(%r{\A/admin/support/[^/]+\z})
+    assert_text "Conversation"
 
     ticket = SupportDesk::Ticket.sole
 
     assert_current_path "/admin/support/#{ticket.id}"
+    assert_text "Vimos que tu pedido no llegó"
     assert_predicate ticket, :opened_by_support?
     assert_equal @lucia, ticket.opened_by
   end
@@ -62,7 +67,10 @@ class ConsoleConversationTest < ApplicationSystemTestCase
     fill_in "requester_query", with: "alice@example.com"
     click_on "Send as Soporte"
 
-    assert_text "Vimos que tu pedido no llegó"
+    # Same trap as above, and worse here: the draft the 422 handed back is
+    # the message we are about to send, so it is on screen either way.
+    assert_current_path(%r{\A/admin/support/[^/]+\z})
+    assert_text "Conversation"
 
     ticket = SupportDesk::Ticket.sole
 
