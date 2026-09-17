@@ -210,6 +210,28 @@ module SupportDesk
       end
     end
 
+    test "nothing along the way is quietly reported and swallowed" do
+      # The event bus is error-isolated on purpose: a host subscriber that
+      # raises is reported and the next one still runs. That is also how a
+      # bug in OUR own after-commit path would disappear, so a test that
+      # watches the happy path has to watch the reporter too.
+      reported = []
+      subscriber = Object.new
+      subscriber.define_singleton_method(:report) { |error, **| reported << error }
+      Rails.error.subscribe(subscriber)
+      seen = []
+      SupportDesk.on(:ticket_opened) { |ticket| seen << ticket.id }
+
+      ticket = @lucia.open_support_conversation_with!(@alice, "Vimos que tu pedido no llegó", about: @order)
+      ask_again ticket, "ah, no lo sabía"
+      ticket.reload.reply!("te contamos", by: @lucia)
+
+      assert_equal [ ticket.id ], seen
+      assert_empty reported.map { |error| "#{error.class}: #{error.message}" }
+    ensure
+      Rails.error.unsubscribe(subscriber)
+    end
+
     private
 
     # An ActiveStorage upload the way a controller hands one over.
