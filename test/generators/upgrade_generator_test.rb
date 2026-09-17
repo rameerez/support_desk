@@ -185,9 +185,13 @@ class UpgradeGeneratorTest < Rails::Generators::TestCase
   def with_scratch_database
     configuration = prepare_scratch_database
     Scratch.establish_connection(configuration)
+    established = true
     silence_migrations { yield Scratch.connection }
   ensure
-    Scratch.remove_connection
+    # Only a connection this class really established: without its own,
+    # `Scratch` inherits ActiveRecord::Base's specification name, and
+    # `remove_connection` would take the WHOLE suite's pool down with it.
+    Scratch.remove_connection if established
     discard_scratch_database
   end
 
