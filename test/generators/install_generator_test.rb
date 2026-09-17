@@ -63,6 +63,36 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     end
   end
 
+  test "a fresh install gets the additive opened_by migration too" do
+    run_generator
+
+    # The SAME file `support_desk:upgrade` copies: one migration owns those
+    # two columns, so a fresh install and an upgraded one have one schema,
+    # and this migration's `down` removes exactly what its `up` added.
+    assert_migration "db/migrate/add_opened_by_to_support_desk_tickets.rb" do |migration|
+      assert_match(/add_reference :support_desk_tickets, :opened_by, polymorphic: true/, migration)
+      assert_match(/SET opened_by_type = requester_type/, migration)
+    end
+
+    create = migration_file_name("db/migrate/create_support_desk_tables.rb")
+    add = migration_file_name("db/migrate/add_opened_by_to_support_desk_tickets.rb")
+
+    assert_operator File.basename(create), :<, File.basename(add),
+                    "the tables have to exist before anything can be added to them"
+  end
+
+  test "the install migration and the upgrade template are the same file" do
+    run_generator
+
+    template = File.read(File.expand_path(
+      "../../lib/generators/support_desk/templates/add_opened_by_to_support_desk_tickets.rb.erb", __dir__
+    ))
+    copied = File.read(migration_file_name("db/migrate/add_opened_by_to_support_desk_tickets.rb"))
+    body = ->(source) { source.split(/^class .*\n/, 2).last }
+
+    assert_equal body.call(template), body.call(copied)
+  end
+
   test "the initializer documents every setting the gem has" do
     run_generator
 
