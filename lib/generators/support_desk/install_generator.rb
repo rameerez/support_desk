@@ -83,7 +83,8 @@ module SupportDesk
 
         say "\n  Already installed and bumping the version? 'rails g support_desk:upgrade' copies"
         say "  only the migrations the new version needs (0.2.0: who opened the case), and"
-        say "  nothing you own. Run it, migrate, then deploy the new code."
+        say "  nothing you own. Follow the CHANGELOG's drained cutover: migrate, pause"
+        say "  support traffic, drain old web/workers, backfill, then serve only 0.2."
 
         say "\nCheck your work any time with SupportDesk.doctor.print"
         say "You now have support tickets that are real conversations. 🚀\n", :green

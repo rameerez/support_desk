@@ -32,6 +32,21 @@ module SupportDesk
     # prove. Where it can run it must run — never skipped, never rescued into
     # a pass.
     if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
+      test "agent revocation on another connection cannot be hidden by the query cache" do
+        requester = create_user
+        agent = create_agent
+        ActiveRecord::Base.cache do
+          assert_predicate User.find_by(id: agent.id), :admin?
+          Thread.new do
+            ActiveRecord::Base.connection_pool.with_connection do
+              User.find(agent.id).update!(admin: false)
+            end
+          end.value
+          assert_raises(NotAnAgent) { agent.open_support_conversation_with!(requester, "hello") }
+        end
+        assert_equal 0, Ticket.count
+      end
+
       test "two agents writing first at the same instant land in one case" do
         alice = create_user(name: "Alice")
         lucia = create_agent(name: "Lucía")
@@ -42,14 +57,30 @@ module SupportDesk
         # this is two sequential opens wearing a costume.
         barrier = Concurrent::CyclicBarrier.new(2)
 
-        tickets = [ [ lucia, "Vimos que tu pedido no llegó" ], [ pedro, "Te escribimos por lo mismo" ] ].map do |agent, body|
-          Thread.new do
-            ActiveRecord::Base.connection_pool.with_connection do
-              barrier.wait(5)
-              agent.open_support_conversation_with!(alice, body, topic: :account)
+        lookup = Ticket.method(:existing_for)
+        observed = Concurrent::Array.new
+        synchronized_lookup = lambda do |**arguments|
+          existing = lookup.call(**arguments)
+          observed << existing
+          raise "writers did not both reach the pre-check" unless barrier.wait(10)
+
+          existing
+        end
+        tickets = Ticket.stub(:existing_for, synchronized_lookup) do
+          threads = [ [ lucia, "Vimos que tu pedido no llegó" ], [ pedro, "Te escribimos por lo mismo" ] ].map do |agent, body|
+            Thread.new do
+              ActiveRecord::Base.connection_pool.with_connection do
+                agent.open_support_conversation_with!(alice, body, topic: :account)
+              end
             end
           end
-        end.map(&:value)
+          begin
+            threads.map(&:value)
+          ensure
+            threads.each(&:join)
+          end
+        end
+        assert_equal [ nil, nil ], observed.to_a, "both reads finished before either insert"
 
         assert_equal 1, Ticket.count, "one case, whoever got there first"
         assert_equal tickets.first.id, tickets.last.id

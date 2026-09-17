@@ -66,12 +66,6 @@ module SupportDesk
       end
     end
 
-    # The gem's own rake tasks (`support_desk:backfill_opened_by`), available
-    # in the host without copying anything.
-    rake_tasks do
-      load File.expand_path("../tasks/support_desk.rake", __dir__)
-    end
-
     # Expose `has_support_tickets` / `supportable` / `acts_as_support_agent`
     # on every AR model.
     initializer "support_desk.active_record" do

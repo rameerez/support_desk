@@ -39,8 +39,10 @@ module SupportDesk
         say "       ticket.opened_by / opened_by_support? / opened_by_requester?"
         say "       config.opening_line / config.opening_line_from_support / config.find_requester"
         say "       has_support_tickets if: :kept?                                 # who may be written to"
-        say "  3. Deploy the migration BEFORE the code that writes provenance, and run"
-        say "     'rake support_desk:backfill_opened_by' once the old processes are gone."
+        say "  3. Migrate BEFORE 0.2 serves traffic. Pause support writes; stop and drain"
+        say "     ALL old web requests and workers. This is NOT a rolling deployment."
+        say "     Keep traffic paused, run 'rake support_desk:backfill_opened_by' under 0.2,"
+        say "     verify no NULL openers remain, then start only 0.2 and resume traffic."
         say "  4. See the CHANGELOG for the full list.\n", :green
       end
 

@@ -210,13 +210,12 @@ class ConsoleConversationsTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
     assert_equal 0, SupportDesk::Ticket.count
 
-    # `desk` is read by EVERY console screen, so a crafted one answers the
-    # way an unknown key does — the first visible desk — rather than taking
-    # the console down with it.
+    # A compose target is authoritative; read-only queue navigation may fall back.
     get "/madmin/support_tickets/new", params: { desk: { a: 1 }, requester: @alice.to_global_id.to_s }
 
-    assert_response :success
+    assert_response :unprocessable_entity
     assert_select "#requester", "Alice"
+    assert_select "#send", false
 
     get "/madmin/support_tickets/next", params: { desk: { a: 1 } }
 

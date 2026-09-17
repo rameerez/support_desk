@@ -64,7 +64,10 @@ rails db:migrate
 
 Already on 0.1? `rails generate support_desk:upgrade` copies only the
 migrations a version bump needs (0.2.0: who opened each case) and nothing
-you own. Migrate before you deploy the new code — see the CHANGELOG.
+you own. Migrate first, pause support traffic, drain all old web requests and
+workers, and backfill before starting 0.2 traffic. This is not a rolling
+upgrade: old assignment writers cannot handle new support-opened cases.
+See the CHANGELOG for the complete cutover and rollback procedure.
 
 Three model lines and one route line:
 

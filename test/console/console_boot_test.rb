@@ -47,6 +47,16 @@ class ConsoleBootTest < ActiveSupport::TestCase
     assert_equal "next,open_conversation", run_in_fresh_process(script)
   end
 
+  test "Rails discovers the backfill task exactly once" do
+    script = <<~RUBY
+      require #{File.expand_path("test/dummy/config/environment", GEM_ROOT).inspect}
+      require "rake"
+      Rails.application.load_tasks
+      puts "backfill_actions=\#{Rake::Task["support_desk:backfill_opened_by"].actions.size}"
+    RUBY
+    assert_match(/(?:\A|\n)backfill_actions=1\n?\z/, run_in_fresh_process(script))
+  end
+
   private
 
   def run_in_fresh_process(script)

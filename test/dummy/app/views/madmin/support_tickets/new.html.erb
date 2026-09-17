@@ -33,7 +33,7 @@
 
   <% if !support_conversation_available? %>
     <p id="off_duty"><%= t("support_desk.console.errors.off_duty") %></p>
-  <% elsif @requester || support_desk_record.config.find_requester %>
+  <% elsif support_conversation_sendable? && (@requester || support_desk_record.config.find_requester) %>
     <%= submit_tag t("support_desk.console.new_conversation.send", desk: support_desk_record.name), id: "send" %>
   <% end %>
 <% end %>

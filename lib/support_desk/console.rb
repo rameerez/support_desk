@@ -137,7 +137,7 @@ module SupportDesk
       helper_method :current_agent, :support_desk_record, :support_queue, :support_transcript,
                     :console_ticket_path, :console_tickets_path, :console_file_path,
                     :support_conversation_available?, :support_conversation_offered?,
-                    :support_conversation_topics
+                    :support_conversation_topics, :support_conversation_sendable?
     end
 
     # --- The verbs --------------------------------------------------------------
@@ -415,15 +415,55 @@ module SupportDesk
     def assign_conversation_draft
       @requester = nil
       @about = nil
-      @requester_query = conversation_param(:requester_query)
-      @topic = conversation_param(:topic).presence
-      @body = conversation_param(:body)
-      @files = Array(params[:files]).reject(&:blank?)
+      # Capture every independently valid field before any validation raises.
+      @requester_query, @topic, @body = %i[requester_query topic body].map do |name|
+        params[name].is_a?(String) ? params[name] : ""
+      end
+      @topic = @topic.presence
+      @files = []
 
       @requester = support_conversation_requester
       @about = support_conversation_subject
       # A supplied topic wins; a subject's own topic is the obvious default.
       @topic ||= @about&.support_topic
+      %i[requester_query topic body].each { |name| conversation_param(name) }
+      validate_conversation_desk!
+      @conversation_requester_unavailable = @requester.present?
+      SupportDesk::Ticket.ensure_requester!(@requester) if @requester
+      @conversation_requester_unavailable = false
+      @files = conversation_files
+    end
+
+    def validate_conversation_desk!
+      return unless params.key?(:desk)
+
+      key = params[:desk]
+      return if key.is_a?(String) && support_visible_desks.any? { |desk| desk.key.to_s == key }
+
+      @invalid_conversation_desk = true
+      raise InvalidInput, :invalid_input
+    end
+
+    # Validate transport shapes here; MIME/size/count policy stays on Message.
+    def conversation_files
+      files = params[:files]
+      return [] if files.nil?
+      raise InvalidInput, :invalid_input unless files.is_a?(Array)
+
+      files.reject { |file| file.nil? || file == "" }.map do |file|
+        case file
+        when ActionDispatch::Http::UploadedFile then file
+        when String
+          raise InvalidInput, :invalid_input unless defined?(ActiveStorage::Blob)
+
+          begin
+            ActiveStorage::Blob.find_signed!(file)
+          rescue ActiveSupport::MessageVerifier::InvalidSignature, ActiveRecord::RecordNotFound
+            raise InvalidInput, :invalid_input
+          end
+        else raise InvalidInput, :invalid_input
+        end
+      end
     end
 
     def conversation_arguments
@@ -480,8 +520,13 @@ module SupportDesk
       gid = GlobalID.parse(token)
       raise InvalidInput, refusal if gid.nil? || gid.app.to_s != GlobalID.app.to_s
 
+      # safe_constantize ignores missing token constants, but propagates bugs
+      # inside an autoload. The host finder runs outside that boundary.
+      model = gid.model_name.safe_constantize
+      raise InvalidInput, refusal unless model.is_a?(Class) && allowed.any? { |klass| model <= klass }
+
       GlobalID::Locator.locate(gid, only: allowed) || raise(InvalidInput, refusal)
-    rescue NameError, ActiveRecord::RecordNotFound, GlobalID::Locator::InvalidModelIdError
+    rescue ActiveRecord::RecordNotFound, GlobalID::Locator::InvalidModelIdError
       # A class name nothing answers to, an id the model can't read, a row
       # that is gone: the same bad token in the same field.
       raise InvalidInput, refusal
@@ -505,6 +550,10 @@ module SupportDesk
     # to disable its own button rather than offering one that only ever 422s.
     def support_conversation_available?
       !current_agent.respond_to?(:on_duty?) || current_agent.on_duty?
+    end
+
+    def support_conversation_sendable?
+      support_conversation_available? && !@invalid_conversation_desk && !@conversation_requester_unavailable
     end
 
     # Whether to show the door on the queue at all: on duty, and the host's

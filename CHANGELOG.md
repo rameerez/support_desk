@@ -19,7 +19,7 @@ algorithm.
 - `config.find_requester`: how a console turns something an agent typed into the person they meant. Without it the console accepts only a GlobalID from one of your own pages.
 - `has_support_tickets if:` — who may ask, and who may be written to — with `support_requester?` and `support_desk` on the requester model.
 - Console: `new` (the form) and `open_conversation` (the send) as collection actions, with the "Write to someone" door in the mounted console and the generated one. `SupportDesk::Console::COLLECTION_VERBS` is the table the router reads.
-- Generators: `rails g support_desk:upgrade` copies the additive `opened_by` migration (the same file a fresh install runs), and `rake support_desk:backfill_opened_by` runs its backfill again after a deploy.
+- Generators: `rails g support_desk:upgrade` copies the additive `opened_by` migration (the same file a fresh install runs), and `rake support_desk:backfill_opened_by` runs its catch-up after draining old processes and before admitting 0.2 traffic.
 - `SupportDesk::NotARequester`, and `SupportDesk.humanize_duration` (moved off `Wizard`, which keeps a delegation).
 
 ### Changed
@@ -39,13 +39,26 @@ Behaviour changes, not refactors. Read them before upgrading:
 
 ### Fixed
 
+- Stale revoked/deleted agents are refused using an uncached eligibility read, shared by opening and ordinary ticket transitions.
+- Malformed attachment inputs return the compose form with 422; signed blob failures do not discard the draft. Invalid explicit desks cannot silently change the sender, and host finder errors are not hidden as bad GlobalIDs.
+- Legacy NULL provenance remains requester-originated for quotas and reply metrics. The documented upgrade drains old web/workers before the catch-up and new traffic.
+- Rake tasks are discovered once across the two engines; migration collision guidance preserves existing provenance.
+- Valid draft fields survive malformed sibling fields, and unavailable recipients are explained before offering send.
 - `Ticket.open!` no longer reloads the case it just opened. The clocks are folded in on the same instance, inside the transaction, so the row that commits is already true.
 
 ### Upgrading from 0.1
 
-1. `rails generate support_desk:upgrade` and **migrate before deploying 0.2 code** — the column is additive and nullable, so 0.1 keeps running against it.
-2. Deploy 0.2. Once the old processes are gone, run `rake support_desk:backfill_opened_by` once: it points any case an old process opened in the meantime at its requester. It is idempotent, and `SupportDesk.doctor` tells you when it is needed.
-3. Want the console door? Add `new` to your routes (`only: %i[index show new]`) and re-run `rails g support_desk:console` for the two new views, or copy them by hand if your console is customized.
+**This upgrade requires a drained cutover, not a rolling deployment.** Old
+processes cannot release assignments with the new `opened` reason.
+
+1. Copy the upgrade migration with `rails generate support_desk:upgrade` and migrate before 0.2 serves traffic. The additive, nullable columns are compatible with 0.1.
+2. Pause incoming support writes and background producers. Stop and drain **all old web requests and workers**, including jobs already running; verify none remain. Keep support traffic paused. Do not start serving 0.2 alongside 0.1.
+3. With the 0.2 artifact available but traffic still paused, run `rake support_desk:backfill_opened_by`. Verify `SupportDesk::Ticket.where(opened_by_id: nil).count` is zero and inspect `SupportDesk.doctor`. The task is idempotent; repeating it is safe in this release because automation openers are not supported.
+4. Start only 0.2 web/workers, then resume support traffic. Writing-first may now be used. Add `new` to console routes and regenerate/customize views as needed.
+
+NULL-provenance cases are treated as requester-opened even before the backfill,
+so quotas, labels and reply metrics stay correct. This read compatibility does
+**not** make old assignment writers compatible with 0.2; the drain is still required.
 
 Rolling back is a host code rollback, not a Gemfile pin: 0.1 does not know the new settings, routes or predicates. Keep the columns and the provenance already written — but note that 0.1's `Assignment#release!` revalidates `reason` and rejects `opened`, so closing, releasing or handing off a case the desk opened will fail under 0.1 until a compatibility patch accepts that reason. Prefer disabling the entry point (drop `new`/`open_conversation` from your routes) over downgrading with active desk-opened cases.
 

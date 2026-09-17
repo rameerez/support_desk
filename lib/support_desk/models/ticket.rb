@@ -104,12 +104,16 @@ module SupportDesk
     # evaluated at class definition would consult the schema before
     # `db:migrate` had added the columns it names.
     def self.opened_by_requester_condition # :nodoc:
-      arel_table[:opened_by_type].eq(arel_table[:requester_type])
-        .and(arel_table[:opened_by_id].eq(arel_table[:requester_id]))
+      identity = arel_table[:opened_by_type].eq(arel_table[:requester_type])
+                       .and(arel_table[:opened_by_id].eq(arel_table[:requester_id]))
+      # Only 0.1 writes a NULL pair: automation openers are not supported.
+      # Keep those inbound cases correct while the catch-up backfill runs.
+      legacy = arel_table[:opened_by_type].eq(nil).and(arel_table[:opened_by_id].eq(nil))
+      identity.or(legacy)
     end
 
     scope :opened_by_requester, -> { where(opened_by_requester_condition) }
-    scope :opened_by_support, -> { where(opened_by_id: nil).or(where.not(opened_by_requester_condition)) }
+    scope :opened_by_support, -> { where.not(opened_by_requester_condition) }
 
     # Waiting longer than +duration+ for whoever owes the next word.
     scope :waiting_over, lambda { |duration|
@@ -320,11 +324,23 @@ module SupportDesk
           raise NotARequester, "an unsaved #{record.class} can't ask for support — save it first"
         end
 
-        current = record.class.find_by(id: record.id)
+        current = record.class.uncached { record.class.find_by(id: record.id) }
         return if current&.support_requester?
 
         raise NotARequester, "#{record.class}##{record.id} can't ask for support or be written to right now " \
                              "(`has_support_tickets if:` says no, or the record is gone)"
+      end
+
+      # A loaded instance may predate revocation or deletion. Check the row,
+      # just as requester eligibility does; this does not serialize revocation.
+      def ensure_agent_record!(record) # :nodoc:
+        if record.respond_to?(:persisted?) && record.persisted? && record.respond_to?(:support_agent?)
+          current = record.class.uncached { record.class.find_by(id: record.id) }
+          return if current&.support_agent?
+        end
+
+        raise NotAnAgent, "#{record.class} is not a currently eligible, persisted support agent — " \
+                         "declare `acts_as_support_agent` and check its if: condition"
       end
 
       # Whether two actors are the same record. Not `==`: either side can be
@@ -354,10 +370,7 @@ module SupportDesk
         unless opener.respond_to?(:persisted?) && opener.persisted?
           raise NotAnAgent, "can't open a ticket as an unsaved #{opener.class} — save the agent first"
         end
-        return if opener.respond_to?(:support_agent?) && opener.support_agent?
-
-        raise NotAnAgent, "#{describe_record(opener)} is not a support agent — declare " \
-                          "`acts_as_support_agent` on #{opener.class}"
+        ensure_agent_record!(opener)
       end
 
       def describe_record(record)
@@ -671,7 +684,8 @@ module SupportDesk
     def requester_unavailable?
       return true if requester_type.blank? || requester_id.blank?
 
-      current = requester_type.safe_constantize&.find_by(id: requester_id)
+      model = requester_type.safe_constantize
+      current = model&.uncached { model.find_by(id: requester_id) }
       return true if current.nil?
       # A requester class that never declared the macro (an import, a legacy
       # row) has no opinion to honour, so it isn't "unavailable".
@@ -691,12 +705,12 @@ module SupportDesk
     # than the association, so neither predicate loads a record to answer —
     # and so a case whose opener has since been deleted still answers.
     def opened_by_requester?
+      return true if opened_by_id.nil? && opened_by_type.nil?
+
       opened_by_id.present? && opened_by_type == requester_type && opened_by_id.to_s == requester_id.to_s
     end
 
-    # The other half: the desk wrote first. A 0.1 row with no provenance at
-    # all reads as this one, which is why `doctor` asks somebody to look at
-    # those rather than letting them pass as automation.
+    # NULL provenance is a legacy requester, never an automation opener.
     def opened_by_support? = !opened_by_requester?
 
     # True when the desk owes the next word.
@@ -1160,10 +1174,7 @@ module SupportDesk
 
     def ensure_agent!(actor)
       return if actor.is_a?(Symbol)
-      return if actor.respond_to?(:support_agent?) && actor.support_agent?
-
-      raise NotAnAgent, "#{describe_actor(actor)} is not a support agent — declare " \
-                        "`acts_as_support_agent` on #{actor.class}"
+      self.class.ensure_agent_record!(actor)
     end
 
     def describe_actor(actor)

@@ -51,9 +51,9 @@ class AddOpenedByToSupportDeskTickets < ActiveRecord::Migration[7.2]
 
     raise ActiveRecord::MigrationError,
           "support_desk_tickets already has #{existing.join(" and ")}. This migration owns those two columns " \
-          "and #{INDEX_NAME}, so it won't write over a schema it didn't make. If you added them by hand and " \
-          "they already hold every case's provenance, record this migration as run instead " \
-          "(bin/rails db:migrate:up VERSION=, with this file's timestamp); otherwise drop them and run it again."
+          "and #{INDEX_NAME}, so it won't overwrite them. Verify both column types, the index and existing " \
+          "provenance against this migration before reconciling its version in schema_migrations. " \
+          "db:migrate:up runs this method again; it does not mark it as already run. Preserve existing data."
   end
 
   # The storage this table already uses for a host record's id — uuid,

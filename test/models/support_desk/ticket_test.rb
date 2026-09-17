@@ -574,12 +574,11 @@ module SupportDesk
 
       assert_predicate asked, :opened_by_requester?
       assert_predicate written, :opened_by_support?
-      # A 0.1 row is not automation and not the requester: it is a row
-      # somebody has to come and backfill, which is what `doctor` says.
-      assert_predicate legacy.reload, :opened_by_support?
+      # Only the requester could open a 0.1 case, even before the backfill.
+      assert_predicate legacy.reload, :opened_by_requester?
 
-      assert_equal [ asked ], Ticket.opened_by_requester.to_a
-      assert_equal [ written, legacy ].sort_by(&:id), Ticket.opened_by_support.sort_by(&:id)
+      assert_equal [ asked, legacy ].sort_by(&:id), Ticket.opened_by_requester.sort_by(&:id)
+      assert_equal [ written ], Ticket.opened_by_support.to_a
       assert_equal Ticket.count, Ticket.opened_by_requester.count + Ticket.opened_by_support.count
 
       # An actor whose record is gone is unavailable, never automation.

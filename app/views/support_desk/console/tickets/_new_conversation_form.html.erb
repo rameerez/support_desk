@@ -78,10 +78,10 @@
     <%= link_to t("support_desk.console.new_conversation.cancel"), console_tickets_path,
           class: "text-sm text-slate-500 underline underline-offset-2" %>
 
-    <% if support_conversation_available? && (@requester || support_desk_record.config.find_requester) %>
+    <% if support_conversation_sendable? && (@requester || support_desk_record.config.find_requester) %>
       <%= submit_tag t("support_desk.console.new_conversation.send", desk: support_desk_record.name),
             class: "rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700" %>
-    <% else %>
+    <% elsif flash[:alert].blank? %>
       <p class="text-sm text-slate-500">
         <%= support_conversation_available? ? t("support_desk.console.new_conversation.requester_hint") :
               t("support_desk.console.errors.off_duty") %>
