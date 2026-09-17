@@ -126,4 +126,17 @@ class ConsoleGeneratedViewsTest < ActionDispatch::IntegrationTest
 
     assert_assigned_to @ticket, @lucia
   end
+
+  test "the generated console has the door too, and it renders under a host namespace" do
+    get "/madmin/support_tickets"
+
+    assert_response :success
+    assert_select "a", "Write to someone"
+
+    get "/madmin/support_tickets/new", params: { requester: @alice.to_global_id.to_s }
+
+    assert_response :success
+    assert_select "h1", "Write as support"
+    assert_select "form[action=?]", "/madmin/support_tickets/open_conversation?desk=default"
+  end
 end

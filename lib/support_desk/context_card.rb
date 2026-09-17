@@ -62,6 +62,25 @@ module SupportDesk
     # When this requester joined — context for "is this a new user?".
     def requester_since = requester.try(:created_at)
 
+    # Who opened the case, as the console should print it: their name when
+    # the record still resolves, the desk's name in front of it when WE
+    # wrote first, and an honest label when there is no record to name.
+    #
+    # The three unnameable cases are not the same thing and must not read
+    # the same way: no provenance at all (a row from before 0.2, or
+    # automation the day it ships), an actor whose record is gone, and a
+    # requester-opened case, which is just their name.
+    def opened_by_label
+      opener = ticket.opened_by
+      return I18n.t("support_desk.console.context.automation") if ticket.opened_by_id.blank?
+      return I18n.t("support_desk.console.context.unavailable") if opener.nil?
+
+      name = opener.try(:support_agent_name) || Chats.display_name_for(opener)
+      return name if ticket.opened_by_requester?
+
+      "#{ticket.desk.name} · #{name}"
+    end
+
     # How many open cases this requester has right now, this one included.
     def requester_open_tickets
       Ticket.not_closed.where(requester: requester).count

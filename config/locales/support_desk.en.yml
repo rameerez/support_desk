@@ -43,6 +43,7 @@ en:
       state:
         awaiting_reply: "We're on it"
         answered: "We replied"
+        opened_by_support: "We wrote to you"
         closed: "Closed"
     doors:
       new: "Need help?"

@@ -249,4 +249,66 @@ class ConsoleEngineTest < ActionDispatch::IntegrationTest
 
     assert_equal "", rendered.strip
   end
+
+  test "the turnkey console has the door, and it opens the compose form" do
+    get "/admin/support"
+
+    assert_response :success
+    assert_select "a", "Write to someone"
+
+    get "/admin/support/new", params: { requester: @alice.to_global_id.to_s }
+
+    assert_response :success
+    assert_select "h1", "Write as support"
+    assert_select "form[action=?]", "/admin/support/open_conversation?desk=default"
+    assert_no_missing_translations
+  end
+
+  test "the turnkey console sends, and lands on the case" do
+    post "/admin/support/open_conversation",
+         params: { requester: @alice.to_global_id.to_s, topic: "account", body: "Vimos que…" }
+
+    ticket = SupportDesk::Ticket.order(:id).last
+
+    assert_response :see_other
+    assert_redirected_to "/admin/support/#{ticket.id}"
+    assert_predicate ticket, :opened_by_support?
+
+    follow_redirect!
+
+    # The card names who opened it, and the row carries the mark.
+    assert_select "dd", "Soporte · Lucía"
+
+    get "/admin/support", params: { tab: "open" }
+
+    assert_select "span", "Written by support"
+  end
+
+  test "the door is not shown to somebody who can't walk through it" do
+    User.class_eval { def on_duty? = false }
+
+    get "/admin/support"
+
+    assert_response :success
+    assert_select "a", { text: "Write to someone", count: 0 }, "an off-duty agent is offered no door"
+  ensure
+    User.send(:remove_method, :on_duty?)
+  end
+
+  test "and not shown when the host policy refuses the collection action" do
+    SupportDesk.config.authorize_console = ->(_agent, _ticket, action) { action != :open_conversation }
+
+    get "/admin/support"
+
+    assert_response :success
+    assert_select "a", { text: "Write to someone", count: 0 }
+  end
+
+  test "the compose form says who it will be signed by, and promises no ownership" do
+    get "/admin/support/new", params: { requester: @alice.to_global_id.to_s }
+
+    assert_response :success
+    assert_select "p", /Signed “Lucía”/
+    assert_no_match(/will be yours|you will hold/i, response.body)
+  end
 end

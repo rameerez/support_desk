@@ -84,6 +84,14 @@ class ConsoleOfferedActionsTest < ActionDispatch::IntegrationTest
     User.send(:remove_method, :on_duty?)
   end
 
+  test "OFFERED_AS names exactly the member verbs" do
+    # The console accepts a verb only when `actions_for` offers what
+    # OFFERED_AS maps it to — so a verb missing from this table would be a
+    # POST nothing checks, and one in the table with no route is a check
+    # nothing ever reaches.
+    assert_equal SupportDesk::Console::MEMBER_VERBS, SupportDesk::Console::OFFERED_AS.keys
+  end
+
   private
 
   # A ticket nothing has touched yet — new requester, new subject.

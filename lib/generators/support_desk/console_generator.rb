@@ -60,7 +60,7 @@ module SupportDesk
         say "  1. One route line:"
         say "       # config/routes.rb"
         say "       namespace :#{target} do"
-        say "         resources :support_tickets, only: %i[index show], concerns: :support_console"
+        say "         resources :support_tickets, only: %i[index show new], concerns: :support_console"
         say "       end"
 
         say "  2. A badge in your admin nav:"

@@ -17,8 +17,20 @@
       <p class="text-sm text-slate-500"><%= support_desk_record.name %></p>
     </div>
 
-    <%= link_to t("support_desk.console.actions.next"), console_tickets_path(:next),
-          class: "inline-flex items-center rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700" %>
+    <div class="flex items-center gap-2">
+      <%# The door to writing first. Through console_tickets_path so it
+          resolves under an isolated admin engine as well as a host
+          namespace, and carrying the desk so a multi-desk console composes
+          for the desk being worked. %>
+      <% if support_conversation_offered? %>
+        <%= link_to t("support_desk.console.actions.new_conversation"),
+              console_tickets_path(:new, desk: support_desk_record.key),
+              class: "inline-flex items-center rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50" %>
+      <% end %>
+
+      <%= link_to t("support_desk.console.actions.next"), console_tickets_path(:next),
+            class: "inline-flex items-center rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700" %>
+    </div>
   </header>
 
   <%= render "tabs", queue: @queue, scope: @scope %>

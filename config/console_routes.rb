@@ -10,7 +10,7 @@
 # SAME `:support_console` concern a host writes in their own routes file —
 # the turnkey console gets no private API.
 SupportDesk::ConsoleEngine.routes.draw do
-  resources :tickets, path: "", only: %i[index show], concerns: :support_console
+  resources :tickets, path: "", only: %i[index show new], concerns: :support_console
 
   root to: "tickets#index"
 end

@@ -158,6 +158,17 @@ module SupportDesk
     # Every class that has declared itself able to answer.
     def agent_class_names = @agent_class_names ||= Set.new
 
+    # The registered classes themselves, for the places that have to restrict
+    # a lookup to them — the console's GlobalID allow-lists, where a raw
+    # token is an identifier and never an authorization to call `find` on
+    # whatever class name it names.
+    #
+    # Names that no longer resolve are dropped rather than raised on: the
+    # registries store names so they survive reloads, and a class that went
+    # away is simply not one of the classes people can be looked up as.
+    def requester_classes = resolve_all(requester_class_names)
+    def supportable_classes = resolve_all(supportable_class_names)
+
     # Whether +klass+ (a Class, an instance, or a class name) is supportable.
     def supportable_class?(klass) = registered?(supportable_class_names, klass)
     # Whether +klass+ asks for support / answers it. Ancestor-aware, so an
@@ -302,6 +313,10 @@ module SupportDesk
     def register(registry, klass)
       registry << klass.name if klass.name
       klass
+    end
+
+    def resolve_all(registry)
+      registry.filter_map { |name| name.safe_constantize }
     end
 
     def registered?(registry, klass)

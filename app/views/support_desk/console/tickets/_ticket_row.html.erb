@@ -20,6 +20,14 @@
         </span>
 
         <span class="font-mono text-xs text-slate-400"><%= ticket.reference %></span>
+
+        <%# A case we started reads differently from one somebody asked for:
+            nobody is waiting on us in it until they answer. %>
+        <% if ticket.opened_by_support? %>
+          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+            <%= t("support_desk.console.row.opened_by_support") %>
+          </span>
+        <% end %>
       </div>
 
       <p class="mt-0.5 text-sm text-slate-500">

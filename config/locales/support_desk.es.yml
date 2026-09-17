@@ -50,6 +50,7 @@ es:
       state:
         awaiting_reply: "Estamos con ello"
         answered: "Te hemos contestado"
+        opened_by_support: "Te hemos escrito"
         closed: "Cerrada"
     # The ways in, from anywhere in the host app.
     doors:

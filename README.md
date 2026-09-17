@@ -280,13 +280,15 @@ One word in your routes file draws every verb an agent needs:
 ```ruby
 # config/routes.rb
 namespace :madmin do
-  resources :support_tickets, only: %i[index show], concerns: :support_console
+  resources :support_tickets, only: %i[index show new], concerns: :support_console
 end
 ```
 
 That adds member `reply take assign hand_off release close reopen note
-change_topic` and collection `next`. It has to sit inside a `resources`
-block, since that is what those routes hang off.
+change_topic` and collection `next` and `open_conversation`. It has to sit
+inside a `resources` block, since that is what those routes hang off.
+`new` stays yours: add it to `only:` when you render the form behind
+`open_conversation` ("Write to someone").
 
 The concern is seeded into every route set by a small prepend on Rails'
 routing mapper, because routing concerns live in a Hash built per `draw`
@@ -298,7 +300,7 @@ Rails.application.routes.draw do
   SupportDesk::ConsoleRoutes.register(self)
 
   namespace :madmin do
-    resources :support_tickets, only: %i[index show], concerns: :support_console
+    resources :support_tickets, only: %i[index show new], concerns: :support_console
   end
 end
 ```

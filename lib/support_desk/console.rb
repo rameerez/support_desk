@@ -8,7 +8,7 @@ module SupportDesk
   #
   #   # config/routes.rb
   #   namespace :madmin do
-  #     resources :support_tickets, only: %i[index show], concerns: :support_console
+  #     resources :support_tickets, only: %i[index show new], concerns: :support_console
   #   end
   #
   #   class Madmin::SupportTicketsController < Madmin::ApplicationController
@@ -18,9 +18,10 @@ module SupportDesk
   #     def current_agent = current_user      # or rely on config.current_agent_method
   #   end
   #
-  # `index` and `show` stay yours — they are the UI, and Layer 1 (Queue,
-  # ContextCard, Timeline, actions_for) is everything they need. What this
-  # concern owns is the boring, easy-to-get-wrong half:
+  # `index`, `show` and `new` stay yours — they are the UI, and Layer 1
+  # (Queue, ContextCard, Timeline, actions_for) is everything they need; the
+  # concern fills `new`'s draft and answers the `open_conversation` behind
+  # it. What this concern owns is the boring, easy-to-get-wrong half:
   #
   # * <b>Who is asking.</b> `current_agent` must be an eligible agent, or the
   #   request is a 403. `SupportDesk::Current.actor` is set from it, so a
@@ -47,12 +48,28 @@ module SupportDesk
   module Console
     extend ActiveSupport::Concern
 
-    # The verbs, in the order the routing concern draws them.
-    TRANSITIONS = %i[reply take assign hand_off release close reopen note change_topic].freeze
+    # The verbs, in the order the routing concern draws them. ONE table: the
+    # routing concern reads it at draw time and `OFFERED_AS` is checked
+    # against it, because a verb added in two places is a console that
+    # accepts a POST its own Drawer never routed (or the other way round).
+    MEMBER_VERBS = %i[reply take assign hand_off release close reopen note change_topic].freeze
+
+    # The verbs that work on the QUEUE rather than on a case, and the HTTP
+    # method each one is drawn with. `open_conversation` is the only write
+    # here: there is no ticket yet, which is the whole point of it.
+    COLLECTION_VERBS = { next: :get, open_conversation: :post }.freeze
+
+    # What 0.1 called the member verbs, kept for a release: a host may have
+    # written it into their own routes or their own tests.
+    TRANSITIONS = MEMBER_VERBS
 
     # Actions that work on one ticket, so `set_support_ticket` runs for them.
     # `show` is the host's, but it still wants the ticket found safely.
-    MEMBER_ACTIONS = ([ :show ] + TRANSITIONS).freeze
+    MEMBER_ACTIONS = ([ :show ] + MEMBER_VERBS).freeze
+
+    # The two actions that have no ticket: the form, and the send behind it.
+    # `authorize_console` is asked about both with a nil ticket.
+    CONVERSATION_ACTIONS = %i[new open_conversation].freeze
 
     # Which entry in `ticket.actions_for(agent)` each verb needs. The
     # console renders exactly what that method returns, so it must accept
@@ -81,19 +98,31 @@ module SupportDesk
       SupportDesk::UnknownTopic,
       SupportDesk::NotSupportable,
       SupportDesk::RateLimited,
-      SupportDesk::TooManyOpenTickets
+      SupportDesk::TooManyOpenTickets,
+      # Nobody to write to: a closed account, or a record that was never a
+      # requester at all.
+      SupportDesk::NotARequester,
+      # Everything chats refuses at the write — a blocked pair, a locked
+      # conversation, a host policy that says these two may not talk. Its
+      # CONFIGURATION error is deliberately not covered by this; see
+      # #support_console_rescuable?. Chats is loaded by the spine, so naming
+      # it here costs no constant that might not exist.
+      Chats::Error
     ].freeze
 
-    # The flash an error translates into. Unlisted ones fall back to
-    # `support_desk.console.errors.generic`.
-    ERROR_KEYS = {
-      "SupportDesk::NotAllowed" => "not_allowed",
-      "SupportDesk::NotTheAssignee" => "not_the_assignee",
-      "SupportDesk::NotAnAgent" => "not_an_agent",
-      "SupportDesk::InvalidTransition" => "invalid_transition",
-      "SupportDesk::Locked" => "locked",
-      "SupportDesk::UnknownTopic" => "unknown_topic"
-    }.freeze
+    # A refusal the console spotted in the REQUEST rather than in the domain:
+    # a token that names nothing, a Hash where text belongs, somebody this
+    # desk has no way to look up. It carries the locale key its flash reads,
+    # and it is deliberately NOT a SupportDesk::Error — nothing outside this
+    # concern should be rescuing it.
+    class InvalidInput < StandardError
+      attr_reader :key
+
+      def initialize(key)
+        @key = key.to_s
+        super("support_desk.console.errors.#{@key}")
+      end
+    end
 
     included do
       before_action :require_support_agent!
@@ -101,11 +130,14 @@ module SupportDesk
       before_action :set_support_current_actor
       before_action :set_support_ticket, only: MEMBER_ACTIONS
       before_action :authorize_support_console!
-      before_action :require_offered_action!, only: TRANSITIONS
+      before_action :require_offered_action!, only: MEMBER_VERBS
+      before_action :require_conversation_duty!, only: :open_conversation
       after_action :mark_support_transcript_read, only: :show
 
       helper_method :current_agent, :support_desk_record, :support_queue, :support_transcript,
-                    :console_ticket_path, :console_tickets_path, :console_file_path
+                    :console_ticket_path, :console_tickets_path, :console_file_path,
+                    :support_conversation_available?, :support_conversation_offered?,
+                    :support_conversation_topics
     end
 
     # --- The verbs --------------------------------------------------------------
@@ -176,6 +208,39 @@ module SupportDesk
       return refuse(:blank_topic) if topic.strip.empty?
 
       attempt(:topic_changed) { @ticket.change_topic!(to: topic, by: current_agent, request: request) }
+    end
+
+    # The form for writing to somebody who hasn't written to us — "Escribir
+    # a alguien". Renders with whatever the caller supplied: a requester
+    # GlobalID from one of your own pages (a user's admin screen, a ride),
+    # a subject to be about, a topic. Blank is an empty form; a token that
+    # names nothing is the same refusal here as it is on the send, because a
+    # form that quietly drops the person it was opened for is worse than one
+    # that says it couldn't find them.
+    def new
+      assign_conversation_draft
+    rescue StandardError => error
+      raise unless support_console_rescuable?(error)
+
+      refuse_conversation(error)
+    end
+
+    # Send it. One case either way: a new one when this person has nothing
+    # open that covers it, an ordinary reply into the one they do — under
+    # this desk's reply policy, and only if the host still says this agent
+    # may answer THAT case.
+    def open_conversation
+      assign_conversation_draft
+      ticket = SupportDesk::Ticket.open_or_reply!(**conversation_arguments)
+
+      @ticket = ticket
+      redirect_to after_transition_path(ticket), status: :see_other,
+                  notice: support_console_t("flashes.message_sent",
+                                            requester: Chats.display_name_for(@requester))
+    rescue StandardError => error
+      raise unless support_console_rescuable?(error)
+
+      refuse_conversation(error)
     end
 
     # The most urgent thing this agent should be looking at. The whole
@@ -268,7 +333,7 @@ module SupportDesk
       # that no test notices until somebody counts.
       def support_queue_tickets
         support_queue.scope(@scope)
-                     .includes(:requester, :assignee, :desk, :subject,
+                     .includes(:requester, :assignee, :desk, :subject, :opened_by,
                                conversation: { last_message: %i[sender author] })
                      .limit(support_tickets_per_page)
       end
@@ -278,7 +343,193 @@ module SupportDesk
       def support_tickets_per_page = 50
     end
 
+    # --- Writing first ------------------------------------------------------------
+    #
+    # Two overridable seams, and their contract:
+    #
+    # * `support_conversation_requester` returns the person this conversation
+    #   is FOR, or nil when nothing was supplied. It NEVER returns somebody
+    #   other than the one that was asked for: a supplied GlobalID is
+    #   authoritative, and a bad one is a refusal
+    #   (`raise InvalidInput, :invalid_requester`), never a silent fallback
+    #   to the typed query.
+    # * `support_conversation_subject` returns what the case is about, or
+    #   nil when nothing was supplied; a supplied token that doesn't resolve,
+    #   or resolves to something this requester may not talk about, is
+    #   `raise InvalidInput, :invalid_subject`.
+    #
+    # Both are looked up inside the classes that declared themselves
+    # (`SupportDesk.requester_classes`, `.supportable_classes`) — a raw
+    # GlobalID is an identifier, never permission to call `find` on whatever
+    # class it names. A multi-tenant host narrows BOTH ways in, because
+    # `config.find_requester` only guards the typed one:
+    #
+    #   def support_conversation_requester
+    #     found = super
+    #     return nil if found.nil?
+    #     raise SupportDesk::Console::InvalidInput, :invalid_requester unless
+    #       found.account_id == current_agent.account_id
+    #
+    #     found
+    #   end
+    #
+    # (The model checks eligibility on its own either way — see
+    # `Ticket.open!` — so an override that forgets is a narrower door, never
+    # a wider one.)
+
+    # The person this conversation is for, from a GlobalID one of your own
+    # pages handed over, or from what an agent typed into the form.
+    def support_conversation_requester
+      token = conversation_param(:requester)
+      return locate_conversation_record(token, SupportDesk.requester_classes, :invalid_requester) if token.present?
+      return nil if @requester_query.blank?
+
+      finder = support_desk_record.config.find_requester
+      raise InvalidInput, :no_requester_lookup if finder.nil?
+
+      found = finder.call(@requester_query)
+      raise InvalidInput, :unknown_requester if found.nil?
+      raise InvalidInput, :invalid_requester unless SupportDesk.requester_class?(found.class)
+
+      found
+    end
+
+    # What the case is about, when the page that opened the form knew.
+    def support_conversation_subject
+      token = conversation_param(:about)
+      return nil if token.blank?
+
+      subject = locate_conversation_record(token, SupportDesk.supportable_classes, :invalid_subject)
+      # Checked here so the form can't show a card for something this person
+      # may not talk about, and checked AGAIN by the model at the write.
+      raise InvalidInput, :invalid_subject unless @requester && subject.supportable_by?(@requester)
+
+      subject
+    end
+
     private
+
+    # Everything the form renders, set BEFORE anything can fail: a refusal
+    # has to come back with the draft still in it, or an agent retypes their
+    # message every time they mistype an email.
+    def assign_conversation_draft
+      @requester = nil
+      @about = nil
+      @requester_query = conversation_param(:requester_query)
+      @topic = conversation_param(:topic).presence
+      @body = conversation_param(:body)
+      @files = Array(params[:files]).reject(&:blank?)
+
+      @requester = support_conversation_requester
+      @about = support_conversation_subject
+      # A supplied topic wins; a subject's own topic is the obvious default.
+      @topic ||= @about&.support_topic
+    end
+
+    def conversation_arguments
+      raise InvalidInput, :unknown_requester if @requester.nil?
+      # A dual-role account (an admin who is also a customer) writing to
+      # themselves is ambiguous: the low-level API would read it as them
+      # asking for help, which is not what this form is for.
+      if SupportDesk::Ticket.same_actor?(@requester, current_agent)
+        raise InvalidInput, :writing_to_yourself
+      end
+
+      {
+        requester: @requester, by: current_agent, message: @body, about: @about, topic: @topic,
+        files: @files, via: :in_app, desk: support_desk_record, request: request,
+        requester_role: @requester.class.support_desk_requester_options[:as],
+        authorize_reuse: method(:authorize_conversation_reuse)
+      }
+    end
+
+    # Run under the REUSED case's row lock, before the reply policy has done
+    # anything: a host may let this agent write to this person and still
+    # refuse them this particular case, and the answer has to be the same one
+    # the member `reply` action would have given. Raising rolls the whole
+    # operation back.
+    def authorize_conversation_reuse(ticket)
+      @ticket = ticket
+      return if SupportDesk.config.console_authorized?(current_agent, ticket, :reply) &&
+                ticket.actions_for(current_agent).include?(:reply)
+
+      raise SupportDesk::NotAllowed,
+            "#{current_agent.class}##{current_agent.id} may not reply to ticket #{ticket.reference}"
+    end
+
+    # Text fields are text. A Hash or an Array where a string belongs is a
+    # crafted request, not something to `.to_s` and then look up.
+    def conversation_param(name)
+      value = params[name]
+      return "" if value.nil?
+      raise InvalidInput, :invalid_input unless value.is_a?(String)
+
+      value
+    end
+
+    # A GlobalID is an identifier, not an authorization: it resolves only
+    # inside the classes that declared themselves, only for this app, and a
+    # token that is malformed, foreign, out of that set or pointing at a row
+    # that is gone is one refusal — never a different target.
+    def locate_conversation_record(token, allowed, refusal)
+      gid = GlobalID.parse(token)
+      raise InvalidInput, refusal if gid.nil? || gid.app.to_s != GlobalID.app.to_s
+
+      GlobalID::Locator.locate(gid, only: allowed) || raise(InvalidInput, refusal)
+    rescue NameError, ActiveRecord::RecordNotFound, GlobalID::Locator::InvalidModelIdError
+      # A class name nothing answers to, an id the model can't read, a row
+      # that is gone: the same bad token in the same field.
+      raise InvalidInput, refusal
+    end
+
+    # Off duty is off duty on both surfaces: `actions_for` gives an off-duty
+    # agent nothing that speaks to a requester, and neither does this.
+    def require_conversation_duty!
+      return if support_conversation_available?
+
+      assign_conversation_draft
+      flash.now[:alert] = support_console_t("errors.off_duty")
+      render :new, formats: [ :html ], status: :unprocessable_entity
+    rescue StandardError => error
+      raise unless support_console_rescuable?(error)
+
+      refuse_conversation(error)
+    end
+
+    # Whether this agent may send from the form at all — what the form reads
+    # to disable its own button rather than offering one that only ever 422s.
+    def support_conversation_available?
+      !current_agent.respond_to?(:on_duty?) || current_agent.on_duty?
+    end
+
+    # Whether to show the door on the queue at all: on duty, and the host's
+    # policy says so. Both are asked again at the form and at the send — this
+    # is what keeps the queue from offering a button that only refuses.
+    def support_conversation_offered?
+      support_conversation_available? &&
+        SupportDesk.config.console_authorized?(current_agent, nil, :open_conversation)
+    end
+
+    # The topics a case can be opened onto from here: the leaves somebody
+    # can write freely under. A subject brings its own topic with it, so
+    # this is the picker for everything else.
+    def support_conversation_topics
+      support_desk_record.config.topics.leaves.select(&:free_form?)
+    end
+
+    # A handled refusal: the form again, with everything the agent typed
+    # still in it, and the reason on top. 422 rather than a redirect for
+    # HTML and Turbo alike — a stream refresh would throw the draft away.
+    def refuse_conversation(error)
+      flash.now[:alert] = support_conversation_error_message(error)
+      render :new, formats: [ :html ], status: :unprocessable_entity
+    end
+
+    def support_conversation_error_message(error)
+      return support_console_t("errors.#{error.key}") if error.is_a?(InvalidInput)
+
+      support_console_error_message(error)
+    end
 
     def mark_support_transcript_read
       return unless response.successful? && @support_read_through
@@ -472,8 +723,15 @@ module SupportDesk
     end
 
     def support_console_rescuable?(error)
+      # A chats CONFIGURATION error is a bug in the host's wiring, not a
+      # refusal an agent can do anything about, and it is a Chats::Error —
+      # so it has to be taken back out before the base class goes in.
+      return false if error.is_a?(Chats::ConfigurationError)
+      return true if error.is_a?(InvalidInput)
       return true if RESCUED_ERRORS.any? { |klass| error.is_a?(klass) }
-      return true if defined?(Chats::Error) && error.is_a?(Chats::Error)
+      # A RUNTIME check on purpose: `require "support_desk"` in a fresh
+      # process does not load ActiveRecord (chats is required, ActiveRecord
+      # is not), and naming the constant in RESCUED_ERRORS would break that.
       return true if defined?(ActiveRecord::RecordInvalid) && error.is_a?(ActiveRecord::RecordInvalid)
 
       false
@@ -485,9 +743,14 @@ module SupportDesk
     # a Spanish desk read "doesn't hold ticket T-AB12CD". `holder` carries
     # the one detail worth keeping, and the console knows it without having
     # to parse the error.
+    # The key is the error's own name (`NotTheAssignee` →
+    # "not_the_assignee"), so a new error needs copy and nothing else — and a
+    # host that overrode one of these keys keeps its wording, because the
+    # names are the ones the old hand-written table used.
     def support_console_error_message(error)
-      key = ERROR_KEYS[error.class.name] || "generic"
-      support_console_t("errors.#{key}", detail: error.message, holder: support_console_holder)
+      key = error.class.name.demodulize.underscore
+      support_console_t("errors.#{key}", detail: error.message, holder: support_console_holder,
+                                         default: :"support_desk.console.errors.generic")
     end
 
     def support_console_t(key, **interpolations)
