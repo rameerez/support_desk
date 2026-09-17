@@ -60,70 +60,70 @@ class MacrosTest < ActiveSupport::TestCase
   end
 
   test "has_support_tickets if: decides who may ask and who may be written to" do
-  assert_predicate @alice, :support_requester?
+    assert_predicate @alice, :support_requester?
 
-  @alice.update!(support_blocked: true)
+    @alice.update!(support_blocked: true)
 
-  assert_not_predicate @alice, :support_requester?
-  assert_raises(SupportDesk::NotARequester) { @alice.ask_support!("hola") }
-end
-
-test "has_support_tickets if: also takes a callable" do
-  klass = Class.new(User) do
-    def self.name = "CallableRequester"
-    has_support_tickets if: ->(user) { user.name.start_with?("A") }
+    assert_not_predicate @alice, :support_requester?
+    assert_raises(SupportDesk::NotARequester) { @alice.ask_support!("hola") }
   end
 
-  assert_predicate klass.create!(name: "Ana"), :support_requester?
-  assert_not_predicate klass.create!(name: "Bea"), :support_requester?
-end
-
-test "has_support_tickets refuses options it doesn't have" do
-  error = assert_raises(SupportDesk::ConfigurationError) do
-    Class.new(User) do
-      def self.name = "BadRequester"
-      has_support_tickets when: :kept?
+  test "has_support_tickets if: also takes a callable" do
+    klass = Class.new(User) do
+      def self.name = "CallableRequester"
+      has_support_tickets if: ->(user) { user.name.start_with?("A") }
     end
+
+    assert_predicate klass.create!(name: "Ana"), :support_requester?
+    assert_not_predicate klass.create!(name: "Bea"), :support_requester?
   end
 
-  assert_match(/unknown has_support_tickets option :when/, error.message)
-end
-
-test "has_support_tickets if: must be a method name or something callable" do
-  error = assert_raises(SupportDesk::ConfigurationError) do
-    Class.new(User) do
-      def self.name = "WorseRequester"
-      has_support_tickets if: "kept?"
+  test "has_support_tickets refuses options it doesn't have" do
+    error = assert_raises(SupportDesk::ConfigurationError) do
+      Class.new(User) do
+        def self.name = "BadRequester"
+        has_support_tickets when: :kept?
+      end
     end
+
+    assert_match(/unknown has_support_tickets option :when/, error.message)
   end
 
-  assert_match(/must be a method name or a callable/, error.message)
-end
+  test "has_support_tickets if: must be a method name or something callable" do
+    error = assert_raises(SupportDesk::ConfigurationError) do
+      Class.new(User) do
+        def self.name = "WorseRequester"
+        has_support_tickets if: "kept?"
+      end
+    end
 
-test "support_desk is the desk this requester writes to" do
-  assert_equal SupportDesk.desk, @alice.support_desk
-
-  SupportDesk.config.desk(:billing) { |desk| desk.name = "Facturación" }
-  klass = Class.new(User) do
-    def self.name = "BillingRequester"
-    has_support_tickets desk: :billing
+    assert_match(/must be a method name or a callable/, error.message)
   end
 
-  assert_equal "billing", klass.create!(name: "B").support_desk.key
-end
+  test "support_desk is the desk this requester writes to" do
+    assert_equal SupportDesk.desk, @alice.support_desk
 
-test "a requester whose desk isn't configured says so instead of landing on the default" do
-  klass = Class.new(User) do
-    def self.name = "GhostDeskRequester"
-    has_support_tickets desk: :ghost
+    SupportDesk.config.desk(:billing) { |desk| desk.name = "Facturación" }
+    klass = Class.new(User) do
+      def self.name = "BillingRequester"
+      has_support_tickets desk: :billing
+    end
+
+    assert_equal "billing", klass.create!(name: "B").support_desk.key
   end
 
-  error = assert_raises(SupportDesk::ConfigurationError) { klass.create!(name: "G").support_desk }
+  test "a requester whose desk isn't configured says so instead of landing on the default" do
+    klass = Class.new(User) do
+      def self.name = "GhostDeskRequester"
+      has_support_tickets desk: :ghost
+    end
 
-  assert_match(/isn't configured/, error.message)
-end
+    error = assert_raises(SupportDesk::ConfigurationError) { klass.create!(name: "G").support_desk }
 
-test "desk: routes a requester's tickets to another desk" do
+    assert_match(/isn't configured/, error.message)
+  end
+
+  test "desk: routes a requester's tickets to another desk" do
     SupportDesk.config.desk(:billing) { |desk| desk.name = "Facturación" }
     klass = Class.new(User) do
       def self.name = "BillingUser"

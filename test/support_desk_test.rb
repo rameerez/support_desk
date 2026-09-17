@@ -107,24 +107,24 @@ class SupportDeskTest < ActiveSupport::TestCase
   end
 
   test "eligible? reads a macro's if: the same way for both sides" do
-  alice = create_user(name: "Alice", admin: false)
+    alice = create_user(name: "Alice", admin: false)
 
-  assert SupportDesk.eligible?(alice, nil), "no condition is always yes"
-  assert_not SupportDesk.eligible?(alice, :admin?)
-  assert SupportDesk.eligible?(alice, ->(user) { user.name.start_with?("A") })
-  # Whatever the host's predicate returns, the answer is a boolean.
-  assert_equal true, SupportDesk.eligible?(alice, ->(user) { user.name })
-end
+    assert SupportDesk.eligible?(alice, nil), "no condition is always yes"
+    assert_not SupportDesk.eligible?(alice, :admin?)
+    assert SupportDesk.eligible?(alice, ->(user) { user.name.start_with?("A") })
+    # Whatever the host's predicate returns, the answer is a boolean.
+    assert_equal true, SupportDesk.eligible?(alice, ->(user) { user.name })
+  end
 
-test "humanize_duration speaks the reader's language, wherever it is called from" do
-  assert_equal "1 day", SupportDesk.humanize_duration(24.hours)
-  # Kept on Wizard as a delegation: it has been public since 0.1.
-  assert_equal "1 day", SupportDesk::Wizard.humanize_duration(24.hours)
+  test "humanize_duration speaks the reader's language, wherever it is called from" do
+    assert_equal "1 day", SupportDesk.humanize_duration(24.hours)
+    # Kept on Wizard as a delegation: it has been public since 0.1.
+    assert_equal "1 day", SupportDesk::Wizard.humanize_duration(24.hours)
 
-  I18n.with_locale(:es) { assert_equal "1 día", SupportDesk.humanize_duration(24.hours) }
-end
+    I18n.with_locale(:es) { assert_equal "1 día", SupportDesk.humanize_duration(24.hours) }
+  end
 
-test "actor_key is stable per record and distinguishes classes" do
+  test "actor_key is stable per record and distinguishes classes" do
     user = create_user
     order = create_order(user: user)
 

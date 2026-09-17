@@ -134,6 +134,7 @@ class TestHelpersApiTest < ActiveSupport::TestCase
     assert_not_nil ticket.last_requester_message_at
     assert_equal ticket.conversation.messages.first.id.to_s, ticket.last_registered_message_id.to_s
   end
+
   test "open_support_ticket by: opens as the desk" do
     ticket = open_support_ticket(for: @alice, by: @lucia, message: "Vimos que tu pedido no llegó")
 
