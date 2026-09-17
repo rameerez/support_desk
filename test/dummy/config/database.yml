@@ -8,9 +8,27 @@
 # this directory. A database migrated under one Rails version and then reused
 # under another fails with a wall of NOT NULL violations that look like
 # product bugs and are not; a file per leg makes the matrix order-independent.
+#
+# == Why the pragmas
+#
+# TEST INFRASTRUCTURE, not gem behaviour. The suite runs system tests in the
+# same process as everything else, and Capybara's server holds its own
+# connection to this one file while the examples around it write. On
+# 2026-09-17 that produced six `SQLite3::BusyException: database is locked`
+# errors in one run (all in SupportDesk::DeskTest, all after Puma started),
+# and four more in another run on a different machine — never the same
+# examples twice, never reproducible with the same seed, and green on the
+# next attempt.
+#
+# WAL lets a reader and a writer hold the file at once, which is exactly the
+# shape of that contention, and the longer timeout gives the loser of a real
+# write lock time to get it rather than failing an unrelated example. Neither
+# changes anything the gem does; the PostgreSQL leg ignores both keys.
 test:
   adapter: sqlite3
   database: <%= File.expand_path("../db/test-rails-#{Rails::VERSION::STRING.split('.').first(2).join('-')}.sqlite3", __dir__) %>
   pool: 5
-  timeout: 5000
+  timeout: 15000
+  pragmas:
+    journal_mode: wal
   url: <%= ENV["DATABASE_URL"] %>
