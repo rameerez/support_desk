@@ -210,6 +210,50 @@ module SupportDesk
       end
     end
 
+    # --- Who is who ---------------------------------------------------------------
+
+    test "identity is the base class and the id, so two records numbered the same are not one" do
+      # Two tables number themselves independently, so the same number really
+      # does turn up on both sides.
+      bea = create_user(name: "Bea")
+      bea.update_columns(id: 9_999)
+      create_order(user: bea).update_columns(id: 9_999)
+
+      assert Ticket.same_actor?(bea, User.find(9_999))
+      assert_not Ticket.same_actor?(bea, Order.find(9_999)), "an Order #9999 is not User #9999"
+      # An STI subclass IS its base class here: that is the identity the
+      # polymorphic columns store, and one table can't hold two rows with the
+      # same id anyway.
+      subclass = Class.new(User) { def self.name = "Staffer" }
+
+      assert Ticket.same_actor?(bea, subclass.find(9_999))
+
+      # Nothing else counts as anybody.
+      assert_not Ticket.same_actor?(bea, User.new(name: "unsaved"))
+      assert_not Ticket.same_actor?(bea, :system)
+      assert_not Ticket.same_actor?(bea, nil)
+      assert_not Ticket.same_actor?(nil, nil)
+    end
+
+    test "provenance of a different class with the same number is not the requester's" do
+      ticket = @alice.ask_support!("no llega", about: @order)
+
+      assert_predicate ticket, :opened_by_requester?
+
+      ticket.update_columns(opened_by_type: "Order", opened_by_id: ticket.requester_id)
+
+      assert_predicate ticket.reload, :opened_by_support?
+      assert_includes Ticket.opened_by_support, ticket
+    end
+
+    test "half an opened_by is not a state this model will save" do
+      ticket = @alice.ask_support!("no llega", about: @order)
+      ticket.opened_by_id = nil
+
+      assert_not_predicate ticket, :valid?
+      assert_match(/both a type and an id/, ticket.errors.full_messages.to_sentence)
+    end
+
     test "nothing along the way is quietly reported and swallowed" do
       # The event bus is error-isolated on purpose: a host subscriber that
       # raises is reported and the next one still runs. That is also how a
