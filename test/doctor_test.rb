@@ -146,4 +146,39 @@ class DoctorTest < ActiveSupport::TestCase
 
     assert_match(/half an opened_by/, SupportDesk.doctor.failures.map(&:message).join)
   end
+test "an opening line naming a translation nobody wrote is a failed check" do
+  SupportDesk.config.opening_line = :"support_desk.thread.nope"
+
+  report = SupportDesk.doctor
+
+  assert_not_predicate report, :ok?
+  assert_match(/no .* translation/, report.failures.map(&:message).join)
+end
+
+test "a block opening line is left alone: running a host's callback is not a diagnostic" do
+  called = false
+  SupportDesk.config.opening_line { |_ticket| called = true }
+
+  assert_predicate SupportDesk.doctor, :ok?
+  assert_not called
+end
+
+test "find_requester is checked by its shape, never by calling it" do
+  called = false
+
+  assert_match(/not set/, SupportDesk.doctor.checks.find { |check| check.name == "find_requester" }.message)
+
+  SupportDesk.config.find_requester { |_query| called = true }
+
+  assert_predicate SupportDesk.doctor, :ok?
+  assert_not called
+
+  SupportDesk.config.find_requester = -> { nil }
+
+  assert_match(/calls it with one/, SupportDesk.doctor.failures.map(&:message).join)
+
+  SupportDesk.config.find_requester = Class.new { def call(query) = query }.new
+
+  assert_predicate SupportDesk.doctor, :ok?
+end
 end

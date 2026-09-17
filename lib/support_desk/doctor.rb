@@ -103,6 +103,13 @@ module SupportDesk
           ok_with("#{tree.count} topic(s), #{tree.leaves.size} leaf/leaves")
         end
 
+        checks << check("opening lines (#{desk.key})") do
+          problems = desk.opening_line_problems
+          next fail_with(problems.join("; ")) if problems.any?
+
+          ok_with("resolve")
+        end
+
         checks << check("supportables (#{desk.key})") do
           missing = desk.topics.about_class_names.reject do |name|
             klass = name.safe_constantize
@@ -112,6 +119,24 @@ module SupportDesk
 
           ok_with("every about: class is supportable")
         end
+      end
+
+      checks << check("find_requester") do
+        callable = SupportDesk.config.find_requester
+        next ok_with("not set — the console takes a GlobalID from your own pages") if callable.nil?
+        next fail_with("find_requester must respond to #call") unless callable.respond_to?(:call)
+
+        # Asked of the SHAPE, never by calling it: a diagnostic that runs a
+        # host's lookup is a diagnostic that queries production. A callable
+        # object is as valid as a lambda, so `arity` (Proc-only) is out.
+        parameters = callable.respond_to?(:parameters) ? callable.parameters : callable.method(:call).parameters
+        required = parameters.count { |type, _| type == :req }
+        open_ended = parameters.any? { |type, _| %i[opt rest].include?(type) }
+        unless required <= 1 && (required == 1 || open_ended)
+          next fail_with("find_requester takes #{required} required argument(s); the console calls it with one")
+        end
+
+        ok_with("the console can look people up")
       end
 
       checks << check("engine mount") do

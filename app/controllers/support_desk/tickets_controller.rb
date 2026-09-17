@@ -55,9 +55,11 @@ module SupportDesk
       # The form was submitted from a step that isn't the composer (a stale
       # tab, a hand-rolled POST): re-render the step they are actually on.
       render :new, status: :unprocessable_entity
-    rescue SupportDesk::NotAllowed, SupportDesk::NotSupportable
-      # The subject passed the wizard's check and failed the model's. Same
-      # answer as a forged token: 404.
+    rescue SupportDesk::NotAllowed, SupportDesk::NotSupportable, SupportDesk::NotARequester
+      # The subject passed the wizard's check and failed the model's, or this
+      # account stopped being able to write between the form and the submit.
+      # Same answer as a forged token: 404. "Not yours", "not there" and "not
+      # eligible" must look the same from outside.
       raise ActiveRecord::RecordNotFound
     end
 

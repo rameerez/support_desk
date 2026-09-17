@@ -19,6 +19,23 @@ SupportDesk.configure do |config|
   #
   # config.agents { User.where(admin: true) }
 
+  # Who may ask, and who may answer, record by record — the macros' `if:`:
+  #
+  #   class User < ApplicationRecord
+  #     has_support_tickets if: :kept?          # a closed account can neither
+  #     acts_as_support_agent if: :admin?       # ask nor be written to
+  #   end
+  #
+  # `has_support_tickets if:` is a WRITE rule, not a screen rule: the thread
+  # and its history stay readable when it turns false.
+
+  # How the console finds the person an agent types in "Write to someone":
+  # email, phone, handle — your call. Given the typed string, return a
+  # requester record or nil. Without it the console accepts only a GlobalID
+  # from one of your own pages.
+  #
+  # config.find_requester { |query| User.find_by(email: query.to_s.strip.downcase) }
+
   # ==========================================================================
   # CONTROLLER INTEGRATION
   # ==========================================================================

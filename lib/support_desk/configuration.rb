@@ -64,6 +64,7 @@ module SupportDesk
         # this one has a default and `opening_line` does not: existing hosts'
         # threads keep opening exactly as they do today.
         opening_line_from_support: :"support_desk.thread.opened_by_support",
+        find_requester: nil,
         reply_policy: :anyone,
         announce_assignments: :first_only,
         closed_tickets: :reopen_on_reply,
@@ -161,6 +162,51 @@ module SupportDesk
       # Set it, validating on assignment (see the reader above).
       def opening_line_from_support=(value)
         @settings[:opening_line_from_support] = ensure_line(value, "opening_line_from_support")
+      end
+
+      # How a console finds the person an agent types: email, phone, handle,
+      # whatever this host lets staff search by. Given the typed string,
+      # returns a requester record or nil.
+      #
+      #   config.find_requester { |query| User.find_by(email: query.to_s.strip.downcase) }
+      #
+      # nil (the default) means the console accepts only a GlobalID from one
+      # of your own pages. Multi-tenant hosts scope BOTH ways in — this hook
+      # is a lookup, never an authorization.
+      def find_requester(&block)
+        return @settings[:find_requester] = block if block
+
+        read(:find_requester)
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def find_requester=(value)
+        @settings[:find_requester] = value.nil? ? nil : ensure_callable(value, "find_requester")
+      end
+
+      # What's wrong with this desk's opening lines, as sentences — what
+      # `doctor` reports. A String is interpolated against the sample, a
+      # Symbol has to exist in the current locale, and a block is left alone:
+      # it needs a ticket, and running a host's callback as a diagnostic is
+      # not a diagnostic.
+      def opening_line_problems # :nodoc:
+        %i[opening_line opening_line_from_support].filter_map do |setting|
+          value = public_send(setting)
+          next if value.nil? || value.respond_to?(:call)
+
+          if value.is_a?(Symbol)
+            next if I18n.exists?(value)
+
+            "#{setting} names #{value.inspect}, which has no #{I18n.locale} translation"
+          else
+            begin
+              interpolate_line(value, LINE_INTERPOLATIONS, setting.to_s)
+              nil
+            rescue ConfigurationError => e
+              e.message
+            end
+          end
+        end
       end
 
       # What to post for THIS ticket, resolved and interpolated in the
@@ -477,9 +523,9 @@ module SupportDesk
     # top-level accessors forward to the `:default` desk, which is also what
     # every other desk falls back to.
     DESK_SETTINGS = %i[
-      name avatar email opening_line opening_line_from_support reply_policy announce_assignments
-      closed_tickets reply_within at_risk_after open_rate_limit max_open_tickets inbox_entry routing
-      mirror_replies_by_email auto_close_after
+      name avatar email opening_line opening_line_from_support find_requester reply_policy
+      announce_assignments closed_tickets reply_within at_risk_after open_rate_limit max_open_tickets
+      inbox_entry routing mirror_replies_by_email auto_close_after
     ].freeze
 
     delegate(*DESK_SETTINGS, *DESK_SETTINGS.map { |setting| :"#{setting}=" }, to: :default_desk)
