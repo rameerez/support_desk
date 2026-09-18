@@ -19,3 +19,17 @@ class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
     assert_text "ok"
   end
 end
+
+# Chrome reports a node that vanished mid-check — the browser swapping in a
+# 422 re-render while Capybara was still inspecting a node from the page it
+# replaced — as an UnknownError ("Node with given id does not belong to the
+# document"), not as the StaleElementReferenceError Capybara already retries.
+# Seen on CI only, on 1–2 of 16 legs, always at the moment a full page load
+# lands. Retrying it inside Capybara's own wait is the same treatment stale
+# nodes get; a real problem still surfaces when the wait runs out.
+module RetryDetachedNodes
+  def invalid_element_errors
+    @invalid_element_errors ||= super + [ ::Selenium::WebDriver::Error::UnknownError ]
+  end
+end
+Capybara::Selenium::Driver.prepend(RetryDetachedNodes)
