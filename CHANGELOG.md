@@ -44,8 +44,8 @@ These land whether or not you declare an assistant:
 - **A host model declared `acts_as_support_agent kind: :ai` is now refused for every support write, by it or to it** (`NotAnAssistant`). It used to be treated as a human. `kind:` is validated at declaration (`:human` or `:ai`), and `SupportDesk.doctor` warns about such classes. Only the desk's own `SupportDesk::Assistant` has machine authority.
 - **Console picker values are `SupportDesk.actor_key(agent)`**, not bare ids — an assistant and a user can share an integer id. A bare id is still accepted for one release, and only when exactly one pool member matches it.
 - `Queue::TABS` gains `:needs_human`. It is hidden unless the desk has an assistant or the count is non-zero, so no existing queue grows a tab it has no use for.
-- Every registration and every transition writes `assistant_revision`. Additive and nullable; a 0.2 process reading those rows is unaffected.
-- The schema adds `support_desk_assistants` and `support_desk_drafts`, and nine nullable columns on `support_desk_tickets`.
+- Every registration and every transition writes `assistant_revision`. Additive; a 0.2 process reading those rows is unaffected.
+- The schema adds `support_desk_assistants` and `support_desk_drafts`, and nine columns on `support_desk_tickets` — two defaulted integers (`assistant_revision`, `assistant_turns_count`), the rest nullable.
 
 ### Changed — only when an assistant is configured
 
