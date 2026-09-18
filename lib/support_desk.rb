@@ -11,6 +11,7 @@ require "chats"
 require_relative "support_desk/version"
 require_relative "support_desk/errors"
 require_relative "support_desk/events"
+require_relative "support_desk/assistant_policy"
 require_relative "support_desk/topic"
 require_relative "support_desk/topic_tree"
 require_relative "support_desk/configuration"
@@ -93,6 +94,7 @@ module SupportDesk
       @configured = false
       @subscribers = nil
       @desks = nil
+      @assistants = nil
       self
     end
 
@@ -101,6 +103,99 @@ module SupportDesk
     def reset_desks!
       @desks = nil
       self
+    end
+
+    # --- Assistants -----------------------------------------------------------
+
+    # The assistant record for +key+, memoised per process — or the desk's
+    # default when called with nothing. nil when this installation has no
+    # assistant at all, which is the answer every existing host gets.
+    #
+    # Found or created exactly like a desk, and never INSERT-first: an
+    # assistant is read on every transition and written once in her life.
+    def assistant(key = nil)
+      key = (key || config.default_assistant_key)
+      return nil if key.nil?
+
+      key = key.to_sym
+      unless config.assistant?(key)
+        raise ConfigurationError,
+              "no assistant #{key.inspect} is configured — declare it with " \
+              "`config.assistant #{key.inspect} do |assistant| … end`"
+      end
+
+      assistants[key] ||= Assistant.for(key)
+    end
+
+    # Every assistant record this process has resolved, keyed by key.
+    def assistants # :nodoc:
+      @assistants ||= {}
+    end
+
+    # Forget the memoised Assistant records without touching configuration —
+    # for tests that truncate tables between examples.
+    def reset_assistants!
+      @assistants = nil
+      self
+    end
+
+    # Whether +record+ is a machine rather than a person. Duck-typed, because
+    # a host's own `acts_as_support_agent kind: :ai` model answers it too —
+    # and is then refused everywhere, which is the point (I2).
+    def ai_actor?(record)
+      record.respond_to?(:support_agent_kind) && record.support_agent_kind == :ai
+    end
+
+    # Release every assistant who has sat on a case longer than her
+    # `responds_within` without answering — and ask for a person on it.
+    #
+    # This is the net under a dead harness: a queue worker that stopped, a
+    # model provider that is down, a job that raised its last retry away.
+    # Run it every minute (`rake support_desk:release_silent_assistants`).
+    # Returns how many cases it moved.
+    def release_silent_assistants!
+      moved = 0
+      config.assistants.each_key do |key|
+        agent = assistant(key)
+        window = agent&.responds_within
+        next if window.nil?
+
+        Ticket.open.assigned_to(agent).awaiting_reply.waiting_over(window).find_each do |ticket|
+          next if ticket.human_required?
+
+          ticket.escalate!(by: :system, reason: "assistant_silent",
+                           summary: "no answer in #{humanize_duration(window)}")
+          moved += 1 if ticket.human_required?
+        rescue StandardError => e
+          report_error(e, context: { hook: :release_silent_assistants, ticket: ticket.id })
+        end
+      end
+      logger&.info("[support_desk] silent assistants: #{moved} case(s) handed to a person") if moved.positive?
+      moved
+    end
+
+    # Re-emit `:assistant_turn` for cases whose turn nobody acted on — a
+    # harness that was down when the event fired, a job that was dropped.
+    #
+    # At-least-once on purpose: a duplicate turn is harmless, because the
+    # turn is consumed by the first action and every later one is a
+    # StaleTurn. Run it every five minutes. Returns how many it re-emitted.
+    def redispatch_assistant_turns!(older_than: 60)
+      older_than = older_than.to_i.seconds unless older_than.respond_to?(:ago)
+      emitted = 0
+
+      config.desks.each_key do |key|
+        agent = desk(key)&.assistant
+        next if agent.nil?
+
+        Ticket.open.for_desk(key).assistant_idle_since(older_than.ago).find_each do |ticket|
+          next unless ticket.assistant_policy(agent).may_observe?
+
+          ticket.send(:emit_assistant_turn)
+          emitted += 1
+        end
+      end
+      emitted
     end
 
     # --- Desks ------------------------------------------------------------------
@@ -222,6 +317,19 @@ module SupportDesk
 
     def logger
       defined?(::Rails) ? ::Rails.logger : nil
+    end
+
+    # Report an exception the way the event dispatcher does: `Rails.error`
+    # when there is one, the log otherwise. Extracted because every hook the
+    # gem runs on a host's behalf — a `hand_off_when` block, a turn
+    # emission, a sweep — has to report and carry on rather than take a
+    # transition down with it.
+    def report_error(error, context: {}) # :nodoc:
+      if defined?(Rails) && Rails.respond_to?(:error) && Rails.error
+        Rails.error.report(error, handled: true, source: "support_desk", context: context)
+      else
+        logger&.error("[support_desk] #{error.class}: #{error.message} #{context.inspect}")
+      end
     end
 
     # Where the host mounted the requester-facing engine

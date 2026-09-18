@@ -14,6 +14,16 @@ module SupportDesk
     KINDS = %w[
       opened assigned handed_off released drop_in closed reopened topic_changed subject_attached note
       snoozed woken escalated channel_added email_bounced email_unverified rated tagged
+      human_requested assistant_paused assistant_resumed draft_sent draft_rejected assistant_withheld
+    ].freeze
+
+    # The five kinds that describe how the desk works rather than what
+    # happened to the case. They join `note` and `drop_in` outside
+    # #requester_visible: a customer's export says a person was asked for
+    # (`escalated`, `human_requested`), never that a machine's proposal was
+    # discarded.
+    INTERNAL_KINDS = %w[
+      note drop_in assistant_paused assistant_resumed draft_sent draft_rejected assistant_withheld
     ].freeze
 
     belongs_to :ticket, class_name: "SupportDesk::Ticket", inverse_of: :events
@@ -28,7 +38,7 @@ module SupportDesk
     scope :notes, -> { where(kind: "note") }
     # Everything a requester may see in an export: their own case's story,
     # never the desk's internal reasoning.
-    scope :requester_visible, -> { where.not(kind: %w[note drop_in]) }
+    scope :requester_visible, -> { where.not(kind: INTERNAL_KINDS) }
 
     # Write one event. `actor` may be a record or a Symbol (`:system`,
     # `:routing`) — symbols are kept in the payload, since there is no row
@@ -63,6 +73,10 @@ module SupportDesk
 
     # The text of an internal note, for kind "note".
     def note = payload["note"]
+
+    # The one-paragraph "here is where I got to" an assistant leaves when she
+    # hands a case over, for kinds "escalated" and "human_requested".
+    def summary = payload["summary"]
 
     # The event, in one line.
     def inspect

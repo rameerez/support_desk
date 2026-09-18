@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_model/type"
+require_relative "assistant_policy"
 
 module SupportDesk
   # What a ticket is about, as a value object.
@@ -190,6 +191,24 @@ module SupportDesk
     # An agent scope or proc that wins over desk routing for this subtree.
     def route_to = inherited_or_own(:route_to)
 
+    # The most the assistant may produce on a case filed here: the MINIMUM
+    # over this node's own cap and every ancestor's own cap, or nil when
+    # nobody capped anything.
+    #
+    # Deliberately not an INHERITED_OPTION. Inheritance would let a child
+    # widen what its parent narrowed — `payments` capped at :draft with a
+    # `payments/refund` declared :reply would be a child handing itself
+    # authority its parent refused. A minimum can only tighten.
+    def assistant_cap
+      caps = [ self, *ancestors ].filter_map(&:own_assistant_cap)
+      caps.min_by { |level| AssistantPolicy::RANK.fetch(level) }
+    end
+
+    # This node's OWN cap, ignoring the tree (what #assistant_cap minimises).
+    def own_assistant_cap # :nodoc:
+      options[:assistant]&.to_sym
+    end
+
     # The desk key tickets under this topic belong to.
     def desk_key
       desk_override || :default
@@ -254,6 +273,9 @@ module SupportDesk
 
       def unknown? = true
       def retired? = true
+      # A path no tree knows is a path nobody has reasoned about, so the
+      # assistant may look and nothing else.
+      def assistant_cap = :observe
       def label = translate(i18n_key(:label)) || @path.tr("/", " ").humanize
       def about = []
       def subject_mode = :none

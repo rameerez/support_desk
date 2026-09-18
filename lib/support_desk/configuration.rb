@@ -2,6 +2,7 @@
 
 require "active_support/core_ext/module/delegation"
 require_relative "topic_tree"
+require_relative "assistant_policy"
 
 module SupportDesk
   # Everything a desk decides, with defaults that already work.
@@ -75,7 +76,8 @@ module SupportDesk
         inbox_entry: :always,
         routing: :manual,
         mirror_replies_by_email: :when_away,
-        auto_close_after: nil
+        auto_close_after: nil,
+        assistant: nil
       }.freeze
 
       attr_reader :key, :fallback
@@ -422,6 +424,45 @@ module SupportDesk
         @settings[:auto_close_after] = ensure_duration(value, "auto_close_after")
       end
 
+      # --- The assistant --------------------------------------------------------
+
+      # The key of the assistant that works this desk, as this desk states
+      # it. nil means "nothing stated" when the desk doesn't own the setting,
+      # and "explicitly nobody" when it does — which is why #assistant_key,
+      # not this, is what everything reads.
+      def assistant = read(:assistant)
+
+      # `desk.assistant = :rose` binds one; `desk.assistant = nil` states
+      # that THIS desk has none, which is a different thing from inheriting
+      # the installation's default.
+      def assistant=(value)
+        if value.nil?
+          @settings[:assistant] = nil
+          return
+        end
+
+        unless value.is_a?(Symbol) || value.is_a?(String)
+          raise ConfigurationError,
+                "desk #{key}: assistant must be a configured assistant's key (a Symbol) or nil, " \
+                "got #{value.inspect}"
+        end
+
+        @settings[:assistant] = value.to_sym
+      end
+
+      # Which assistant answers here: this desk's own choice (including an
+      # explicit "none"), else the installation's default, else the only
+      # assistant configured, else nobody.
+      #
+      # It reaches for `SupportDesk.config` rather than walking the fallback
+      # chain because `default_assistant` is an INSTALLATION setting, not a
+      # desk one — there is nowhere else for it to live.
+      def assistant_key
+        return read(:assistant) if own?(:assistant)
+
+        SupportDesk.config.default_assistant_key
+      end
+
       # --- Internals ------------------------------------------------------------
 
       def read(name) # :nodoc:
@@ -519,13 +560,406 @@ module SupportDesk
       end
     end
 
+    # Everything ONE assistant is, as configuration. The record
+    # (SupportDesk::Assistant) is an identity and a kill switch; every rule
+    # she works under is here, in code, so a policy change is a deploy and a
+    # diff rather than a row somebody edited.
+    #
+    #   config.assistant :rose do |rose|
+    #     rose.name       = "Rose"
+    #     rose.autonomy   = :draft
+    #     rose.disclosure = :signature_and_notice
+    #   end
+    #
+    # Every setter validates on assignment, like the rest of the gem. One
+    # setting deliberately has NO default: `disclosure`. Whether a customer
+    # is told they are talking to a machine is not a decision this gem gets
+    # to make quietly on a host's behalf, so omitting it fails boot (12 #22).
+    class AssistantConfiguration
+      DISCLOSURE_MODES = %i[signature_and_notice signature notice none].freeze
+
+      # The system lines an assistant can post. All three take the same
+      # interpolations and are read the same way.
+      LINE_SETTINGS = %i[hand_off_line human_requested_line disclosure_line].freeze
+
+      # The sample a static line is interpolated against the moment it is
+      # assigned, so a typo'd %{nam} is a boot failure and not a 3am
+      # exception in the middle of a hand-off.
+      LINE_INTERPOLATIONS = { name: "…", desk: "…", reply_within: "…" }.freeze
+
+      DEFAULTS = {
+        name: nil,
+        avatar: nil,
+        autonomy: :draft,
+        disclosure: nil,
+        max_turns: 6,
+        responds_within: 3 * 60,
+        may_open_conversations: false,
+        hand_off_line: :"support_desk.system.handed_off_to_humans",
+        human_requested_line: :"support_desk.system.human_requested",
+        disclosure_line: :"support_desk.system.assistant_disclosure"
+      }.freeze
+
+      attr_reader :key
+
+      # A fresh assistant, everything at its documented default — except
+      # `disclosure`, which has none.
+      def initialize(key)
+        @key = key.to_sym
+        @settings = {}
+        @hand_off_when = nil
+        @cap = nil
+      end
+
+      # --- Identity -------------------------------------------------------------
+
+      # What the requester sees, before disclosure decorates it.
+      def name = read(:name) || key.to_s.humanize
+
+      # nil resets the name to the humanized key; a blank string is a
+      # mistake, not an intention.
+      def name=(value)
+        return @settings.delete(:name) if value.nil?
+
+        string = value.to_s
+        raise ConfigurationError, "assistant #{key}: name can't be blank" if string.strip.empty?
+
+        @settings[:name] = string
+      end
+
+      # An asset path, a URL, or ->(assistant) { … }. A brand mark, not a
+      # face — see the README.
+      def avatar = read(:avatar)
+
+      # Set it, validating on assignment (see the reader above).
+      def avatar=(value)
+        unless value.nil? || value.is_a?(String) || value.respond_to?(:call)
+          raise ConfigurationError,
+                "assistant #{key}: avatar must be a String, a callable, or nil, got #{value.inspect}"
+        end
+
+        @settings[:avatar] = value
+      end
+
+      # --- What she may do ------------------------------------------------------
+
+      # The GLOBAL ceiling: the most this assistant may ever produce. Topics
+      # only cap it DOWN, so promoting a desk means raising this AND capping
+      # every topic that has to stay human-sent.
+      def autonomy = read(:autonomy)
+
+      # Set it, validating on assignment (see the reader above).
+      def autonomy=(value)
+        @settings[:autonomy] = ensure_level(value, "autonomy")
+      end
+
+      # How many times she may speak in one case. nil is unlimited, which
+      # `doctor` warns about: a loop with no bound is a loop.
+      def max_turns = read(:max_turns)
+
+      # Set it, validating on assignment (see the reader above).
+      def max_turns=(value)
+        unless value.nil? || (value.is_a?(Integer) && value.positive?)
+          raise ConfigurationError,
+                "assistant #{key}: max_turns must be a positive Integer or nil, got #{value.inspect}"
+        end
+
+        @settings[:max_turns] = value
+      end
+
+      # How long a case she holds may wait before the sweep releases her seat
+      # and asks for a person. nil disables that safety net, and `doctor`
+      # says so.
+      def responds_within = duration(read(:responds_within))
+
+      # Set it, validating on assignment (see the reader above).
+      def responds_within=(value)
+        unless value.nil? || value.is_a?(ActiveSupport::Duration) || value.is_a?(Numeric)
+          raise ConfigurationError,
+                "assistant #{key}: responds_within must be a duration (e.g. 3.minutes) or nil, " \
+                "got #{value.inspect}"
+        end
+
+        @settings[:responds_within] = value
+      end
+
+      # Whether she may open a case nobody asked for (outreach).
+      def may_open_conversations = read(:may_open_conversations)
+
+      # The same question, spelled as a predicate.
+      def may_open_conversations? = !!read(:may_open_conversations)
+
+      # Set it, validating on assignment. Strict booleans: a truthy string
+      # here would be somebody meaning `false`.
+      def may_open_conversations=(value)
+        unless [ true, false ].include?(value)
+          raise ConfigurationError,
+                "assistant #{key}: may_open_conversations must be true or false, got #{value.inspect}"
+        end
+
+        @settings[:may_open_conversations] = value
+      end
+
+      # --- Disclosure -----------------------------------------------------------
+
+      # How the requester is told they are talking to a machine:
+      #
+      #   :signature_and_notice  her name signs every message AND a notice
+      #                          opens the conversation
+      #   :signature             her name signs every message
+      #   :notice                a notice opens the conversation; the
+      #                          messages themselves are the desk's voice
+      #   :none                  nothing is said
+      #
+      # Required. There is no default because there is no default answer.
+      def disclosure = read(:disclosure)
+
+      # Set it, validating on assignment. nil is refused: `:none` is how you
+      # say "nothing", and you say it on purpose.
+      def disclosure=(value)
+        if value.nil?
+          raise ConfigurationError,
+                "assistant #{key}: disclosure is required — one of " \
+                "#{DISCLOSURE_MODES.map(&:inspect).join(", ")}. `:none` is the explicit way to say nothing."
+        end
+
+        @settings[:disclosure] = ensure_one_of(value, DISCLOSURE_MODES, "disclosure")
+      end
+
+      # Whether her messages carry her name.
+      def signs? = %i[signature_and_notice signature].include?(disclosure)
+
+      # Whether the conversation opens with a notice about her.
+      def notice? = %i[signature_and_notice notice].include?(disclosure)
+
+      # Whether anything at all is said.
+      def disclosed? = !disclosure.nil? && disclosure != :none
+
+      # --- Lines ----------------------------------------------------------------
+
+      # What she posts when she hands the case to a person.
+      def hand_off_line(&block)
+        return @settings[:hand_off_line] = block if block
+
+        read(:hand_off_line)
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def hand_off_line=(value)
+        @settings[:hand_off_line] = ensure_line(value, "hand_off_line")
+      end
+
+      # What the desk posts when the REQUESTER asks for a person.
+      def human_requested_line(&block)
+        return @settings[:human_requested_line] = block if block
+
+        read(:human_requested_line)
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def human_requested_line=(value)
+        @settings[:human_requested_line] = ensure_line(value, "human_requested_line")
+      end
+
+      # The notice a `:notice` mode opens the conversation with.
+      def disclosure_line(&block)
+        return @settings[:disclosure_line] = block if block
+
+        read(:disclosure_line)
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def disclosure_line=(value)
+        @settings[:disclosure_line] = ensure_line(value, "disclosure_line")
+      end
+
+      # --- Host hooks -----------------------------------------------------------
+
+      # ->(ticket, message) { true } — run on every requester message, before
+      # the model, and FAILS CLOSED: anything but true, false or nil (a
+      # raise included) is reported and the case is handed to a person.
+      # "Somebody typed 'quiero hablar con una persona'" must never depend on
+      # a model answering.
+      def hand_off_when(&block)
+        return @hand_off_when = block if block
+
+        @hand_off_when
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def hand_off_when=(value)
+        @hand_off_when = value.nil? ? nil : ensure_callable(value, "hand_off_when")
+      end
+
+      # ->(ticket) { :draft } — a per-case ceiling the host computes (a VIP,
+      # a banned requester, a case about money). Returns a level, or nil for
+      # "no opinion".
+      def cap(&block)
+        return @cap = block if block
+
+        @cap
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def cap=(value)
+        @cap = value.nil? ? nil : ensure_callable(value, "cap")
+      end
+
+      # --- Reading the lines ----------------------------------------------------
+
+      # What to post for THIS ticket, resolved and interpolated in the
+      # current locale. nil or blank means post nothing.
+      #
+      # A Symbol whose `_with_promise` variant exists is used when the desk
+      # promises an answer time, and the plain one when it doesn't — the
+      # gem's own copies come in both shapes, so a hand-off never invents a
+      # duration nobody promised.
+      def line_for(setting, ticket)
+        value = public_send(setting)
+        return nil if value.nil?
+
+        interpolations = line_interpolations(ticket)
+        line = case value
+        when Symbol then I18n.t(promised_key(value, interpolations), **interpolations, raise: true)
+        when String then interpolate_line(value, interpolations, setting.to_s)
+        else value.call(ticket)
+        end
+        return nil if line.nil?
+
+        unless line.is_a?(String)
+          raise ConfigurationError,
+                "assistant #{key}: a #{setting} block must return a String or nil, got #{line.inspect}"
+        end
+
+        line
+      end
+
+      # What's wrong with this assistant's lines, as sentences — what
+      # `doctor` reports. Mirrors DeskConfiguration#opening_line_problems: a
+      # String is interpolated against the sample, a Symbol has to exist in
+      # the current locale, and a block is left alone, because it needs a
+      # ticket and running a host's callback as a diagnostic is not a
+      # diagnostic.
+      def line_problems # :nodoc:
+        LINE_SETTINGS.filter_map do |setting|
+          value = public_send(setting)
+          next if value.nil? || value.respond_to?(:call)
+
+          if value.is_a?(Symbol)
+            next if I18n.exists?(value)
+
+            "assistant #{key}: #{setting} names #{value.inspect}, which has no #{I18n.locale} translation"
+          else
+            begin
+              interpolate_line(value, LINE_INTERPOLATIONS, setting.to_s)
+              nil
+            rescue ConfigurationError => e
+              e.message
+            end
+          end
+        end
+      end
+
+      # --- Internals ------------------------------------------------------------
+
+      def read(name) # :nodoc:
+        return @settings[name] if @settings.key?(name)
+
+        DEFAULTS[name]
+      end
+
+      # Whether this assistant states the setting herself (tests).
+      def own?(name) = @settings.key?(name) # :nodoc:
+
+      # Forget a setting so it goes back to its default (tests).
+      def reset_setting(name) # :nodoc:
+        @settings.delete(name)
+      end
+
+      # The assistant, in one line.
+      def inspect
+        "#<SupportDesk::Configuration::AssistantConfiguration #{key} #{autonomy} #{disclosure.inspect}>"
+      end
+
+      private
+
+      def duration(value)
+        return nil if value.nil?
+        return value if value.is_a?(ActiveSupport::Duration)
+
+        ActiveSupport::Duration.build(value.to_i)
+      end
+
+      def ensure_level(value, name)
+        ensure_one_of(value, AssistantPolicy::LEVELS, name)
+      end
+
+      def ensure_one_of(value, allowed, name)
+        symbol = value.respond_to?(:to_sym) ? value.to_sym : value
+        unless allowed.include?(symbol)
+          raise ConfigurationError,
+                "assistant #{key}: #{name} must be one of #{allowed.map(&:inspect).join(", ")}, " \
+                "got #{value.inspect}"
+        end
+
+        symbol
+      end
+
+      def ensure_callable(value, name)
+        unless value.respond_to?(:call)
+          raise ConfigurationError,
+                "assistant #{key}: #{name} must respond to #call (a proc/lambda), got #{value.inspect}"
+        end
+
+        value
+      end
+
+      def ensure_line(value, name)
+        return value if value.nil? || value.is_a?(Symbol) || value.respond_to?(:call)
+        if value.is_a?(String)
+          interpolate_line(value, LINE_INTERPOLATIONS, name)
+          return value
+        end
+
+        raise ConfigurationError,
+              "assistant #{key}: #{name} must be a String, an I18n key (Symbol), a block, or nil, " \
+              "got #{value.inspect}"
+      end
+
+      # Named interpolation, NOT String#%: "100% seguro" is ordinary copy in
+      # any language, and `%` would read that as a format directive.
+      def interpolate_line(line, interpolations, name)
+        I18n.interpolate(line, interpolations)
+      rescue KeyError, ArgumentError => e
+        raise ConfigurationError,
+              "assistant #{key}: #{name} can't be interpolated (#{e.class}: #{e.message}). The placeholders " \
+              "it can use are #{LINE_INTERPOLATIONS.keys.map { |name| "%{#{name}}" }.join(", ")}."
+      end
+
+      # The "… en menos de 24 h" variant of a key, when the desk promises a
+      # time AND that variant exists. Everything else falls back to the key
+      # as written, a host's own included.
+      def promised_key(symbol, interpolations)
+        return symbol if interpolations[:reply_within].nil?
+
+        promised = :"#{symbol}_with_promise"
+        I18n.exists?(promised) ? promised : symbol
+      end
+
+      def line_interpolations(ticket)
+        reply_within = ticket.desk_config.reply_within
+        { name: name, desk: ticket.desk.name,
+          reply_within: (SupportDesk.humanize_duration(reply_within) if reply_within) }
+      end
+    end
+
     # Settings that belong to a desk rather than the installation. The
     # top-level accessors forward to the `:default` desk, which is also what
     # every other desk falls back to.
     DESK_SETTINGS = %i[
       name avatar email opening_line opening_line_from_support find_requester reply_policy
       announce_assignments closed_tickets reply_within at_risk_after open_rate_limit max_open_tickets
-      inbox_entry routing mirror_replies_by_email auto_close_after
+      inbox_entry routing mirror_replies_by_email auto_close_after assistant
     ].freeze
 
     delegate(*DESK_SETTINGS, *DESK_SETTINGS.map { |setting| :"#{setting}=" }, to: :default_desk)
@@ -578,6 +1012,8 @@ module SupportDesk
       @authorize_console = nil
 
       @desks = { default: DeskConfiguration.new(:default) }
+      @assistants = {}
+      @default_assistant = nil
       @warnings = []
     end
 
@@ -674,6 +1110,73 @@ module SupportDesk
       SupportDesk.on(event, &block)
     end
 
+    # --- Assistants ---------------------------------------------------------------
+
+    # Declare or reconfigure an assistant:
+    #
+    #   config.assistant :rose do |rose|
+    #     rose.autonomy   = :draft
+    #     rose.disclosure = :signature
+    #   end
+    #
+    # Without a block it READS one, and an unknown key is a ConfigurationError
+    # rather than nil — a typo in a desk binding should fail at boot, not
+    # leave a desk quietly unassisted. This never doubles as the default
+    # getter: `default_assistant` is its own setting.
+    #
+    # (The `assistant` in DESK_SETTINGS delegates the SETTER to the default
+    # desk, so `config.assistant = :rose` binds the default desk; this reader
+    # is defined afterwards and wins, which is the intent.)
+    def assistant(key, &block)
+      key = key.to_sym
+      if block
+        configuration = @assistants[key] ||= AssistantConfiguration.new(key)
+        block.call(configuration)
+        return configuration
+      end
+
+      @assistants.fetch(key) do
+        raise ConfigurationError,
+              "no assistant #{key.inspect} is configured" \
+              "#{" (known: #{@assistants.keys.map(&:inspect).join(", ")})" if @assistants.any?}"
+      end
+    end
+
+    # Every configured assistant, keyed by key.
+    def assistants = @assistants
+
+    def assistant?(key) = @assistants.key?(key.to_sym)
+
+    # The installation's default assistant — the one a desk that says nothing
+    # gets. Required from the moment there are two.
+    attr_reader :default_assistant
+
+    # Set it. Existence is checked by `validate!`, at the end of the
+    # configure block, so the order of the initializer never matters.
+    def default_assistant=(value)
+      if value.nil?
+        @default_assistant = nil
+        return
+      end
+
+      unless value.is_a?(Symbol) || value.is_a?(String)
+        raise ConfigurationError,
+              "default_assistant must be a configured assistant's key (a Symbol) or nil, got #{value.inspect}"
+      end
+
+      @default_assistant = value.to_sym
+    end
+
+    # The key every desk falls back to: the stated default, or the single
+    # configured assistant when there is exactly one (the DX case — one
+    # assistant, one desk, nothing to say twice).
+    def default_assistant_key # :nodoc:
+      return @default_assistant if @default_assistant
+      return @assistants.keys.first if @assistants.size == 1
+
+      nil
+    end
+
     # --- Validation -------------------------------------------------------------
 
     # Cross-field validation, run at the end of `SupportDesk.configure`.
@@ -688,6 +1191,7 @@ module SupportDesk
               "reply_within (#{desk.reply_within.inspect}) — a ticket can't breach before it's at risk"
       end
 
+      validate_assistants!
       true
     end
 
@@ -741,6 +1245,43 @@ module SupportDesk
     def console_parent_controller_class = console_parent_controller.constantize
 
     private
+
+    # The four rules that can't be checked one setter at a time: an
+    # assistant with no disclosure, a desk pointing at an assistant nobody
+    # declared, a default pointing nowhere, and two assistants with no way to
+    # tell which one a desk gets.
+    def validate_assistants!
+      @assistants.each_value do |assistant|
+        next unless assistant.disclosure.nil?
+
+        raise ConfigurationError,
+              "assistant #{assistant.key}: disclosure is required — one of " \
+              "#{AssistantConfiguration::DISCLOSURE_MODES.map(&:inspect).join(", ")}. " \
+              "`:none` is the explicit way to say nothing."
+      end
+
+      @desks.each_value do |desk|
+        key = desk.assistant
+        next if key.nil? || @assistants.key?(key)
+
+        raise ConfigurationError,
+              "desk #{desk.key}: assistant #{key.inspect} isn't configured. Declare it with " \
+              "`config.assistant #{key.inspect} do |assistant| … end`, or set the desk's assistant to nil."
+      end
+
+      if @default_assistant && !@assistants.key?(@default_assistant)
+        raise ConfigurationError,
+              "default_assistant is #{@default_assistant.inspect}, which isn't configured. Declare it with " \
+              "`config.assistant #{@default_assistant.inspect} do |assistant| … end`."
+      end
+
+      return true if @assistants.size <= 1 || @default_assistant
+
+      raise ConfigurationError,
+            "#{@assistants.size} assistants are configured (#{@assistants.keys.map(&:inspect).join(", ")}) " \
+            "and nothing says which one a desk gets. Set `config.default_assistant`, or bind each desk with " \
+            "`config.desk(:key) { |desk| desk.assistant = :…  }`."
+    end
 
     # `config.agents { … }` has to hand back something a desk can iterate.
     # Resolving it costs nothing at boot — a relation is lazy — and a block

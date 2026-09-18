@@ -139,6 +139,63 @@ module SupportDesk
         ok_with("the console can look people up")
       end
 
+      if SupportDesk.config.assistants.any?
+        checks << check("assistants (config)") do
+          problems = []
+          warnings = []
+          SupportDesk.config.assistants.each_value do |assistant|
+            problems.concat(assistant.line_problems)
+            warnings << "#{assistant.key} has no max_turns — a loop with no bound is a loop" if
+              assistant.max_turns.nil?
+            warnings << "#{assistant.key} has no responds_within — nothing will notice if she goes quiet" if
+              assistant.responds_within.nil?
+          end
+          SupportDesk.config.desks.each_value do |desk|
+            key = desk.assistant_key
+            next if key.nil? || SupportDesk.config.assistant?(key)
+
+            problems << "desk #{desk.key} points at assistant #{key.inspect}, which isn't configured"
+          end
+          next fail_with(problems.join("; ")) if problems.any?
+          next warn_with(warnings.join("; ")) if warnings.any?
+
+          ok_with("#{SupportDesk.config.assistants.size} assistant(s) configured")
+        end
+
+        checks << check("assistant turn subscriber") do
+          next ok_with("no assistant on any desk") if assistant_desks.empty?
+          next warn_with("nothing subscribes to :assistant_turn — no harness will ever answer. See the " \
+                         "README's assistants section") if SupportDesk.subscribers[:assistant_turn].empty?
+
+          ok_with("#{SupportDesk.subscribers[:assistant_turn].size} subscriber(s)")
+        end
+
+        checks << check("assistant authorship") do
+          blank = assistant_desks.filter_map do |desk|
+            assistant = desk.assistant
+            assistant.key if Chats.display_name_for(assistant).blank?
+          end
+          next fail_with("chats has no display name for #{blank.join(", ")} — a signed message would go out " \
+                         "unsigned; check `Chats.config.messager_display_name`") if blank.any?
+
+          ok_with("every assistant has a name chats can print")
+        end
+
+        checks << check("ai agents without policy") do
+          strays = SupportDesk.agent_class_names.select do |name|
+            klass = name.safe_constantize
+            next false if klass.nil? || klass == SupportDesk::Assistant
+            next false unless klass.respond_to?(:support_desk_agent_options)
+
+            klass.support_desk_agent_options[:kind] == :ai
+          end
+          next warn_with("#{strays.join(", ")} declares `kind: :ai` but isn't this gem's assistant — every " \
+                         "support write by it, or to it, is refused") if strays.any?
+
+          ok_with("no unmanaged AI agents")
+        end
+      end
+
       checks << check("engine mount") do
         path = SupportDesk.root_path
         next warn_with("SupportDesk::Engine isn't mounted — requesters have nowhere to write") if path.nil?
@@ -187,7 +244,7 @@ module SupportDesk
       return [ check("database") { warn_with("support_desk tables are missing — run rails db:migrate") } ] unless
         tables?
 
-      [
+      checks = [
         check("conversations") do
           orphans = Ticket.where(conversation_id: nil).count
           next fail_with("#{orphans} ticket(s) without a conversation") if orphans.positive?
@@ -248,6 +305,89 @@ module SupportDesk
           ok_with("references are unique")
         end
       ]
+
+      checks.concat(assistant_invariant_checks)
+      checks
+    end
+
+    # The assistants' own invariants: nobody sitting on a case they may not
+    # work, nobody silently not answering, one pending proposal per case.
+    #
+    # Every one of them is asked of EVIDENCE — a seat, a timestamp, a row —
+    # and never of the policy's own verdict. A policy cannot page anybody
+    # about its own bug.
+    def assistant_invariant_checks
+      return [] unless assistants_migrated?
+
+      checks = []
+
+      SupportDesk.config.assistants.each_key do |key|
+        assistant = SupportDesk.assistant(key)
+        window = assistant&.responds_within
+        next if window.nil?
+
+        checks << check("assistant silence (#{key})") do
+          quiet = Ticket.open.assigned_to(assistant).awaiting_reply.waiting_over(window).count
+          next fail_with("#{quiet} case(s) have waited longer than #{window.inspect} for #{key} — is the " \
+                         "harness running? `rake support_desk:release_silent_assistants` hands them over") if
+            quiet.positive?
+
+          ok_with("nobody is waiting on #{key}")
+        end
+      end
+
+      checks << check("assistant seats") do
+        seated = Ticket.open.held_by_assistants.to_a
+        wrong = seated.reject { |ticket| ticket.assistant_policy.may_hold? }
+        next fail_with("#{wrong.size} case(s) held by an assistant who may not hold them " \
+                       "(#{wrong.first(3).map(&:reference).join(", ")}) — release them") if wrong.any?
+
+        ok_with("#{seated.size} seat(s), all of them allowed")
+      end
+
+      assistant_desks.each do |desk|
+        window = desk.assistant.responds_within
+        next if window.nil?
+
+        checks << check("assistant idle turns (#{desk.key})") do
+          idle = Ticket.open.for_desk(desk.key).assistant_idle_since((window * 3).ago).count
+          next warn_with("#{idle} case(s) have had no answer and no assistant action — the harness may be " \
+                         "down; `rake support_desk:redispatch_assistant_turns` re-emits their turns") if
+            idle.positive?
+
+          ok_with("every turn has been picked up")
+        end
+      end
+
+      checks << check("drafts") do
+        duplicated = Draft.pending.group(:ticket_id).having("COUNT(*) > 1").count.size
+        next fail_with("#{duplicated} case(s) with more than one pending proposal") if duplicated.positive?
+
+        orphaned = Draft.pending.where(ticket_id: Ticket.closed.select(:id)).count
+        next warn_with("#{orphaned} pending proposal(s) on closed cases — a close expires them, so these " \
+                       "predate 0.3 or were written by hand") if orphaned.positive?
+
+        ok_with("at most one pending proposal per case")
+      end
+
+      checks
+    end
+
+    # The desks that actually have an assistant, as Desk records.
+    def assistant_desks
+      SupportDesk.config.desks.each_key.filter_map do |key|
+        desk = SupportDesk.desk(key)
+        desk if desk&.assistant?
+      end
+    rescue StandardError
+      []
+    end
+
+    def assistants_migrated?
+      Ticket.column_names.include?("human_required_at") &&
+        ActiveRecord::Base.connection.table_exists?(Draft.table_name)
+    rescue StandardError
+      false
     end
 
     def tables?

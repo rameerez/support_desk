@@ -36,6 +36,14 @@ module SupportDesk
                            File.join(db_migrate_path, "add_opened_by_to_support_desk_tickets.rb")
       end
 
+      # The assistants (0.3). The SAME file `support_desk:upgrade` copies,
+      # for the same reason: one migration owns those tables and columns
+      # wherever they came from.
+      def create_assistants_migration
+        migration_template "add_assistants_to_support_desk.rb.erb",
+                           File.join(db_migrate_path, "add_assistants_to_support_desk.rb")
+      end
+
       # The annotated initializer — every setting the gem has, with what it
       # means and what it defaults to.
       def create_initializer

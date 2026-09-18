@@ -14,7 +14,7 @@ module SupportDesk
   class Queue
     # Every tab a queue can answer for, in display order. `scope` and
     # `counts` both cover all of them.
-    TABS = %i[awaiting mine unassigned open snoozed closed].freeze
+    TABS = %i[awaiting needs_human mine unassigned open snoozed closed].freeze
 
     # Tabs whose FEATURE hasn't shipped yet. Snoozing lands in 0.2: until a
     # ticket can actually be snoozed, the tab is a permanent column of
@@ -24,8 +24,16 @@ module SupportDesk
     # by name — but nothing offers the tab.
     UNRELEASED_TABS = %i[snoozed].freeze
 
-    # The tabs a console should render, in display order.
+    # The tabs a console should render, in display order. `needs_human` is
+    # in the list but not always shown — see #visible_tabs.
     VISIBLE_TABS = (TABS - UNRELEASED_TABS).freeze
+
+    # "Has somebody asked for a person on this case?", as something every
+    # adapter can GROUP BY. A boolean column would group differently on
+    # three databases; a CASE expression counts the same everywhere.
+    NEEDS_HUMAN = Arel.sql(
+      "CASE WHEN #{Ticket.quoted_table_name}.human_required_at IS NULL THEN 0 ELSE 1 END"
+    ).freeze
 
     # How long a nav badge may lie. Long enough that a busy console isn't
     # counting rows on every request, short enough that nobody notices.
@@ -72,6 +80,14 @@ module SupportDesk
       scoped.open.awaiting_reply.most_urgent_first
     end
 
+    # Open, and somebody has asked for a person on it: the assistant handed
+    # it over, the customer pressed the door, or the silent sweep did. First
+    # in the list on purpose — a case a machine could not finish is the one
+    # that must never be the one nobody looks at.
+    def needs_human
+      scoped.open.needs_human.most_urgent_first
+    end
+
     # Put aside until a date, the soonest to wake first (0.2).
     def snoozed = scoped.snoozed.order(:snoozed_until)
 
@@ -87,10 +103,10 @@ module SupportDesk
     # (status, awaiting, assignee) and adding up in Ruby costs one round
     # trip; six `.count` calls cost six.
     def counts
-      rows = scoped.group(:status, :awaiting, :assignee_type, :assignee_id).count
+      rows = scoped.group(:status, :awaiting, :assignee_type, :assignee_id, NEEDS_HUMAN).count
 
       counts = TABS.index_with(0)
-      rows.each do |(status, awaiting, assignee_type, assignee_id), count|
+      rows.each do |(status, awaiting, assignee_type, assignee_id, needs_human), count|
         assigned_to_me = agent_key == [ assignee_type, assignee_id.to_s ]
 
         case status
@@ -99,11 +115,24 @@ module SupportDesk
           counts[:mine] += count if assigned_to_me
           counts[:unassigned] += count if assignee_id.nil?
           counts[:awaiting] += count if awaiting == "agent"
+          counts[:needs_human] += count if needs_human.to_i.positive?
         when "snoozed" then counts[:snoozed] += count
         when "closed" then counts[:closed] += count
         end
       end
       counts
+    end
+
+    # The tabs THIS desk should render. `needs_human` only means something
+    # where a machine answers, so a desk without an assistant and without a
+    # single flagged case is not given a column of zeros to learn to ignore.
+    #
+    # Takes the numbers when the caller already has them (`tabs` does), so
+    # rendering a tab bar is one query and not two.
+    def visible_tabs(numbers = counts)
+      return VISIBLE_TABS if desk.assistant? || numbers[:needs_human].to_i.positive?
+
+      VISIBLE_TABS - [ :needs_human ]
     end
 
     # The nav badge: open tickets this agent should feel responsible for —
@@ -124,7 +153,7 @@ module SupportDesk
     # ready to render.
     def tabs
       numbers = counts
-      VISIBLE_TABS.map { |tab| [ tab, I18n.t("support_desk.queue.tabs.#{tab}"), numbers[tab] ] }
+      visible_tabs(numbers).map { |tab| [ tab, I18n.t("support_desk.queue.tabs.#{tab}"), numbers[tab] ] }
     end
 
     # The relation behind a tab name, so a console can route `params[:tab]`

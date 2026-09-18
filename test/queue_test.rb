@@ -40,7 +40,8 @@ class QueueTest < ActiveSupport::TestCase
     queries = count_queries { counts = @queue.counts }
 
     assert_equal 1, queries
-    assert_equal({ awaiting: 3, mine: 1, unassigned: 1, open: 3, snoozed: 0, closed: 1 }, counts)
+    assert_equal({ awaiting: 3, needs_human: 0, mine: 1, unassigned: 1, open: 3, snoozed: 0, closed: 1 },
+                 counts)
   end
 
   test "counts and the relations agree" do
@@ -119,7 +120,10 @@ class QueueTest < ActiveSupport::TestCase
   test "tabs come with i18n labels, in display order" do
     tabs = @queue.tabs
 
-    assert_equal SupportDesk::Queue::VISIBLE_TABS, tabs.map(&:first)
+    # `visible_tabs`, not VISIBLE_TABS: a desk with no assistant and no
+    # flagged case is not given a "needs a person" column of zeros.
+    assert_equal @queue.visible_tabs, tabs.map(&:first)
+    assert_not_includes tabs.map(&:first), :needs_human
     assert_equal "Needs a reply", tabs.first[1]
     assert_equal 3, tabs.first[2]
   end
