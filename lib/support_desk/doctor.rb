@@ -317,6 +317,9 @@ module SupportDesk
     # and never of the policy's own verdict. A policy cannot page anybody
     # about its own bug.
     def assistant_invariant_checks
+      # Nothing about a feature nobody turned on: a host with no assistant
+      # configured runs not one extra query (I1).
+      return [] if SupportDesk.config.assistants.empty?
       return [] unless assistants_migrated?
 
       checks = []

@@ -164,4 +164,33 @@ class QueueTest < ActiveSupport::TestCase
     ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
     count
   end
+
+  # --- The "needs a person" tab -------------------------------------------------
+
+  test "needs_human is the cases somebody asked a person for, most urgent first" do
+    rose = configure_assistant!
+    flagged = ticket_for(create_user, topic: :account, message: "Para una persona")
+    flagged.escalate!(by: @lucia, reason: "lo lleva alguien")
+
+    assert_equal [ flagged ], @queue.needs_human.to_a
+    assert_equal 1, @queue.counts[:needs_human]
+    assert_equal @queue.needs_human.to_a, @queue.scope(:needs_human).to_a
+    assert_not_nil rose
+  end
+
+  test "the tab shows up where a machine answers, and where a case is flagged" do
+    assert_not_includes @queue.visible_tabs, :needs_human
+
+    configure_assistant!
+
+    assert_includes @queue.visible_tabs, :needs_human, "a desk with an assistant always sees it"
+    assert_equal "Needs a person", @queue.tabs.find { |tab| tab.first == :needs_human }[1]
+  end
+
+  test "a flagged case shows the tab even with no assistant on the desk" do
+    ticket = ticket_for(create_user, topic: :account, message: "Para una persona")
+    ticket.escalate!(by: @lucia, reason: "segundo nivel")
+
+    assert_includes @queue.visible_tabs, :needs_human, "there is something in it to look at"
+  end
 end
