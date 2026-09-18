@@ -58,6 +58,12 @@ class ConsoleConversationTest < ApplicationSystemTestCase
     fill_in "body", with: "Vimos que tu pedido no llegó"
     click_on "Send as Soporte"
 
+    # The refusal is a full page load (a 422 re-render), so wait for the
+    # NAVIGATION before touching any element: an assertion that starts while
+    # the browser is still swapping documents can find a node from the form
+    # page and check it after it is gone ("Node with given id does not belong
+    # to the document" — seen once on CI, on 1 of 16 legs).
+    assert_current_path(%r{\A/admin/support/open_conversation}, url: false)
     assert_text "We can't find that person."
     # Still in the box: nobody should have to retype their message to fix an
     # email address.
