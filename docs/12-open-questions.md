@@ -104,11 +104,33 @@ here so a later change is a decision rather than a discovery.
     on every assistant (`:signature_and_notice`, `:signature`, `:notice`,
     `:none`); omitting it is a boot failure, and `:none` is an explicit
     choice that warns nowhere. **Taken** over the recommended
-    `:signature_and_notice` default with a warning on `:none`. The AI Act
-    art. 50(1) reading in 14 §3 stands as guidance for hosts; counsel
-    confirms in the legal repo.
+    `:signature_and_notice` default with a warning on `:none`. The gem
+    documents the visible behavior; host legal conclusions belong
+    in the host legal process, not in the gem implementation contract.
 
-Still open in 14 §17, running on the recommended defaults: default
-autonomy `:draft`, `responds_within` 3 minutes with a scheduled release
-task, `may_open_conversations` false, stale sends need `even_if_stale:
-true`, the level vocabulary, `hand_off_when` as a gem-side host block.
+## Adversarial review refinements (2026-09-18)
+
+The four owner decisions above are preserved. The implementation details in
+[15-assistants-prd.md](15-assistants-prd.md) refine their mechanics:
+
+- #19 ships the built-in identity without requiring a provider or harness.
+  Host kind: :ai records may bind to the same policy; unbound AI is refused,
+  never treated as a human with a warning only.
+- #20 records immutable draft revision, reviewer and publishing human. The
+  message author remains the publishing human; draft provenance is retained.
+- #21 records a separate reopen cap, based on the actual AI closer. Explicit
+  authorized hand-back can lift that cap but cannot implicitly clear pause,
+  unrelated human requirements or host/topic restrictions.
+- #22 remains required and has no default. CarHey's actual disclosure mode is
+  still its choice; an illustrative signature_and_notice is not a decision.
+
+Recommended defaults retained: draft autonomy, six autonomous turns, three
+minutes to recover overdue work (plus scheduler interval), outreach disabled.
+The old stale-send recommendation is replaced: no even_if_stale bypass;
+a human submits the exact proposal revision and current reviewed context.
+Levels remain off/observe/draft/reply/resolve, with separate triage permission.
+hand_off_when remains an optional deterministic local host hook, but failure
+preserves the message and requires human attention instead of silently
+proceeding. Plain nil/false is a valid negative result; arbitrary truthy
+values are invalid. All of these refinements are documented review changes,
+not newly claimed owner decisions.
