@@ -106,6 +106,22 @@ module SupportDesk
         [ max - assistant_turns_count.to_i, 0 ].max
       end
 
+      # The conversation as ordered turns — the readable half of what a
+      # harness works from. `limit:` keeps the LAST n, which is the part
+      # still being answered. See SupportDesk::Transcript.
+      def transcript(limit: nil)
+        Transcript.new(self, limit: limit)
+      end
+
+      # Everything a machine needs to answer this case, as data: the desk,
+      # the policy, the case, the requester and the transcript.
+      # `include_internal: true` adds the desk's own notes and proposals —
+      # off by default, because it leaves the building. See
+      # SupportDesk::Brief.
+      def brief(include_internal: false, transcript_limit: 50)
+        Brief.new(self, include_internal: include_internal, transcript_limit: transcript_limit)
+      end
+
       # Whether this message came from an assistant — by authorship when she
       # signs, by the provenance stamp when she doesn't. Both shapes, because
       # a host that changes disclosure mode must not rewrite old bubbles.

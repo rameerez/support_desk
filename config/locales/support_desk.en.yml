@@ -20,6 +20,8 @@ en:
       human_requested_notice: "Done. Somebody from the team will take it from here."
       handled_by_assistant: "Handled by %{name}"
       handled_by_humans: "Somebody from the team will take it from here"
+    transcript:
+      deleted: "[message deleted]"
     notifications:
       title: "%{desk} · new message"
     queue:
