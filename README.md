@@ -21,6 +21,8 @@ It is a product gem on the [`chats`](https://github.com/rameerez/chats) kernel: 
 
 Every app eventually needs a support inbox, and everyone rebuilds the same ticket table, the same "assigned to me" tab, the same "which order is this about?" picker and the same email bridge. `support_desk` is that whole rebuild, done once, done right, on top of the messaging you already have.
 
+**Contents:** [Example](#-example) · [Quickstart](#quickstart) · [Configuration reference](#configuration-reference) · [Topics](#topics) · [Model macros](#the-model-macros) · [Tickets](#tickets) · [Queues and presenters](#queues-and-presenters) · [The requester experience](#the-requester-experience) · [The agent console](#the-agent-console) · [Writing first](#writing-first) · [The wizard](#the-wizard) · [Events](#events) · [Errors](#errors) · [Locales](#locales) · [Doctor](#doctor) · [Compatibility](#compatibility) · [Testing](#testing) · [Module-level API](#module-level-api)
+
 ## 👨‍💻 Example
 
 `support_desk` reads like plain English:
@@ -110,6 +112,122 @@ Check your work any time with `SupportDesk.doctor.print`.
 
 Desk records are memoised for the life of the process, so anything that has to change everywhere at once belongs in this initializer rather than in a desk's `settings` column.
 
+## Configuration reference
+
+Everything lives in `config/initializers/support_desk.rb` (the install
+generator writes an annotated one). Two rules, shared with the rest of the
+gem ecosystem: class names are stored as **strings** and constantized lazily,
+so the initializer can name app classes before they load and everything
+survives reloads; and every setter **validates on assignment** and raises
+`SupportDesk::ConfigurationError` with the fix in the message — a
+configuration mistake is a boot failure, never a 3 a.m. `NoMethodError`.
+
+### Installation settings
+
+| setting | default | what it decides |
+|---|---|---|
+| `requester_class` | `"User"` | the model with `has_support_tickets`; it must also be a chats messager |
+| `parent_controller` | `"::ApplicationController"` | what the requester-facing engine inherits: your layout, auth, helpers, locale |
+| `console_parent_controller` | your admin's base controller | what the mounted `ConsoleEngine` and the generated console inherit |
+| `current_requester_method` | `:current_user` | how the engine finds the person asking |
+| `current_agent_method` | `:current_user` | how the console finds the person answering (or define `current_agent` in your controller) |
+| `authenticate_method` | `:authenticate_user!` | your own filter, run before every requester screen |
+| `visible_desks_for` | `nil` (every desk) | `->(agent) { … }` returning the desks this agent may work; scopes the whole console |
+| `authorize_console` | `nil` (allow) | `->(agent, ticket, action) { … }`; asked before every console action, `ticket` is nil for `index`, `new`, `next` and `open_conversation`; a hook that raises **denies** |
+| `on(event) { … }` | — | subscribe to an event (see [Events](#events)); pass `key:` from code that reloads |
+
+### Desk settings
+
+Top-level setters configure the `:default` desk. Every other desk inherits
+whatever it does not state:
+
+```ruby
+config.desk :billing do |desk|
+  desk.name = "Billing"
+  desk.reply_within = 8.hours
+  desk.topics { topic :invoice, about: Invoice; other }
+end
+
+SupportDesk.desk            # the :default Desk record, memoised for the process
+SupportDesk.desk(:billing)  # another one (nil if nobody configured it)
+```
+
+| setting | default | values / meaning |
+|---|---|---|
+| `name` | the key, humanized | what requesters see as the counterpart |
+| `avatar` | `nil` | anything `image_tag` takes, or `->(desk) { … }` |
+| `email` | `nil` | the address the email channel will answer from (channel lands in a later release) |
+| `agents { … }` | — | a block or lambda returning the agent pool: notified while a case is unheld, offered in the assign picker |
+| `topics do … end` | `other` only | the topic tree (see [Topics](#topics)) |
+| `reply_policy` | `:anyone` | `:anyone` (a drop-in posts, signed; an unheld case is taken by whoever answers) · `:take_over` (replying reassigns) · `:assignee_only` (raises `NotAllowed`) |
+| `announce_assignments` | `:first_only` | `:first_only` ("Lucía is taking care of your request" once) · `:always` (hand-offs too) · `:never` |
+| `closed_tickets` | `:reopen_on_reply` | `:reopen_on_reply` (a requester writing reopens the case) · `:locked` (composer replaced by a notice) |
+| `reply_within` | `24.hours` | the SLA breach threshold **and** the promise the requester reads |
+| `at_risk_after` | `4.hours` | when a waiting case starts showing as at risk |
+| `open_rate_limit` | `{ to: 5, within: 1.hour }` | how often one requester may **ask**; `nil` disables. Counts only cases the requester opened |
+| `max_open_tickets` | `5` | how many cases one requester may have open; `nil` disables. Same rule |
+| `inbox_entry` | `:always` | when the desk shows in an inbox with no cases yet: `:always` · `:when_tickets` · `:never` |
+| `routing` | `:manual` | new cases are unassigned and the first "take" wins (`:round_robin` / `:least_loaded` are reserved and refused until they ship) |
+| `mirror_replies_by_email` | `:when_away` | reserved for the email channel: `:always` · `:when_away` · `:never` |
+| `auto_close_after` | `nil` | reserved for the sweep job: a duration after which an answered case closes itself |
+| `opening_line` | `nil` | the system line a requester-opened thread starts with (see [Writing first](#writing-first)) |
+| `opening_line_from_support` | the gem's I18n copy | the same line for a case the desk opened |
+| `find_requester { \|query\| … }` | `nil` | how a console turns what an agent typed into a requester record |
+
+`SupportDesk.doctor.print` checks all of it against a running app (see
+[Doctor](#doctor)).
+
+## Topics
+
+Topics are a **tree defined in code** and stored on the ticket as a stable
+path (`"billing/invoice"`), so they can carry behaviour — which models they
+attach to, which picker, which desk — and be reviewed and versioned like
+everything else. Labels are I18n keys by default, so copy is a locale edit.
+
+```ruby
+config.topics do
+  topic :order,   about: Order, subject: :required, icon: "package"
+  topic :billing, priority: :high do
+    topic :invoice, about: Invoice, ask: "Which invoice?"
+    topic :refund,  prefill: "Hi, I'd like a refund for ", desk: :billing
+  end
+  topic :beta,    only: ->(requester) { requester.beta? }
+  topic :legacy,  retired: true                 # old cases keep their label; nobody can open a new one
+  other                                         # the free-form leaf every desk should have
+end
+```
+
+| option | meaning |
+|---|---|
+| `about:` | the `supportable` class(es) this topic is about; the wizard offers the requester's own records |
+| `subject:` | `:required` (must pick one) · `:optional` (offers "none of these") · `:none` (free-form) |
+| `candidates:` | `->(requester) { … }` overriding which records the picker shows |
+| `ask:`, `placeholder:`, `prefill:`, `label:` | copy, when you'd rather not use the locale keys; `prefill:` may be a `->(subject) { … }` |
+| `only:` | `->(requester) { … }` — who is offered this topic in the wizard (agents may still file onto it) |
+| `priority:` | `:normal` · `:high` · `:urgent` — sorts the queue |
+| `desk:` / `route_to:` | send cases on this topic to another desk |
+| `retired:` | hidden from the wizard, still readable on old cases |
+| `icon:` | a key your views may render; the gem never does |
+
+`about`, `candidates`, `desk`, `route_to`, `priority`, `only` and `retired`
+are inherited down the branch; copy never is. Labels come from
+`support_desk.topics.<path>.label` in your locale files (`ask` and `hint`
+alongside).
+
+```ruby
+ticket.topic                    # a SupportDesk::Topic value object
+ticket.topic.path               # "billing/invoice"
+ticket.topic.label              # "Invoice"
+ticket.topic.full_label         # "Billing › Invoice"
+ticket.topic.under?(:billing)   # true
+ticket.topic.free_form?  .subject_required?  .retired?  .priority  .about  .icon
+SupportDesk.find_topic("billing/invoice")   # across every desk; nil, never a raise
+```
+
+Agents can refile a case (`ticket.change_topic!(to: "billing/refund", by:)`)
+and point a free-form one at the record it turned out to be about
+(`ticket.attach_subject!(order, by:)`); both are events.
+
 ## The model macros
 
 ### `has_support_tickets(desk: :default, as: nil, if: nil)`
@@ -169,16 +287,49 @@ ticket.attach_subject!(order, by: lucia)
 
 Every transition takes `by:` (falling back to `SupportDesk::Current.actor`), runs under the ticket's row lock, writes exactly one event row, and emits its events after the transaction commits. Repeating one that already happened returns `self` and writes nothing.
 
+More of what a ticket knows:
+
+```ruby
+ticket.opened_by  ticket.opened_by_requester?  ticket.opened_by_support?   # who wrote first
+ticket.opened_via          # :in_app | :email | :intercom | :api
+ticket.channels            # every channel the case can be answered through
+ticket.channels_summary    # "in app · email", in the reader's language
+ticket.requester  ticket.assignee  ticket.desk  ticket.conversation  ticket.messages
+ticket.assigned_to?(lucia)  ticket.about?(order)  ticket.reopened?  ticket.unassigned?
+ticket.assignments         # the history of who held it; .open for the current seat
+ticket.assignment_history  # the same, oldest first
+ticket.events  ticket.notes                     # the append-only timeline, and just the internal notes
+ticket.waiting_since  ticket.first_agent_reply_at  ticket.last_requester_message_at  ticket.last_agent_message_at
+ticket.export              # a GDPR-friendly Hash: the requester's transcript and the events they saw, never notes
+ticket.notification_title  # "Support · new message" — safe for a lock screen
+ticket.notification_body   # the label — for an authenticated feed
+ticket.register!(message)  # fold a chats message into the clocks by hand (imports); idempotent, and what the chats subscriber calls
+ticket.desk_config         # this desk's slice of the configuration
+
+SupportDesk::Ticket.find_by_reference!("t-ab12cd")      # forgives case, the prefix and Crockford lookalikes (O→0, I/L→1)
+SupportDesk::Ticket.for_conversation(conversation)     # the case behind a chats conversation, or nil
+SupportDesk::Current.actor = lucia                     # the fallback for every `by:` (the console sets it per request)
+```
+
+An **assignment** row records `agent`, `assigned_by`, `reason` (`taken`
+`assigned` `handed_off` `routed` `drop_in_takeover` `escalated` `reopened`
+`opened`), `note`, `assigned_at`, `released_at` and `release_reason`
+(`handed_off` `released` `shift_end` `closed` `escalated`). An **event** row
+has a `kind` (`opened` `assigned` `handed_off` `released` `drop_in` `closed`
+`reopened` `topic_changed` `subject_attached` `note` — plus kinds reserved for
+later releases), an `actor` and a `payload`, and is read-only once written.
+
 ### Scopes
 
 ```ruby
 SupportDesk::Ticket
   .open .closed .not_closed .assigned .unassigned .assigned_to(lucia)
   .awaiting_reply .awaiting_requester
+  .opened_by_requester .opened_by_support
   .waiting_over(4.hours) .at_risk .overdue
   .about(order) .about_any(Order) .on_topic(:billing)
-  .for_desk(:billing) .opened_via(:email) .opened_between(range)
-  .most_urgent_first .recent_activity_first .newest_first
+  .for_desk(:billing) .opened_via(:email) .opened_between(range) .closed_between(range)
+  .most_urgent_first .recent_activity_first .newest_first .oldest_first
   .find_by_reference("T-AB12CD")
 ```
 
@@ -198,6 +349,19 @@ ticket.context_card      # title, status, the host's own context pairs, the requ
 ticket.summary           # one line for a list row, Slack, or a digest
 ticket.timeline          # messages ⨉ events merged by time; .print in a console
 ticket.actions_for(lucia) # exactly the buttons to render
+```
+
+```ruby
+card = ticket.context_card
+card.title  card.status  card.pairs  card.subject_url  card.topic_label
+card.requester_name  card.requester_avatar  card.requester_since  card.requester_open_tickets
+card.opened_by_label      # "Support · Lucía G." for a case the desk opened; "not recorded" for a 0.1 row awaiting backfill
+card.to_h
+
+ticket.summary.to_s       # "T-AB12CD · Order SO1 · Alice · awaiting reply (12 minutes)"
+ticket.summary.state      # "awaiting reply" | "awaiting requester" | "closed" | "open", translated
+ticket.timeline.entries   # Timeline::Entry: .kind (:message or the event kind), .at, .actor, .body
+ticket.timeline.print     # in a console
 ```
 
 ## The requester experience
@@ -257,6 +421,21 @@ first would lose to it.
 
 Both surfaces are pushed screens, never modals: every wizard step is a real
 URL, so the back gesture and cold-boot deep links work.
+
+
+### Every helper the requester views can use
+
+| helper | what it renders |
+|---|---|
+| `link_to_support(about:, text:, **html)` | the door into the wizard (nothing when there is nobody to ask, or nothing they may ask about) |
+| `support_unread_badge` | unread support messages, counted against the chats read horizon |
+| `support_desk_styles` | the bundled stylesheet tag for your `<head>` |
+| `support_reply_promise` | "We usually reply in under 24 hours", from `reply_within` |
+| `support_ticket_state(ticket)` | "We're on it" · "We replied" · "We wrote to you" · "Closed" |
+| `support_inbox_door?(viewer)` | whether the inbox should show the door instead of a row (`inbox_entry`) |
+| `support_desk_record(key)`, `support_desk_avatar`, `support_desk_badge` | the desk as a counterpart: record, avatar (initials fallback), verified badge |
+| `support_thread_path(ticket)` | where a case is read: its chats conversation |
+| `open_support_ticket_about(record, requester)` | the open case about a record, or nil — what makes a door lead to the existing conversation |
 
 ### Restyling
 
@@ -606,6 +785,72 @@ Pass `key:` from anywhere that runs more than once (a `to_prepare` block, an eng
 Keep push titles and bodies generic — `ticket.notification_title` is safe for previews.
 `ticket.notification_body` contains case details for an authenticated feed, not a lock screen.
 
+
+
+The whole catalogue, with the arguments each subscriber receives:
+
+| event | arguments | when |
+|---|---|---|
+| `ticket_opened` | `ticket` | a case was **inserted** — by a requester or by the desk; check `ticket.opened_by_support?` before paging your team about their own message |
+| `requester_replied` | `ticket, message` | a requester message registered, other than the one that opened the case |
+| `agent_replied` | `ticket, message` | a desk message registered, other than the desk's own opening message |
+| `ticket_assigned` | `ticket, assignment` | take, assign, or (later) routing — not the silent seat a desk-opened case starts with |
+| `ticket_handed_off` | `ticket, assignment, from:, note:` | |
+| `ticket_released` | `ticket, from:, reason:` | |
+| `ticket_closed` / `ticket_reopened` | `ticket, by:` | `by:` is the requester when their own reply reopened it |
+| `ticket_topic_changed` | `ticket, from:, to:, by:` | |
+| `subject_attached` | `ticket, subject, by:` | |
+| `note_added` | `ticket, event` | internal notes never reach the conversation |
+| `ticket_transitioned` | `ticket, kind, by:, request:, payload:` | once per event row — the audit-log hook |
+
+`ticket.agents_to_notify` is the assignee, or the whole on-duty pool while
+nobody holds the case — the gem computes it so every host gets "assignee or
+everyone" right. System messages (opening lines, closure notices) never emit
+anything and never move the clocks.
+
+## Errors
+
+Every error inherits `SupportDesk::Error`, so `rescue SupportDesk::Error`
+catches anything support-specific; the console turns each into a translated
+flash. `ConfigurationError` (boot) · `ActorMissing` (a transition with no
+`by:` and no `Current.actor`) · `NotAnAgent` · `NotARequester` (no
+`has_support_tickets`, or its `if:` said no) · `NotTheAssignee` (a hand-off
+by somebody who doesn't hold the case) · `NotAllowed` (policy: a drop-in
+under `:assignee_only`, somebody else's record, a hidden topic, an agent
+writing to themselves) · `InvalidTransition` and its subclass `Locked` (a
+closed case on a desk that locks them, or a requester who can no longer be
+written to) · `UnknownTopic` · `NotSupportable` · `RateLimited` ·
+`TooManyOpenTickets`.
+
+## Locales
+
+`es` and `en` ship with the gem, under `support_desk.*` (requester screens,
+system lines, notifications, queue tabs, statuses, channels) and
+`support_desk.console.*` (queue, case page, compose form, flashes, errors).
+Your own locale files **outrank** the gem's — Rails loads every engine's
+locales first and the app's last — so override any key in your `es.yml` and
+the gem's copy loses. The ones hosts usually touch: `support_desk.topics.<path>.label`
+(and `.ask`, `.hint`), `support_desk.queue.tabs.*`,
+`support_desk.system.assigned`, `support_desk.thread.*`,
+`support_desk.console.flashes.*` and `support_desk.console.errors.*`. The
+suite asserts both languages carry exactly the same keys.
+
+## Doctor
+
+```ruby
+SupportDesk.doctor.print   # or .ok? in CI
+```
+
+Configuration: `requester_class`, `agents` (the block resolves to records),
+`topics` (a tree with a way out), `opening lines` (every static line
+interpolates, every I18n key exists), `supportables` (every `about:` class is
+supportable), `find_requester` (callable, one argument), `engine mount`,
+`parent controllers`. Chats seams: `chats subscribers`, `chats authorship`,
+`desk messager`. Data invariants: `conversations` (every ticket has one),
+`assignments` (at most one open per case), `assignee pointers`, `provenance`
+(no half-NULL `opened_by`; warns on legacy NULL rows and names the backfill
+task), `awaiting` (agrees with the transcript), `references` (unique).
+
 ## Compatibility
 
 Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`).
@@ -643,6 +888,41 @@ assert_awaiting_requester ticket
 assert_ticket_event ticket, :handed_off, from: users(:lucia), to: users(:pedro)
 
 with_support_config(reply_policy: :assignee_only) { … }
+```
+
+Everything the module gives you:
+
+| helper | |
+|---|---|
+| `open_support_ticket(for:, message:, about:, topic:, by:)` | a case, the way a requester opens one — or the desk, with `by:` |
+| `reply_as(agent, ticket, body, files:)` | answer; returns the `Chats::Message` |
+| `ask_again(ticket, body)` | the requester writes again |
+| `assert_awaiting_reply` / `assert_awaiting_requester` | who owes the next word (these reload the ticket) |
+| `assert_ticket_open` / `assert_ticket_closed` | status |
+| `assert_assigned_to(ticket, agent)` / `assert_unassigned` | the seat |
+| `assert_ticket_event(ticket, kind, from:, to:, by:)` / `refute_ticket_event` | the timeline |
+| `with_support_config(desk = :default, **overrides) { … }` | different desk settings for one block, put back afterwards |
+| `capture_support_events(*names) { … }` | `[[name, args, kwargs], …]` of what the block emitted; unsubscribes on the way out |
+
+Between examples, `SupportDesk.reset!` clears configuration, subscribers,
+desks and registries; `SupportDesk.reset_desks!` only forgets the memoised
+desk records.
+
+## Module-level API
+
+```ruby
+SupportDesk.configure { |config| … }   SupportDesk.config   SupportDesk.configured?
+SupportDesk.desk(key = :default)       # the Desk record, found or created, memoised
+SupportDesk.find_topic("billing/invoice")
+SupportDesk.on(event, key: nil) { … }  SupportDesk.off(event, key)
+SupportDesk.doctor
+SupportDesk.native_path_rules(mount:, title:)   # Hotwire Native path rules for the requester screens
+SupportDesk.humanize_duration(24.hours)          # "1 day", in the reader's language
+SupportDesk.actor_key(record)                    # a stable key for an actor (GlobalID param); what event payloads store
+SupportDesk.requester_class?(klass)  .supportable_class?(klass)  .agent_class?(klass)
+SupportDesk.eligible?(record, condition)         # how both macros read their `if:`
+SupportDesk.subscribe_to_chats!                  # the `:message_created` listener; idempotent
+SupportDesk::VERSION
 ```
 
 ## Development
