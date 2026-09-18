@@ -49,7 +49,10 @@ module SupportDesk
         say "     Keep traffic paused, run 'rake support_desk:backfill_opened_by' under 0.2,"
         say "     verify no NULL openers remain, then start only 0.2 and resume traffic."
         say "  4. New in 0.3.0 — assistants. The migration is ADDITIVE and rolling-safe:"
-        say "     add `config.assistant` only once every process is on 0.3.0."
+        say "     add `config.assistant` only once every process is on 0.3.0. Then"
+        say "       rails g support_desk:assistant Rose --disclosure signature"
+        say "     writes the harness and prints the stanza, the subscription and the two"
+        say "     scheduled tasks. It never edits your initializer."
         say "  5. See the CHANGELOG for the full list.\n", :green
       end
 

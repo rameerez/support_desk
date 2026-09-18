@@ -1,0 +1,60 @@
+# frozen_string_literal: true
+
+module Support
+  # <%= assistant_name %>'s mind. Everything the gem knows how to do stops at the
+  # door of this file: which provider you call, what you put in the prompt,
+  # how you cache, what you spend, and what you refuse to answer are yours.
+  #
+  # What comes in:
+  #
+  # * `brief` — a SupportDesk::Brief. `brief.to_h` is versioned data;
+  #   `brief.to_text` is the same facts as plain text. It carries the desk,
+  #   the case, the requester, and `may` / `may_not` — the authorization,
+  #   so you never have to re-derive the rules this case is under.
+  # * `transcript` — a SupportDesk::Transcript. `to_text` is the readable
+  #   rendering; `to_a` is Turns (`role`, `name`, `body`, `at`,
+  #   `attachments`, `assisted`).
+  #
+  # ⚠️ Both of these go to whatever you call. `support_context` (the
+  # subject's and the requester's) is host data, chosen by you, and it
+  # leaves your building the moment this method does. Decide what belongs in
+  # a prompt before you fill those in, not after.
+  #
+  # What goes out: an Answer. Nothing else — this method never touches the
+  # ticket. The job owns the writes, so the turn, the policy and the lock
+  # are checked in exactly one place.
+  class <%= key.camelize %>
+    # `kind` is the whole decision:
+    #
+    #   :answer   — say this. `text` required; `confidence` (0..1) and
+    #               `sources` ([{ title:, url: }]) are shown to the agent
+    #               reviewing the proposal, so fill them in honestly.
+    #   :hand_off — a person should take this. `reason` required, `summary`
+    #               is the paragraph the next human reads first.
+    #   :note     — leave a staff note and stop. Never reaches the customer.
+    #   :nothing  — do nothing. The case stays in the humans' queue.
+    Answer = Struct.new(:kind, :text, :confidence, :sources, :reason, :summary, :metadata,
+                        keyword_init: true) do
+      def initialize(**attributes)
+        super
+        self.kind ||= :nothing
+        self.sources ||= []
+        self.metadata ||= {}
+      end
+    end
+
+    # Answer one case.
+    #
+    #   def self.answer(brief, transcript)
+    #     reply = MyModel.complete(system: PROMPT, user: brief.to_text)
+    #     return Answer.new(kind: :hand_off, reason: "unsure") if reply.confidence < 0.6
+    #
+    #     Answer.new(kind: :answer, text: reply.text, confidence: reply.confidence)
+    #   end
+    def self.answer(brief, transcript)
+      raise NotImplementedError,
+            "#{self} has no answer yet. Write one — the contract is the Assistants " \
+            "section of the support_desk README (brief in, Answer out, no ticket writes)."
+    end
+  end
+end
