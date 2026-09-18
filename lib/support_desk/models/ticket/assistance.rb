@@ -458,8 +458,12 @@ module SupportDesk
         # One pending proposal per case. The row lock serialises this, so
         # there is no unique-violation to rescue: supersede, then insert.
         drafts.pending.each(&:supersede!)
-        candidate.save!
         bump_assistant_revision!
+        # The turn this proposal LEAVES the case at, not the one it answered
+        # — a proposal is itself a change, so stamping the turn it consumed
+        # would make every draft stale the moment it was written.
+        candidate.proposed_turn = assistant_turn
+        candidate.save!
         stamp_assistant_action!
         broadcast_change
         SupportDesk.emit_after_commit(:draft_proposed, self, candidate)
