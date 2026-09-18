@@ -483,6 +483,56 @@ screen, an order) and says so:
 config.find_requester { |query| User.find_by(email: query.to_s.strip.downcase) }
 ```
 
+#### What the compose form posts, and what comes back
+
+The form is yours (`new.html.erb` — the generated one is a fine start); the
+concern owns the request. `new` fills the draft it renders, `open_conversation`
+sends it. Every field is read by name:
+
+| param | what it is |
+|---|---|
+| `requester` | a GlobalID from one of your own pages — **authoritative**: a bad one is a refusal, never a fallback to the typed query |
+| `requester_query` | what an agent typed, resolved by `config.find_requester` when no `requester` was supplied |
+| `about` | a GlobalID of a `supportable` record; the topic comes with it |
+| `topic` | a free-form topic path when there is no subject |
+| `body`, `files[]` | the message: text, uploads, or Active Storage signed blob ids — text **or** an attachment is enough |
+| `desk` | the desk key the agent is working; an explicit key that isn't a visible desk is refused, never silently swapped for the default |
+
+GlobalIDs resolve only inside the classes that declared themselves
+(`has_support_tickets`, `supportable`), so a token is an identifier and never
+permission to call `find` on whatever it names. The concern sets `@requester`,
+`@about`, `@topic`, `@body`, `@files` and `@requester_query` **before** it
+looks anything up, so every refusal re-renders your `new` as a **422 with the
+draft still in it** (for Turbo too — a stream refresh would throw it away);
+success is a **303** to the case, with the flash `message_sent` whether the
+case was opened or the message joined one the person already had open. The
+refusals are distinct and each has its own copy under
+`support_desk.console.errors`: `unknown_requester`, `not_a_requester` (a
+closed account), `invalid_requester`, `invalid_subject`, `blank_message`,
+`invalid_input`, `no_requester_lookup`, `writing_to_yourself`, `off_duty`.
+
+Two named seams, for hosts that look people up their own way (a multi-tenant
+host scopes **both**, since `find_requester` only guards the typed path):
+
+```ruby
+def support_conversation_requester   # the person, or nil; raise SupportDesk::Console::InvalidInput, :invalid_requester to refuse
+def support_conversation_subject     # what it's about, or nil; the model re-checks supportable_by? at the write
+```
+
+Helpers your `new` template can read: `support_conversation_topics` (the
+free-form leaves), `support_conversation_offered?` (show the door at all: on
+duty, and `config.authorize_console` says yes for `:open_conversation` with a
+nil ticket), `support_conversation_sendable?` (render the send button), and
+`support_desk_record` (the desk being written as). When the message turns out
+to be a reply into an open case, `config.authorize_console(agent, ticket,
+:reply)` and `ticket.actions_for(agent)` are asked again, **under that case's
+row lock**, before anything is written.
+
+The verbs live in one table the router reads:
+`SupportDesk::Console::MEMBER_VERBS` (reply take assign hand_off release close
+reopen note change_topic) and `SupportDesk::Console::COLLECTION_VERBS`
+(`next: :get, open_conversation: :post`).
+
 ### Who can be written to
 
 `has_support_tickets if: :kept?` is the whole policy. When it turns false
@@ -490,6 +540,35 @@ the person can neither ask nor be written to, on every path — the console,
 the model, a direct chats write — and nothing is hidden or deleted: the
 transcript stays readable, the case stays in the queue, and agents can
 still take notes and close it.
+
+### Upgrading to 0.2
+
+```bash
+rails generate support_desk:upgrade   # copies the additive opened_by migration (the same file a fresh install runs)
+rails db:migrate                      # backfills every existing case to its requester
+rake support_desk:backfill_opened_by  # the idempotent catch-up, once the old processes are gone
+```
+
+**This is a drained cutover, not a rolling deploy.** 0.1 processes revalidate
+`Assignment#reason` on `release!`/`close!`/`hand_off!` and reject the new
+`opened` reason, so a case the desk opened must not exist while 0.1 code can
+still touch it: migrate, pause support writes, stop and drain all old web
+requests **and workers**, run the catch-up, verify
+`SupportDesk::Ticket.where(opened_by_id: nil).count == 0` and
+`SupportDesk.doctor` (its `provenance` check says exactly that), then start
+only 0.2. A NULL `opened_by` is read as requester-opened in the meantime, so
+quotas, labels and metrics stay right before the catch-up. Rolling back is a
+code rollback, never a schema one; with staff-opened cases live, prefer
+dropping `new`/`open_conversation` from your routes over downgrading. If you
+would rather avoid the window, ship a `0.1.4` that only adds `opened` to
+`Assignment::REASONS` first.
+
+Requesters see one more state in their list — `support_desk.tickets.state
+.opened_by_support` ("We wrote to you") — until they answer, and every error
+the gem raises still inherits `SupportDesk::Error`; the new one is
+`SupportDesk::NotARequester` (no `has_support_tickets`, or its `if:` said no).
+`SupportDesk.humanize_duration` is where "1 day" / "4 horas" now comes from
+(`Wizard.humanize_duration` still delegates to it).
 
 ## The wizard
 
@@ -558,6 +637,7 @@ bundle exec appraisal rails-8.1 rake test
 include SupportDesk::TestHelpers
 
 ticket = open_support_ticket(for: users(:alice), about: orders(:one), message: "…")
+written = open_support_ticket(for: users(:alice), by: users(:lucia), message: "…")   # the desk writes first
 reply_as users(:lucia), ticket, "…"
 assert_awaiting_requester ticket
 assert_ticket_event ticket, :handed_off, from: users(:lucia), to: users(:pedro)
