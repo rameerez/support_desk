@@ -51,10 +51,14 @@ class ReadmeTest < ActiveSupport::TestCase
     assert_kind_of ActiveRecord::Relation, q.mine
     assert_kind_of ActiveRecord::Relation, q.unassigned
     assert_kind_of ActiveRecord::Relation, q.awaiting
+    assert_kind_of ActiveRecord::Relation, q.needs_human
     assert_kind_of Hash, q.counts
     assert_kind_of Integer, q.badge
     assert_kind_of SupportDesk::Ticket, q.next
     assert_equal 5, q.tabs.size
+    # A desk with no assistant has no use for the needs_human tab, which is
+    # why the README says `tabs` renders `visible_tabs` and not TABS.
+    assert_not_includes q.visible_tabs, :needs_human
   end
 
   test "the README's event wiring works as written" do

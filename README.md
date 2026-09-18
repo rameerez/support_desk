@@ -21,7 +21,7 @@ It is a product gem on the [`chats`](https://github.com/rameerez/chats) kernel: 
 
 Every app eventually needs a support inbox, and everyone rebuilds the same ticket table, the same "assigned to me" tab, the same "which order is this about?" picker and the same email bridge. `support_desk` is that whole rebuild, done once, done right, on top of the messaging you already have.
 
-**Contents:** [Example](#-example) · [Quickstart](#quickstart) · [Configuration reference](#configuration-reference) · [Topics](#topics) · [Model macros](#the-model-macros) · [Tickets](#tickets) · [Queues and presenters](#queues-and-presenters) · [The requester experience](#the-requester-experience) · [The agent console](#the-agent-console) · [Writing first](#writing-first) · [The wizard](#the-wizard) · [Events](#events) · [Errors](#errors) · [Locales](#locales) · [Doctor](#doctor) · [Compatibility](#compatibility) · [Testing](#testing) · [Module-level API](#module-level-api)
+**Contents:** [Example](#-example) · [Quickstart](#quickstart) · [Configuration reference](#configuration-reference) · [Topics](#topics) · [Model macros](#the-model-macros) · [Tickets](#tickets) · [Queues and presenters](#queues-and-presenters) · [The requester experience](#the-requester-experience) · [The agent console](#the-agent-console) · [Writing first](#writing-first) · [Assistants](#-assistants) · [The wizard](#the-wizard) · [Events](#events) · [Errors](#errors) · [Locales](#locales) · [Doctor](#doctor) · [Compatibility](#compatibility) · [Testing](#testing) · [Module-level API](#module-level-api)
 
 ## 👨‍💻 Example
 
@@ -70,6 +70,9 @@ you own. Migrate first, pause support traffic, drain all old web requests and
 workers, and backfill before starting 0.2 traffic. This is not a rolling
 upgrade: old assignment writers cannot handle new support-opened cases.
 See the CHANGELOG for the complete cutover and rollback procedure.
+
+Already on 0.2? The same generator copies the 0.3 assistants migration,
+which is additive and needs no drain — see [Assistants](#-assistants).
 
 Three model lines and one route line:
 
@@ -134,6 +137,8 @@ configuration mistake is a boot failure, never a 3 a.m. `NoMethodError`.
 | `authenticate_method` | `:authenticate_user!` | your own filter, run before every requester screen |
 | `visible_desks_for` | `nil` (every desk) | `->(agent) { … }` returning the desks this agent may work; scopes the whole console |
 | `authorize_console` | `nil` (allow) | `->(agent, ticket, action) { … }`; asked before every console action, `ticket` is nil for `index`, `new`, `next` and `open_conversation`; a hook that raises **denies** |
+| `assistant(key) { … }` | — | declare an assistant (see [Assistants](#-assistants)); `config.assistants`, `config.assistant?(key)` read them back |
+| `default_assistant` | the only one declared | which assistant the `:default` desk gets when more than one exists |
 | `on(event) { … }` | — | subscribe to an event (see [Events](#events)); pass `key:` from code that reloads |
 
 ### Desk settings
@@ -158,6 +163,7 @@ SupportDesk.desk(:billing)  # another one (nil if nobody configured it)
 | `avatar` | `nil` | anything `image_tag` takes, or `->(desk) { … }` |
 | `email` | `nil` | the address the email channel will answer from (channel lands in a later release) |
 | `agents { … }` | — | a block or lambda returning the agent pool: notified while a case is unheld, offered in the assign picker |
+| `assistant` | the default one | the key of the assistant that works this desk; an explicit `nil` **disables** her here rather than inheriting (see [Assistants](#-assistants)) |
 | `topics do … end` | `other` only | the topic tree (see [Topics](#topics)) |
 | `reply_policy` | `:anyone` | `:anyone` (a drop-in posts, signed; an unheld case is taken by whoever answers) · `:take_over` (replying reassigns) · `:assignee_only` (raises `NotAllowed`) |
 | `announce_assignments` | `:first_only` | `:first_only` ("Lucía is taking care of your request" once) · `:always` (hand-offs too) · `:never` |
@@ -208,9 +214,13 @@ end
 | `desk:` / `route_to:` | send cases on this topic to another desk |
 | `retired:` | hidden from the wizard, still readable on old cases |
 | `icon:` | a key your views may render; the gem never does |
+| `assistant:` | the most an assistant may produce on this branch (see [Assistants](#-assistants)) |
 
 `about`, `candidates`, `desk`, `route_to`, `priority`, `only` and `retired`
-are inherited down the branch; copy never is. Labels come from
+are inherited down the branch; copy never is. `assistant:` is the one option
+that is neither inherited nor overridden: `Topic#assistant_cap` is the
+**minimum** over the node and every ancestor, so a child can only tighten
+what a parent allowed. Labels come from
 `support_desk.topics.<path>.label` in your locale files (`ask` and `hint`
 alongside).
 
@@ -220,7 +230,7 @@ ticket.topic.path               # "billing/invoice"
 ticket.topic.label              # "Invoice"
 ticket.topic.full_label         # "Billing › Invoice"
 ticket.topic.under?(:billing)   # true
-ticket.topic.free_form?  .subject_required?  .retired?  .priority  .about  .icon
+ticket.topic.free_form?  .subject_required?  .retired?  .priority  .about  .icon  .assistant_cap
 SupportDesk.find_topic("billing/invoice")   # across every desk; nil, never a raise
 ```
 
@@ -261,6 +271,8 @@ Makes a domain record something people can ask about. Every method has a working
 ### `acts_as_support_agent(if: nil, kind: :human)`
 
 Makes someone able to answer. Agents are never chats participants — the desk sends, the agent *authors* — so this needs no messaging setup at all. It adds `support_agent?`, `support_agent_name`, `support_agent_avatar`, `on_duty?`, `support_capacity`, `support_queue` and exactly one verb — `open_support_conversation_with!`, the only agent action with no ticket yet (see [Writing first](#writing-first)). Everywhere else the ticket is the subject of the sentence.
+
+`kind:` is `:human` or `:ai`, and anything else is a boot failure. Declaring one of your own models `kind: :ai` does **not** hand it an agent's authority: every support write by it, or to it, is refused with `SupportDesk::NotAnAssistant`, and `doctor` warns about it. The only machine that may act on a case is the desk's own `SupportDesk::Assistant` — see [Assistants](#-assistants).
 
 ## Tickets
 
@@ -316,8 +328,10 @@ An **assignment** row records `agent`, `assigned_by`, `reason` (`taken`
 `opened`), `note`, `assigned_at`, `released_at` and `release_reason`
 (`handed_off` `released` `shift_end` `closed` `escalated`). An **event** row
 has a `kind` (`opened` `assigned` `handed_off` `released` `drop_in` `closed`
-`reopened` `topic_changed` `subject_attached` `note` — plus kinds reserved for
-later releases), an `actor` and a `payload`, and is read-only once written.
+`reopened` `topic_changed` `subject_attached` `note` `escalated`
+`human_requested` `assistant_paused` `assistant_resumed` `draft_sent`
+`draft_rejected` `assistant_withheld` — plus kinds reserved for later
+releases), an `actor` and a `payload`, and is read-only once written.
 
 ### Scopes
 
@@ -339,11 +353,12 @@ Bring your own UI on the agent side. Everything the console needs is plain Ruby:
 
 ```ruby
 q = lucia.support_queue
-q.mine  q.unassigned  q.awaiting  q.open  q.closed    # relations
-q.counts     # { awaiting: 4, mine: 2, … } in ONE query
-q.badge      # the nav number, cached 30s per agent
-q.next       # the most urgent thing this agent could pick up
-q.tabs       # [[:awaiting, "Needs a reply", 4], …]
+q.mine  q.unassigned  q.awaiting  q.open  q.closed  q.needs_human   # relations
+q.counts        # { awaiting: 4, mine: 2, … } in ONE query
+q.badge         # the nav number, cached 30s per agent
+q.next          # the most urgent thing this agent could pick up
+q.tabs          # [[:awaiting, "Needs a reply", 4], …]
+q.visible_tabs  # which ones this desk has any use for
 
 ticket.context_card      # title, status, the host's own context pairs, the requester
 ticket.summary           # one line for a list row, Slack, or a digest
@@ -436,6 +451,7 @@ URL, so the back gesture and cold-boot deep links work.
 | `support_desk_record(key)`, `support_desk_avatar`, `support_desk_badge` | the desk as a counterpart: record, avatar (initials fallback), verified badge |
 | `support_thread_path(ticket)` | where a case is read: its chats conversation |
 | `open_support_ticket_about(record, requester)` | the open case about a record, or nil — what makes a door lead to the existing conversation |
+| `support_human_door(ticket)` | the way to a person on a case an assistant is or was on, and the status line once one has been asked for (see [Assistants](#-assistants)) |
 
 ### Restyling
 
@@ -477,8 +493,11 @@ end
 ```
 
 That adds member `reply take assign hand_off release close reopen note
-change_topic` and collection `next` and `open_conversation`. It has to sit
-inside a `resources` block, since that is what those routes hang off.
+change_topic send_draft reject_draft pause_assistant resume_assistant` and
+collection `next` and `open_conversation`. The last four do nothing until an
+assistant is configured, and the console never offers them before that. It
+has to sit inside a `resources` block, since that is what those routes hang
+off.
 `new` stays yours: add it to `only:` when you render the form behind
 `open_conversation` ("Write to someone").
 
@@ -749,6 +768,569 @@ the gem raises still inherits `SupportDesk::Error`; the new one is
 `SupportDesk.humanize_duration` is where "1 day" / "4 horas" now comes from
 (`Wizard.humanize_duration` still delegates to it).
 
+## 🤖 Assistants
+
+An assistant is an agent that happens to be a machine. She has a seat, a
+name, a turn budget and a **level** that says what she may produce on this
+case — and at the default level that is a proposal a person reads and sends,
+signed by them.
+
+The gem does not call a model. It emits one event and accepts a handful of
+verbs; which provider you use, what you put in a prompt and what you spend
+are yours. What lives here is the part nobody should write twice: who may
+say what to whom, what happens when the customer writes again mid-answer,
+and how a person takes over.
+
+**Nothing in this section is on until you turn it on.** Without
+`config.assistant`, `support_desk` behaves exactly as it did in 0.2.
+
+### Two minutes
+
+```bash
+rails g support_desk:assistant Rose --disclosure signature
+```
+
+It writes `app/jobs/support/rose_turn_job.rb` and
+`app/services/support/rose.rb`, and it **prints** the rest — it never edits
+your initializer, because `config.assistant` is a policy decision and a
+generator that wrote one would turn "let me look at this" into a live
+assistant. Paste the stanza:
+
+```ruby
+# config/initializers/support_desk.rb
+config.assistant :rose do |rose|
+  rose.name            = "Rose"
+  rose.autonomy        = :draft            # she proposes; a person sends
+  rose.disclosure      = :signature        # REQUIRED — see below
+  rose.max_turns       = 6
+  rose.responds_within = 3.minutes
+end
+config.default_assistant = :rose
+```
+
+Wire the job to the one event the gem emits:
+
+```ruby
+SupportDesk.on(:assistant_turn, key: "support.rose.turn") do |ticket, assistant, _message, turn:|
+  Support::RoseTurnJob.set(wait: 20.seconds).perform_later(ticket.id, assistant.key, turn)
+end
+```
+
+And the job, which is the whole harness contract in nine lines:
+
+```ruby
+def perform(ticket_id, assistant_key, turn)
+  ticket = SupportDesk::Ticket.find(ticket_id)
+  return unless ticket.assistant_turn == turn       # the case moved on while we waited
+
+  rose = SupportDesk.assistant(assistant_key)
+  return unless ticket.assistant_policy(rose).may_observe?
+
+  answer = Support::Rose.answer(ticket.brief, ticket.transcript)
+  ticket.respond!(answer.text, by: rose, turn: turn, confidence: answer.confidence)
+end
+```
+
+What a person sees next: a card at the top of the case that says "Propuesta
+de Rose", the text, a confidence pill, the sources she cited, and three
+buttons — **Enviar**, **Editar**, **Descartar**. The sent message is
+*theirs*, signed with their name. The customer sees an answer from a human,
+because it is one.
+
+### Levels
+
+`autonomy` is the ceiling she may ever work at. Every level is the one below
+it plus its own verbs:
+
+| level | she may | what it feels like |
+|---|---|---|
+| `:off` | nothing | configured, switched off |
+| `:observe` | `note`, `escalate`, `release` | she reads and can leave a staff note or hand the case to a person; she never writes to the customer |
+| `:draft` | the above + `draft` | **the default.** Every word goes through a person |
+| `:reply` | the above + `reply`, `take` | she answers the customer and holds the case |
+| `:resolve` | the above + `close` | she can close a case she holds once the customer has been answered |
+
+```ruby
+ticket.assistant_policy.level          # => :draft
+ticket.assistant_policy.because        # => "topic payments caps rose at draft"
+ticket.assistant_policy.may_reply?     # => false
+ticket.assistant_policy.allowed_verbs  # => [:note, :escalate, :release, :draft]
+```
+
+### Ceilings and floors
+
+A **ceiling** lowers what she may ever produce here. The lowest one wins,
+and `because` names the single rule that decided it — so any refusal traces
+back to one line of configuration:
+
+| ceiling | set by |
+|---|---|
+| her autonomy | `rose.autonomy = :reply` |
+| the topic | `topic :payments, assistant: :draft` — the minimum over the node and every ancestor, so a child can only tighten |
+| your block | `rose.cap { |ticket| :draft if ticket.requester.try(:vip?) }` |
+| the case | what a reopen writes (below) |
+| a pause | a human switched her off on this case |
+
+A **floor** lowers the level because of the case's state, after the ceilings:
+she is deactivated, the case is closed, a person has been asked for, or a
+human holds it.
+
+```ruby
+ticket.assistant_policy.ceilings   # => { assistant: :reply }   only the ones that apply
+ticket.assistant_policy.floors     # => [:held_by_human]      Lucía took it: :reply becomes :draft
+ticket.assistant_policy.to_h       # all five ceiling slots, spelled out, for a log line
+```
+
+Policy decides what she may **produce**. It never decides what a person can
+see: the transcript, the case, the queue and the door to a human are the
+same at every level, and a refusal is always a named reason on a record — an
+`assistant_withheld` event, a policy stored in a proposal's metadata — never
+silence.
+
+### `respond!` and its three outcomes
+
+`respond!` is the verb a harness should call. It hands over an answer and
+lets policy decide what that answer becomes, so the harness never encodes
+rules that change per case:
+
+```ruby
+outcome = ticket.respond!(text, by: rose, turn: turn, confidence: 0.82, sources: [{ title: "…", url: "https://…" }])
+
+outcome.sent?        # it went to the requester (level :reply or above, and it was her turn)
+outcome.drafted?     # a person will send it; outcome.draft is the row
+outcome.withheld?    # nothing was written; outcome.reason is :policy or :not_your_turn
+outcome.escalated?   # the budget ran out: the proposal is waiting AND so is a person
+outcome.turn         # the successor turn, for a second action in the same run
+```
+
+`draft!` proposes regardless of level, for a host that has already decided it
+wants a proposal. `reply!(by: rose, turn:)` and `note!(by: rose, turn:)` are
+the ordinary verbs with a turn attached.
+
+### The turn
+
+`ticket.assistant_turn` is an opaque string (`"t7-r12"`) over an integer
+bumped by **every** registered message and **every** transition. Every
+assistant action requires it and consumes it:
+
+```ruby
+turn = ticket.assistant_turn      # read it before you call a model
+ticket.respond!(answer, by: rose, turn: turn)
+```
+
+A model takes seconds and a customer can write again while it thinks. The
+turn is what makes that safe: the action is compared against the case's
+current revision **under its row lock**, and a late, retried or redelivered
+one raises `SupportDesk::StaleTurn` and writes nothing. That one integer is
+also why this gem has no idempotency keys, no claim rows and no leases —
+"is this still the case you read?" is already answered.
+
+Two consequences worth knowing:
+
+- Check `ticket.assistant_turn == turn` in your job **before you spend
+  money**. A mismatch means the newer turn's job already exists.
+- A retry after a committed action is a `StaleTurn`, and that is correct:
+  the work was done. Generated jobs `discard_on` it.
+
+### Proposals in the console
+
+A pending proposal renders above the composer with its confidence, its
+sources and its attachments, and goes stale visibly the moment anything on
+the case moves.
+
+```ruby
+draft = ticket.pending_draft
+draft.send!(by: lucia, seen_turn: ticket.assistant_turn)                  # verbatim
+draft.send!(by: lucia, seen_turn: ticket.assistant_turn, body: "Casi: …") # edited
+draft.reject!(by: lucia, reason: "no es eso")
+```
+
+`seen_turn` is the turn the reviewer's **page** was rendered with, and a
+mismatch is a refusal, not a warning: approving a proposal from a page that
+predates the customer's next message would send an answer into a
+conversation that has moved on. There is no "send anyway" flag — the console
+re-renders the case with the current turn and the reviewer's text still in
+the box, and they submit again. One pending proposal per case, always: a
+newer one, a takeover, a human reply or a pause supersedes the last.
+
+A sent proposal is the **human's** message. `sent_body` keeps the edit, the
+original body stays on the row, and `draft.edited?` / the `verbatim` and
+`edited` scopes are the acceptance numbers you raise her level on.
+
+### The two exits
+
+Either side can ask for a person, and both do the same write: her seat is
+released, the reason is recorded, the priority goes up, and a line lands in
+the thread.
+
+```ruby
+ticket.escalate!(by: rose, turn: turn, reason: "refund_over_limit", summary: "Pidió el reembolso de …")
+ticket.request_human!(by: alice)     # the requester's own door
+```
+
+Render the door in your thread — it is a partial in the requester engine,
+and a helper:
+
+```erb
+<%= render "support_desk/tickets/human_door", ticket: ticket %>
+<%= support_human_door(ticket) %>
+```
+
+It shows the button while an assistant is or has been in play on the case,
+and the status line once a person has been asked for. **History counts**:
+the door does not vanish because somebody edited an initializer after she
+answered. Both exits reach the queue's `needs_human` tab, which appears only
+on desks that have an assistant or a non-zero count.
+
+### Disclosure
+
+Required, with no default. Boot fails until you choose:
+
+| mode | what the requester gets |
+|---|---|
+| `:signature_and_notice` | her messages are signed "Rose · asistente virtual" **and** the thread opens with a notice |
+| `:signature` | signed; no notice |
+| `:notice` | a notice; her messages are unsigned, from the desk |
+| `:none` | nothing is said and nothing is signed |
+
+**Your legal process decides this, not us.** The gem refuses to pick a
+default because the right answer depends on a jurisdiction, a sector and a
+risk appetite it knows nothing about. What it does guarantee is that the
+choice is never invisible to *you*: whatever the mode, every machine-written
+message carries `metadata["support_desk"]` naming the assistant, the mode,
+the turn and the whole policy that allowed it, `ticket.export` labels it
+`from: "assistant"` in **every** mode including `:none`, and the console
+marks it for staff. What a customer is told is a product decision; what your
+records say a machine wrote is not.
+
+### Humans outrank
+
+- A person may answer a case she holds under **every** `reply_policy`.
+  `:assignee_only` exists so two people don't answer at once, and she is not
+  one.
+- A human reply on her case takes it over and supersedes the pending
+  proposal.
+- `ticket.agents_to_notify` and `desk.humans` return people only. Notifying a
+  machine is notifying nobody. (`desk.agents` includes her, and is an Array.)
+- She can never send her own proposal, hand a case off, change a topic or
+  attach a subject. She escalates instead.
+
+### Pause, resume, and what a reopen remembers
+
+```ruby
+ticket.pause_assistant!(by: lucia, reason: "cliente enfadado")   # floors her at :off on THIS case
+ticket.resume_assistant!(by: lucia)
+```
+
+Pausing releases her seat and throws away her pending proposal. Resuming
+clears the pause and **nothing else** — a case cap and a request for a
+person are different decisions made by different people, and only an
+explicit hand-back (`assign!(to: rose, by: lucia)`) lifts those.
+
+Reopening a case she closed leaves it unassigned and writes
+`assistant_cap = "draft"` for the rest of its life. A case that came back is
+a case where her answer was not the end of it.
+
+### When the harness is down
+
+Two scheduled tasks, and they are the difference between a delay and a
+customer nobody answers:
+
+```yaml
+# config/recurring.yml
+support_desk_release_silent_assistants:
+  command: "SupportDesk.release_silent_assistants!"
+  schedule: every minute
+support_desk_redispatch_assistant_turns:
+  command: "SupportDesk.redispatch_assistant_turns!"
+  schedule: every 5 minutes
+```
+
+`release_silent_assistants` hands over every case she has sat on longer than
+her `responds_within` without answering — a worker that stopped, a provider
+that is down, a job that spent its last retry. It asks for a **person** on
+each one, not just her seat back: a case that waited that long deserves one
+whatever she would have said. `redispatch_assistant_turns` re-emits the turn
+for cases nobody acted on, which is safe precisely because the turn is
+consumed by the first action and every later one is a `StaleTurn`.
+
+`rake support_desk:assistant_status` reads and writes nothing, and is the
+line to put in a deploy check. `SupportDesk.doctor` covers the same ground
+with verdicts.
+
+### What the model sees
+
+> [!WARNING]
+> **`ticket.brief` and `ticket.transcript` are what your harness sends to a
+> third party.** Two fields in the brief are host data you chose:
+> `Supportable#support_context` (about the thing the case is about) and
+> `Requester#support_context` (about the person). `include_internal: true`
+> adds the desk's private reasoning — notes agents left each other, and
+> proposals a human rejected with the reason. Decide what belongs in a
+> prompt before you fill those in, not after.
+
+```ruby
+brief = ticket.brief(include_internal: false, transcript_limit: 50)
+brief.to_h        # versioned data — schema_version, desk, assistant, case, requester, transcript
+brief.to_text     # the same facts as sectioned plain text
+brief.policy      # what she may do here, and why
+
+ticket.transcript.to_text
+# [2026-09-18 10:02] Alice: No me han pagado
+# [2026-09-18 10:03] Rose: Lo estoy mirando ahora mismo
+# [2026-09-18 10:07] Lucía: Ya está resuelto [justificante.pdf]
+```
+
+A brief is **facts, never instructions**. There is not one imperative
+sentence in it and there never will be: what the assistant should *do* with
+a case is your prompt and your product. The one thing it states about
+behaviour is `may` / `may_not`, and that is not advice either — it is the
+authorization, straight off the policy, so a harness never has to re-derive
+the rules it is working under.
+
+The transcript speaks four roles (`:requester`, `:human`, `:assistant`,
+`:system`) where `Ticket#role_of` speaks three: whose turn it is does not
+change because a machine wrote the desk's last word, but a reader cares.
+Deleted messages stay in it as tombstones, and an assistant's name follows
+your configuration — rename her and the whole transcript renames, drop her
+from the initializer and it keeps saying what the customer was actually
+shown.
+
+### Before you launch
+
+- [ ] `SupportDesk.doctor.print` is green. It checks her bindings, that
+      `Chats.display_name_for` answers for her, that no case she holds needs
+      a person, that a turn subscriber exists, and that nothing has been
+      idle longer than three times her `responds_within`.
+- [ ] **Moderation covers both shapes.** A signed message has her as its
+      author; a `:notice` or `:none` message has no author at all and is the
+      desk's. Whatever owns your moderation has to catch the nameless one
+      too.
+- [ ] Notifiers subscribe to `draft_proposed` (a proposal is waiting),
+      `ticket_escalated` and `human_requested` (somebody needs a person).
+- [ ] The `_human_door` partial renders in your thread.
+- [ ] Both rake tasks are scheduled, and you have watched them run once.
+- [ ] `autonomy` is `:draft`, and topic caps are on money and identity.
+      Raise her only when the acceptance rate on reviewed proposals says so.
+
+### Reference
+
+**Configuration**
+
+| setting | type | default |
+|---|---|---|
+| `name` | String | the key, humanized |
+| `avatar` | String, or a callable given the assistant | nil |
+| `autonomy` | one of `AssistantPolicy::LEVELS` | `:draft` |
+| `disclosure` | **required**: `:signature_and_notice` · `:signature` · `:notice` · `:none` | — |
+| `max_turns` | positive Integer, or nil for unlimited (doctor warns) | 6 |
+| `responds_within` | a Duration, or nil to disable the silent sweep (doctor warns) | 3 minutes |
+| `may_open_conversations` | true / false | false |
+| `hand_off_line` · `human_requested_line` · `disclosure_line` | String (`%{name} %{desk} %{reply_within}`), I18n key, block, or nil | the gem's copy |
+| `hand_off_when` | block `(ticket, message)` → true / false / nil; anything else, or a raise, hands the case over | nil |
+| `cap` | block `(ticket)` → a level or nil | nil |
+
+Predicates: `signs?`, `notice?`, `disclosed?`, `may_open_conversations?`,
+`line_for(setting, ticket)`. The four modes are
+`AssistantConfiguration::DISCLOSURE_MODES`.
+
+```ruby
+config.assistant :rose { |rose| … }   config.assistant(:rose)   config.assistants   config.assistant?(:rose)
+config.default_assistant = :rose
+config.desk(:billing) { |desk| desk.assistant = :rose }        # an explicit nil DISABLES that desk
+config.desk(:billing).assistant_key
+topic :payments, assistant: :draft                              # Topic#assistant_cap — tightens only
+acts_as_support_agent kind: :ai                                 # validated; see the upgrade note
+```
+
+**Module**
+
+```ruby
+SupportDesk.assistant(key = nil)        # the Assistant record, memoised; nil when none is configured
+SupportDesk.reset_assistants!
+SupportDesk.ai_actor?(record)
+SupportDesk.release_silent_assistants!            # → Integer
+SupportDesk.redispatch_assistant_turns!(older_than: 1.minute)   # → Integer
+```
+
+**`SupportDesk::Assistant`**
+
+| | |
+|---|---|
+| `SupportDesk::Assistant.for(key)` / `.active` | found or created; the on-duty scope |
+| `config` / `configured?` | her slice of the configuration; whether anything still declares her |
+| `name` `avatar` `autonomy` `disclosure` `max_turns` `responds_within` `may_open_conversations?` | read through the configuration, with safe answers when it is gone |
+| `disclosed?` `signs?` `notice?` | the mode, as predicates |
+| `disclosed_name` `display_name` `to_s` `support_agent_name` `support_agent_avatar` | what a requester sees |
+| `on_duty?` `support_capacity` | the agent contract |
+| `deactivate!(by:, reason:)` / `activate!(by:)` | the cross-process kill switch; rows are never destroyed |
+| `desks` / `held_tickets` | where she works, and what she is sitting on |
+
+**`SupportDesk::AssistantPolicy`**
+
+`LEVELS` · `RANK` · `VERBS_BY_LEVEL` · `ALL_VERBS` ·
+`AssistantPolicy.for(ticket, assistant, hand_back: false)` · `level` ·
+`because` · `ceilings` · `floors` · `assistant` · `ticket` ·
+`at_least?(level)` · `may?(verb)` · `may_observe?` · `may_draft?` ·
+`may_reply?` · `may_hold?` · `may_close?` · `allowed_verbs` ·
+`forbidden_verbs` · `to_h` · `to_s` · `null?` (and `AssistantPolicy::Null`,
+whose `because` says which of "no assistant here" and "not this desk's
+assistant" it was).
+
+**`SupportDesk::Ticket`**
+
+```ruby
+# verbs
+respond!(body, by:, turn:, files:, confidence:, sources:, metadata:, request:)   # → Outcome
+draft!(body, by:, turn:, …)                                                       # → Draft
+escalate!(by:, reason:, summary:, turn:, request:)
+request_human!(by:, request:)          # by: must be the requester
+pause_assistant!(by:, reason:) / resume_assistant!(by:)
+
+# readers
+assistant   assistant_policy(assistant = self.assistant, hand_back: false)   assistant_turn
+assistant_in_play?   held_by_assistant?   human_required?   assistant_paused?   assistant_turns_left
+assistant_message?(message)   transcript(limit: nil)   brief(include_internal:, transcript_limit:)
+drafts   pending_draft   notes
+
+# scopes
+held_by_assistants   held_by_humans   needs_human   assistant_paused   assistant_capped
+resolved_by_assistant   with_pending_draft   assistant_idle_since(time)
+```
+
+Columns: `assistant_revision`, `last_requester_message_id`,
+`assistant_turns_count`, `assistant_acted_at`, `assistant_paused_at`,
+`assistant_paused_reason`, `assistant_cap`, `human_required_at`,
+`human_required_reason`.
+
+**`SupportDesk::Draft`**
+
+`STATUSES` · `MAX_SOURCES` (20) · `MAX_SOURCE_TITLE` (500) ·
+`MAX_SOURCE_URL` (2048) · `send!(by:, seen_turn:, body:, request:)` ·
+`reject!(by:, reason:, request:)` · `pending?` `sent?` `rejected?`
+`superseded?` `expired?` · `stale?` · `edited?` · `final_body` ·
+`confidence_percent` · `author_key` · scopes `pending` `sent` `rejected`
+`superseded` `expired` `reviewed` `verbatim` `edited` `by(author)`
+`chronological` `newest_first`.
+
+**`SupportDesk::Outcome`** — `action` `message` `draft` `policy` `reason`
+`turn` · `sent?` `drafted?` `withheld?` `escalated?` · `to_h`.
+
+**`SupportDesk::Transcript`** — `Turn(role:, name:, body:, at:,
+attachments:, assisted:, message:)` with `requester?` `human?` `assistant?`
+`system?` `assisted?` and `to_line`; `to_a` `to_h` `to_text` `last(n)`
+`since(message)` `size`, Enumerable, and `limit:`. `to_h` carries
+`truncated`, because a reader seeing the last 50 of 300 turns has to know.
+
+**`SupportDesk::Brief`** — `SCHEMA_VERSION` · `to_h` · `to_text` · `policy`
+· `include_internal?` · `transcript`.
+
+**`Requester#support_context`** — overridable, `{}` by default, the same
+meaning as `Supportable#support_context`. `ContextCard#requester_pairs`
+renders it next to the subject's own `pairs`, and `to_h` carries it under
+`requester.context`.
+
+**`SupportDesk::Desk`** — `assistant` · `assistant?` · `humans` (people
+only) · `agents` (people plus her, an Array).
+
+**Events**
+
+| event | arguments |
+|---|---|
+| `assistant_turn` | `ticket, assistant, message, turn:` — the only one a harness subscribes to |
+| `draft_proposed` | `ticket, draft` |
+| `draft_sent` | `ticket, draft, message, by:` |
+| `draft_rejected` | `ticket, draft, by:, reason:` |
+| `assistant_withheld` | `ticket, assistant, reason:, policy:` |
+| `ticket_escalated` | `ticket, from:, reason:, by:` |
+| `human_requested` | `ticket, by:, reason:` |
+| `assistant_paused` / `assistant_resumed` | `ticket, by:` |
+
+New `Event::KINDS`: `human_requested` `assistant_paused` `assistant_resumed`
+`draft_sent` `draft_rejected` `assistant_withheld` — the last five join
+`note` and `drop_in` in `Event::INTERNAL_KINDS`, which is what
+`Event.requester_visible` excludes. An export says a person was asked for;
+it never says a machine's proposal was discarded. `Event#summary` reads the
+paragraph an escalation left.
+
+**Errors** — `SupportDesk::NotAnAssistant` (an AI-kind actor that is not
+this desk's assistant; a subclass of `NotAnAgent`),
+`SupportDesk::AssistantNotAllowed` (carries `policy` and `verb`; a subclass
+of `NotAllowed`), `SupportDesk::StaleTurn` (a subclass of
+`InvalidTransition`, so `rescue InvalidTransition` still catches it).
+
+**Console** — `MEMBER_VERBS` gains `send_draft` `reject_draft`
+`pause_assistant` `resume_assistant`; helpers `support_pending_draft` and
+`support_assistant`; `unavailable_reason` gains `"no_pending_draft"`. Picker
+values are `SupportDesk.actor_key(agent)`. `Queue::TABS` gains
+`:needs_human`, hidden by `visible_tabs` unless the desk has an assistant or
+the count is non-zero.
+
+**Requester engine** — `POST /tickets/:id/request_human`, and
+`support_desk/tickets/_human_door` (local: `ticket`) behind the
+`support_human_door(ticket)` helper.
+
+**Rake** — `support_desk:release_silent_assistants` ·
+`support_desk:redispatch_assistant_turns` (`OLDER_THAN=60`) ·
+`support_desk:assistant_status`.
+
+**Doctor** — `assistants (config)` · `assistant turn subscriber` ·
+`assistant authorship` · `assistant silence` · `assistant seats` ·
+`assistant idle turns` · `drafts` · `ai agents without policy`.
+
+**Test helpers**
+
+| helper | |
+|---|---|
+| `support_assistant(key = nil)` | the record |
+| `respond_as(assistant, ticket, body, turn:, **options)` | → `Outcome` |
+| `draft_as(assistant, ticket, body, turn:, **options)` | → `Draft` |
+| `assert_pending_draft(ticket, body:)` / `refute_pending_draft` | `body:` takes a String (substring) or a Regexp |
+| `assert_needs_human(ticket, reason:)` / `refute_needs_human` | |
+| `assert_held_by_assistant(ticket, assistant = nil)` | |
+| `refute_assistant_spoke(ticket)` | no machine has said anything to the requester |
+| `assert_assistant_policy(ticket, level, because:)` | the level **and** the sentence |
+| `with_assistant_config(key = nil, **overrides) { … }` | |
+| `with_topic_assistant_cap(path, level) { … }` | rebuilds the frozen tree with one cap |
+
+### Upgrading to 0.3
+
+```bash
+rails generate support_desk:upgrade   # copies the additive assistants migration
+rails db:migrate
+```
+
+Additive and rolling-safe — unlike 0.2, no drain. Deploy **every** process to
+0.3 before you add `config.assistant`: a 0.2 worker cannot honour a turn it
+does not know about.
+
+Four things change whether or not you configure an assistant:
+
+- **A host model declared `acts_as_support_agent kind: :ai` is now refused
+  for every support write, by it or to it** (`NotAnAssistant`). It used to
+  be treated as a human. `kind:` is validated at declaration, and `doctor`
+  warns about such classes. Only the desk's own `SupportDesk::Assistant` has
+  machine authority.
+- **Console picker values are actor keys**, not bare ids — an assistant and
+  a user can share an integer id. A bare id is still accepted for one
+  release, and only when exactly one pool member matches it.
+- `Queue::TABS` gains `:needs_human`, hidden unless it is relevant.
+- **Every registered message and every transition writes
+  `assistant_revision`**, on every case, with or without an assistant. It is
+  one nullable integer, it is what the turn is made of, and a 0.2 process
+  reading those rows is unaffected — which is why step 3 matters in the
+  other direction: a 0.2 *writer* leaves the counter behind.
+
+And when you do configure one: `desk.agents` becomes an Array of humans plus
+her and `desk.humans` is the human-only pool, `announce_assignments` never
+announces her, a human reply takes her case over under every `reply_policy`
+and supersedes the pending proposal, `close!` expires proposals, a reopen
+after her close caps her at `:draft`, and `reply!` / `post_agent_message!`
+accept `metadata:` and `turn:`.
+
+`rose.deactivate!(by: owner)` is the kill switch: cross-process, within one
+transition, no deploy.
+
 ## The wizard
 
 "What do you need help with?" is a plain object, not a controller, so a host
@@ -801,6 +1383,14 @@ The whole catalogue, with the arguments each subscriber receives:
 | `ticket_topic_changed` | `ticket, from:, to:, by:` | |
 | `subject_attached` | `ticket, subject, by:` | |
 | `note_added` | `ticket, event` | internal notes never reach the conversation |
+| `assistant_turn` | `ticket, assistant, message, turn:` | there is something for an assistant to answer — the only event a harness subscribes to (see [Assistants](#-assistants)) |
+| `draft_proposed` | `ticket, draft` | a proposal is waiting for a person |
+| `draft_sent` | `ticket, draft, message, by:` | |
+| `draft_rejected` | `ticket, draft, by:, reason:` | |
+| `assistant_withheld` | `ticket, assistant, reason:, policy:` | `respond!` wrote nothing, and the policy that refused is in the payload |
+| `ticket_escalated` | `ticket, from:, reason:, by:` | a case was handed to a person |
+| `human_requested` | `ticket, by:, reason:` | the requester pressed the door, or a `hand_off_when` phrase fired |
+| `assistant_paused` / `assistant_resumed` | `ticket, by:` | |
 | `ticket_transitioned` | `ticket, kind, by:, request:, payload:` | once per event row — the audit-log hook |
 
 `ticket.agents_to_notify` is the assignee, or the whole on-duty pool while
@@ -820,7 +1410,13 @@ under `:assignee_only`, somebody else's record, a hidden topic, an agent
 writing to themselves) · `InvalidTransition` and its subclass `Locked` (a
 closed case on a desk that locks them, or a requester who can no longer be
 written to) · `UnknownTopic` · `NotSupportable` · `RateLimited` ·
-`TooManyOpenTickets`.
+`TooManyOpenTickets`. With an assistant configured, three more:
+`NotAnAssistant` (an AI-kind actor that isn't this desk's own assistant — a
+subclass of `NotAnAgent`), `AssistantNotAllowed` (her policy forbids the
+verb; it carries the `policy` and the `verb`, so you can log the rule
+instead of parsing the sentence) and `StaleTurn` (the case changed since she
+read it — a subclass of `InvalidTransition`, so anything rescuing that
+still catches it).
 
 ## Locales
 
@@ -850,13 +1446,18 @@ supportable), `find_requester` (callable, one argument), `engine mount`,
 `assignments` (at most one open per case), `assignee pointers`, `provenance`
 (no half-NULL `opened_by`; warns on legacy NULL rows and names the backfill
 task), `awaiting` (agrees with the transcript), `references` (unique).
+Assistants (only where one is configured): `assistants (config)`,
+`assistant turn subscriber`, `assistant authorship`, `assistant silence`,
+`assistant seats`, `assistant idle turns`, `drafts`, and `ai agents without
+policy` — which warns about any host class declared `kind: :ai`, since every
+support write by it is refused.
 
 ## Compatibility
 
 Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`).
 
-PostgreSQL and SQLite enforce unique new-case creation and one open assignment per ticket
-with **partial unique indexes**. New submissions reuse an existing open case. Reopening
+PostgreSQL and SQLite enforce unique new-case creation, one open assignment per ticket and
+one pending proposal per ticket with **partial unique indexes**. New submissions reuse an existing open case. Reopening
 historical cases is deliberately exempt from new-case deduplication: if a newer case
 already exists, both histories remain open and support is notified of the reply. No
 conversation is silently merged, closed or discarded. MySQL has no partial indexes,
@@ -904,6 +1505,8 @@ Everything the module gives you:
 | `with_support_config(desk = :default, **overrides) { … }` | different desk settings for one block, put back afterwards |
 | `capture_support_events(*names) { … }` | `[[name, args, kwargs], …]` of what the block emitted; unsubscribes on the way out |
 
+And, with an assistant configured, the ones its own suite uses — `support_assistant`, `respond_as`, `draft_as`, `assert_pending_draft` / `refute_pending_draft`, `assert_needs_human` / `refute_needs_human`, `assert_held_by_assistant`, `refute_assistant_spoke`, `assert_assistant_policy`, `with_assistant_config` and `with_topic_assistant_cap`. They are documented in [Assistants](#-assistants).
+
 Between examples, `SupportDesk.reset!` clears configuration, subscribers,
 desks and registries; `SupportDesk.reset_desks!` only forgets the memoised
 desk records.
@@ -913,6 +1516,10 @@ desk records.
 ```ruby
 SupportDesk.configure { |config| … }   SupportDesk.config   SupportDesk.configured?
 SupportDesk.desk(key = :default)       # the Desk record, found or created, memoised
+SupportDesk.assistant(key = nil)       # the Assistant record, memoised; nil when none is configured
+SupportDesk.reset_assistants!          SupportDesk.ai_actor?(record)
+SupportDesk.release_silent_assistants!            # the net under a dead harness (schedule it)
+SupportDesk.redispatch_assistant_turns!(older_than: 1.minute)
 SupportDesk.find_topic("billing/invoice")
 SupportDesk.on(event, key: nil) { … }  SupportDesk.off(event, key)
 SupportDesk.doctor
