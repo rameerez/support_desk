@@ -368,13 +368,21 @@ module SupportDesk
         return if conversation.nil?
 
         scope = conversation.messages.where(kind: "text", sender_type: requester_type, sender_id: requester_id)
-        scope = if last_requester_message_at
-          scope.where(
-            "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id <> :id)",
-            at: last_requester_message_at, id: last_requester_message_id.to_s
-          )
-        else
-          scope
+        if last_requester_message_at.present?
+          scope = if last_requester_message_id.present?
+            # Everything after the clock, plus anything sharing its instant
+            # that ISN'T the message the clock was set from — two messages
+            # can land on one timestamp, and the second one is real.
+            scope.where(
+              "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id <> :id)",
+              at: last_requester_message_at, id: last_requester_message_id
+            )
+          else
+            # No pointer to compare against (a 0.2 row whose backfill found
+            # nothing): the clock alone, rather than a comparison against an
+            # empty string that some adapters refuse outright.
+            scope.where("chats_messages.created_at > ?", last_requester_message_at)
+          end
         end
 
         scope.oldest_first.each { |message| record_registration!(message) }

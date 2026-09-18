@@ -44,6 +44,30 @@ class LocalesTest < ActiveSupport::TestCase
     support_desk.console.context.unavailable
   ].freeze
 
+  # The same list for the assistants (0.3). Spelled out rather than derived,
+  # for the same reason: renaming one of these silently is how a thread
+  # starts saying "translation missing" to a customer.
+  ASSISTANT_KEYS = %w[
+    support_desk.assistant.disclosed_name
+    support_desk.system.assistant_disclosure
+    support_desk.system.handed_off_to_humans
+    support_desk.system.handed_off_to_humans_with_promise
+    support_desk.system.human_requested
+    support_desk.system.human_requested_with_promise
+    support_desk.thread.human_door
+    support_desk.thread.human_requested_notice
+    support_desk.thread.handled_by_assistant
+    support_desk.thread.handled_by_humans
+    support_desk.queue.tabs.needs_human
+    support_desk.summary.needs_human
+    support_desk.console.errors.unknown_draft
+    support_desk.console.errors.draft_already_reviewed
+    support_desk.console.errors.no_pending_draft
+    support_desk.console.errors.stale_turn
+    support_desk.console.errors.assistant_not_allowed
+    support_desk.console.errors.not_an_assistant
+  ].freeze
+
   test "es and en ship exactly the same keys" do
     %w[support_desk support_desk.console].each do |file|
       spanish = keys_in("#{file}.es.yml")
@@ -58,6 +82,28 @@ class LocalesTest < ActiveSupport::TestCase
     WRITE_FIRST_KEYS.each do |key|
       %i[es en].each do |locale|
         assert I18n.exists?(key, locale), "no #{locale} copy for #{key}"
+      end
+    end
+  end
+
+  test "every key the assistants added exists in both languages" do
+    ASSISTANT_KEYS.each do |key|
+      %i[es en].each do |locale|
+        assert I18n.exists?(key, locale), "no #{locale} copy for #{key}"
+      end
+    end
+  end
+
+  test "the promised and plain variants of a line take the same placeholders" do
+    # A desk with no `reply_within` gets the plain copy, and it must not
+    # promise a duration nobody stated.
+    %w[handed_off_to_humans human_requested].each do |key|
+      %i[es en].each do |locale|
+        plain = I18n.t("support_desk.system.#{key}", locale: locale)
+        promised = I18n.t("support_desk.system.#{key}_with_promise", locale: locale, reply_within: "1 día")
+
+        assert_no_match(/%\{/, plain, "#{locale} #{key} promises something it wasn't given")
+        assert_includes promised, "1 día"
       end
     end
   end

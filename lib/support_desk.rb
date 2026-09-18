@@ -180,7 +180,7 @@ module SupportDesk
     # At-least-once on purpose: a duplicate turn is harmless, because the
     # turn is consumed by the first action and every later one is a
     # StaleTurn. Run it every five minutes. Returns how many it re-emitted.
-    def redispatch_assistant_turns!(older_than: 60)
+    def redispatch_assistant_turns!(older_than: 1.minute)
       older_than = older_than.to_i.seconds unless older_than.respond_to?(:ago)
       emitted = 0
 
