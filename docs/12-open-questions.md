@@ -104,33 +104,30 @@ here so a later change is a decision rather than a discovery.
     on every assistant (`:signature_and_notice`, `:signature`, `:notice`,
     `:none`); omitting it is a boot failure, and `:none` is an explicit
     choice that warns nowhere. **Taken** over the recommended
-    `:signature_and_notice` default with a warning on `:none`. The gem
-    documents the visible behavior; host legal conclusions belong
-    in the host legal process, not in the gem implementation contract.
+    `:signature_and_notice` default with a warning on `:none`. The AI Act
+    art. 50(1) reading in 14 §3 stands as guidance for hosts; counsel
+    confirms in the legal repo.
 
-## Adversarial review refinements (2026-09-18)
+Running on the recommended defaults: autonomy `:draft`, `max_turns` 6,
+`responds_within` 3 minutes with a scheduled sweep, `may_open_conversations`
+false, levels off/observe/draft/reply/resolve, `hand_off_when` as a gem-side
+host block.
 
-The four owner decisions above are preserved. The implementation details in
-[15-assistants-prd.md](15-assistants-prd.md) refine their mechanics:
+## Adversarial review refinements (2026-09-18, review-1 → v3)
 
-- #19 ships the built-in identity without requiring a provider or harness.
-  Host kind: :ai records may bind to the same policy; unbound AI is refused,
-  never treated as a human with a warning only.
-- #20 records immutable draft revision, reviewer and publishing human. The
-  message author remains the publishing human; draft provenance is retained.
-- #21 records a separate reopen cap, based on the actual AI closer. Explicit
-  authorized hand-back can lift that cap but cannot implicitly clear pause,
-  unrelated human requirements or host/topic restrictions.
-- #22 remains required and has no default. CarHey's actual disclosure mode is
-  still its choice; an illustrative signature_and_notice is not a decision.
+The four decisions above stand. The implementation contract (15, v3) refines
+their mechanics after the adversarial review (15-assistants-review-1.md;
+disposition in 15-assistants-review-2.md):
 
-Recommended defaults retained: draft autonomy, six autonomous turns, three
-minutes to recover overdue work (plus scheduler interval), outreach disabled.
-The old stale-send recommendation is replaced: no even_if_stale bypass;
-a human submits the exact proposal revision and current reviewed context.
-Levels remain off/observe/draft/reply/resolve, with separate triage permission.
-hand_off_when remains an optional deterministic local host hook, but failure
-preserves the message and requires human attention instead of silently
-proceeding. Plain nil/false is a valid negative result; arbitrary truthy
-values are invalid. All of these refinements are documented review changes,
-not newly claimed owner decisions.
+- #19: any host `kind: :ai` model that is not the desk's `SupportDesk::Assistant`
+  is refused for every support write (fail closed), never treated as a human.
+- #20: unchanged; a human plain reply also supersedes the pending draft.
+- #21: the reopen cap is keyed on the recorded closer (`closed_by`), stored in
+  its own column (`assistant_cap`), and cleared only by an explicit hand-back.
+- #22: unchanged.
+- The turn is derived from a per-ticket revision bumped by every message and
+  transition; every assistant action requires and consumes it.
+- No `even_if_stale`: a human resubmits with the `seen_turn` they reviewed.
+- `hand_off_when` fails closed (a raise or a non-boolean requires a person).
+- Pause, case cap and human-required are three independent columns.
+- No AI triage in 0.3.0. No chats change is required.
