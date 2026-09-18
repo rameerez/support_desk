@@ -28,13 +28,6 @@ module SupportDesk
     # in the list but not always shown — see #visible_tabs.
     VISIBLE_TABS = (TABS - UNRELEASED_TABS).freeze
 
-    # "Has somebody asked for a person on this case?", as something every
-    # adapter can GROUP BY. A boolean column would group differently on
-    # three databases; a CASE expression counts the same everywhere.
-    NEEDS_HUMAN = Arel.sql(
-      "CASE WHEN #{Ticket.quoted_table_name}.human_required_at IS NULL THEN 0 ELSE 1 END"
-    ).freeze
-
     # How long a nav badge may lie. Long enough that a busy console isn't
     # counting rows on every request, short enough that nobody notices.
     BADGE_TTL = 30
@@ -103,7 +96,7 @@ module SupportDesk
     # (status, awaiting, assignee) and adding up in Ruby costs one round
     # trip; six `.count` calls cost six.
     def counts
-      rows = scoped.group(:status, :awaiting, :assignee_type, :assignee_id, NEEDS_HUMAN).count
+      rows = scoped.group(:status, :awaiting, :assignee_type, :assignee_id, needs_human_grouping).count
 
       counts = TABS.index_with(0)
       rows.each do |(status, awaiting, assignee_type, assignee_id, needs_human), count|
@@ -176,6 +169,20 @@ module SupportDesk
     # caller's order is the one that counts.
     def scoped
       Ticket.where(desk: desk)
+    end
+
+    # "Has somebody asked for a person on this case?", as something every
+    # adapter can GROUP BY. A boolean column would group differently on
+    # three databases; a CASE expression counts the same everywhere.
+    #
+    # Built when it is CALLED, and from `table_name` rather than
+    # `quoted_table_name`: an identifier assembled at class-definition time
+    # is one more thing that has to work during `assets:precompile` in a
+    # container with no database, and the rest of this gem keeps every
+    # identifier inside a lambda or a method for exactly that reason. The
+    # name is the gem's own constant, so there is nothing to quote.
+    def needs_human_grouping
+      Arel.sql("CASE WHEN #{Ticket.table_name}.human_required_at IS NULL THEN 0 ELSE 1 END")
     end
 
     def mine_or_unassigned

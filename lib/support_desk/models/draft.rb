@@ -147,6 +147,7 @@ module SupportDesk
         )
         update!(status: "sent", reviewed_by: human, reviewed_at: Time.current, sent_message: message,
                 sent_body: (final if edited))
+        ticket.send(:reset_draft_associations!)
         ticket.send(:write_transition!, :draft_sent, actor: human, request: request) do
           { "draft" => id.to_s, "assistant" => author_key, "edited" => edited,
             "was_stale" => was_stale, "message" => message.id.to_s }
@@ -172,6 +173,7 @@ module SupportDesk
 
         update!(status: "rejected", reviewed_by: human, reviewed_at: Time.current,
                 rejection_reason: reason.presence&.to_s)
+        ticket.send(:reset_draft_associations!)
         ticket.send(:write_transition!, :draft_rejected, actor: human, request: request) do
           { "draft" => id.to_s, "assistant" => author_key, "reason" => reason.presence&.to_s }
         end
@@ -205,6 +207,20 @@ module SupportDesk
 
     private
 
+    # A model wrote these, so the shape is whatever came back. `to_h` is the
+    # generous reading (a list of pairs, a hash-like object) and it RAISES on
+    # anything else — `["title", "x"]` is a TypeError, not a hash — so the
+    # coercion answers nil and the validation below says what it wanted,
+    # instead of taking the save down with an exception nobody can act on.
+    def coerce_source(entry)
+      return entry.stringify_keys if entry.is_a?(Hash)
+      return nil if entry.is_a?(String) || !entry.respond_to?(:to_h)
+
+      entry.to_h.stringify_keys
+    rescue TypeError, ArgumentError
+      nil
+    end
+
     def body_or_files_present
       return if body.present? || files_attached?
 
@@ -227,10 +243,10 @@ module SupportDesk
         return
       end
 
-      value.each do |entry|
-        entry = entry.respond_to?(:to_h) && !entry.is_a?(String) ? entry.to_h.stringify_keys : entry
+      value.each do |original|
+        entry = coerce_source(original)
         unless entry.is_a?(Hash)
-          errors.add(:sources, "entries must be { title:, url: } hashes, got #{entry.class}")
+          errors.add(:sources, "entries must be { title:, url: } hashes, got #{original.class}")
           next
         end
 

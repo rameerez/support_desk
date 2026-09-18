@@ -472,6 +472,7 @@ module SupportDesk
         # would make every draft stale the moment it was written.
         candidate.proposed_turn = assistant_turn
         candidate.save!
+        reset_draft_associations!
         stamp_assistant_action!
         broadcast_change
         SupportDesk.emit_after_commit(:draft_proposed, self, candidate)
@@ -632,6 +633,7 @@ module SupportDesk
         scope = drafts.pending
         scope = scope.where.not(id: except) if except.present?
         scope.each(&:supersede!)
+        reset_draft_associations!
       end
 
       # A closed case has nothing pending. Returns how many it expired, for
@@ -639,7 +641,18 @@ module SupportDesk
       def expire_pending_drafts!
         pending = drafts.pending.to_a
         pending.each(&:expire!)
+        reset_draft_associations!
         pending.size
+      end
+
+      # The proposals moved, so what this instance remembers about them is
+      # a lie. Everything that changes a draft's status calls this, so
+      # `ticket.pending_draft` and `actions_for` are right inside the SAME
+      # operation — a console that had to `reload` to see its own write is a
+      # console that renders a button nobody can press.
+      def reset_draft_associations!
+        association(:pending_draft).reset
+        association(:drafts).reset
       end
     end
   end

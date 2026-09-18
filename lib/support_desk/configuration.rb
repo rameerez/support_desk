@@ -1277,10 +1277,19 @@ module SupportDesk
 
       return true if @assistants.size <= 1 || @default_assistant
 
+      # Two assistants and no default is only ambiguous for a desk that
+      # states nothing — a desk bound to one (or explicitly to none) has its
+      # answer, which is the other half of the sentence this used to raise
+      # even when somebody had done exactly what it asked for.
+      unbound = @desks.each_value.reject { |desk| desk.own?(:assistant) }
+      return true if unbound.empty?
+
       raise ConfigurationError,
             "#{@assistants.size} assistants are configured (#{@assistants.keys.map(&:inspect).join(", ")}) " \
-            "and nothing says which one a desk gets. Set `config.default_assistant`, or bind each desk with " \
-            "`config.desk(:key) { |desk| desk.assistant = :…  }`."
+            "and nothing says which one desk#{"s" if unbound.size > 1} " \
+            "#{unbound.map { |desk| desk.key.inspect }.join(", ")} get#{"s" if unbound.size == 1}. Set " \
+            "`config.default_assistant`, or bind them with " \
+            "`config.desk(:key) { |desk| desk.assistant = :… }`."
     end
 
     # `config.agents { … }` has to hand back something a desk can iterate.

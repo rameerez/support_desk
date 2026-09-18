@@ -240,6 +240,47 @@ module SupportDesk
       assert_predicate @draft.reload, :sent?, "the reply it posts must not throw it away on the way out"
     end
 
+    # --- What the instance knows about itself ------------------------------------
+
+    test "the case sees its own proposal without being reloaded" do
+      ticket = ticket_for(@alice, topic: :order, message: "Otra consulta")
+
+      outcome = ticket.respond!("Una propuesta", by: @rose, turn: ticket.assistant_turn)
+
+      # No reload: a console renders from the instance it just wrote with,
+      # and a button that only appears after a round trip is a button that
+      # is missing when it matters.
+      assert_equal outcome.draft, ticket.pending_draft
+      assert_includes ticket.actions_for(@lucia), :send_draft
+
+      ticket.pause_assistant!(by: @lucia)
+
+      assert_nil ticket.pending_draft
+      assert_not_includes ticket.actions_for(@lucia), :send_draft
+    end
+
+    test "sending and rejecting clear it on the same instance too" do
+      assert_equal @draft, @ticket.pending_draft
+
+      @draft.send!(by: @lucia, seen_turn: turn)
+
+      assert_nil @ticket.pending_draft
+
+      other = @ticket.draft!("otra", by: @rose, turn: turn)
+
+      assert_equal other, @ticket.pending_draft
+
+      other.reject!(by: @lucia)
+
+      assert_nil @ticket.pending_draft
+    end
+
+    test "closing a case clears it on the same instance" do
+      @ticket.close!(by: @lucia)
+
+      assert_nil @ticket.pending_draft
+    end
+
     # --- Validation --------------------------------------------------------------
 
     test "a proposal needs something in it" do
@@ -267,6 +308,21 @@ module SupportDesk
                                              { "title" => "Sin enlace", "url" => nil } ])
 
       assert_equal 2, draft.sources.size
+    end
+
+    test "a source that isn't a pair at all is refused, not an exception" do
+      # `["title", "x"].to_h` raises TypeError. A model wrote these, so the
+      # shape is whatever came back, and a validation that raises is a 500
+      # on the page that would have shown somebody what went wrong.
+      [ [ [ "title", "x" ] ], [ "https://x.test" ], [ 42 ], [ [ [ 1, 2, 3 ] ] ] ].each do |sources|
+        error = assert_raises(ActiveRecord::RecordInvalid) do
+          @ticket.draft!("x", by: @rose, turn: turn, sources: sources)
+        end
+
+        assert_match(/title:, url: /, error.message, "#{sources.inspect} should say what it wanted")
+      end
+
+      assert_predicate @draft.reload, :pending?
     end
 
     test "a failed proposal never takes the pending one with it" do

@@ -135,6 +135,16 @@ module SupportDesk
       # the worst shape for a bug. Found by the CarHey integration (#2).
       _desk = SupportDesk::Desk
 
+      # And the assistant, for the THIRD registry with the same shape:
+      # `acts_as_support_agent` registers a class when that class loads, and
+      # both `SupportDesk.agent_class?` and the doctor's "ai agents without
+      # policy" check read that registry. Under lazy autoloading nothing has
+      # referenced her before the first case is answered, so the doctor would
+      # report a healthy desk as having no assistant at all. A constant
+      # reference and nothing else: no row is created and no connection is
+      # needed to load the class.
+      _assistant = SupportDesk::Assistant
+
       SupportDesk.config.validate_classes! if SupportDesk.configured?
     end
   end

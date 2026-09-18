@@ -69,4 +69,46 @@ class EngineAutoloadTest < ActiveSupport::TestCase
                  "The engine's to_prepare has to REFERENCE SupportDesk::Desk, or a lazily loading host shows " \
                  "every support conversation as its own inbox row.\n#{output}")
   end
+
+  # A third boot, for the property an engine has to keep at the OTHER end:
+  # loading the gem's constants must not touch the database. An
+  # `assets:precompile` inside a container has no database at all, and a
+  # constant that assembles an identifier through the connection at
+  # class-definition time turns that into a boot failure.
+  #
+  # This boot eager loads (so every class body really runs) and then asks
+  # whether anything checked a connection out or ran a query.
+  NO_DATABASE_BOOT = <<~RUBY_SRC
+    ENV["RAILS_ENV"] = "test"
+    queries = []
+    require "active_support/notifications"
+    ActiveSupport::Notifications.subscribe("sql.active_record") { |*, payload| queries << payload[:sql] }
+
+    require File.expand_path("test/dummy/config/environment", Dir.pwd)
+
+    raise "expected this boot to eager load" unless Rails.application.config.eager_load
+
+    # Named explicitly as well, for the hosts that do NOT eager load: these
+    # are the two that build SQL of their own.
+    SupportDesk::Queue
+    SupportDesk::Ticket
+
+    # The HOST's own models read their own schema as they eager load;
+    # what must not happen is the gem reading ITS tables to define a class.
+    puts "OUR QUERIES: \#{queries.grep(/support_desk_/).size}"
+    puts "CONNECTED: \#{ActiveRecord::Base.connection_pool.connected?}"
+  RUBY_SRC
+
+  test "loading the gem runs no query and needs no connection" do
+    output, status = Open3.capture2e(
+      RbConfig.ruby, "-e", NO_DATABASE_BOOT, chdir: Rails.root.join("../..").to_s
+    )
+
+    assert_predicate status, :success?, "the dummy app failed to boot:\n#{output}"
+    assert_includes output, "OUR QUERIES: 0",
+                    "something in support_desk read its own schema while it was being LOADED. A container " \
+                    "running assets:precompile has no database — build identifiers and scopes inside a " \
+                    "method or a lambda, never in a class body.\n#{output}"
+    assert_includes output, "CONNECTED: false", output
+  end
 end

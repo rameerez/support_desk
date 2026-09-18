@@ -270,7 +270,7 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
     assert_match(/default_assistant is :nope/, error.message)
   end
 
-  test "two assistants with no default is a refusal, not a coin flip" do
+  test "two assistants and a desk that states nothing is a refusal, not a coin flip" do
     error = assert_raises(SupportDesk::ConfigurationError) do
       SupportDesk.configure do |config|
         config.assistant(:rose) { |assistant| assistant.disclosure = :none }
@@ -279,7 +279,37 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
     end
 
     assert_match(/2 assistants are configured/, error.message)
+    assert_match(/desk :default/, error.message, "the refusal has to name the desk with no answer")
     assert_match(/default_assistant/, error.message)
+  end
+
+  test "two assistants are fine when every desk says which one it gets" do
+    SupportDesk.configure do |config|
+      config.assistant(:rose) { |assistant| assistant.disclosure = :none }
+      config.assistant(:max) { |assistant| assistant.disclosure = :none }
+      config.desk(:default) { |desk| desk.assistant = :rose }
+      config.desk(:billing) { |desk| desk.assistant = :max }
+      # An explicit "nobody here" is an answer too.
+      config.desk(:legal) { |desk| desk.assistant = nil }
+    end
+
+    assert_equal :rose, SupportDesk.config.desk(:default).assistant_key
+    assert_equal :max, SupportDesk.config.desk(:billing).assistant_key
+    assert_nil SupportDesk.config.desk(:legal).assistant_key
+  end
+
+  test "one desk left unbound is still a refusal, and it is named" do
+    error = assert_raises(SupportDesk::ConfigurationError) do
+      SupportDesk.configure do |config|
+        config.assistant(:rose) { |assistant| assistant.disclosure = :none }
+        config.assistant(:max) { |assistant| assistant.disclosure = :none }
+        config.desk(:default) { |desk| desk.assistant = :rose }
+        config.desk(:billing) { |desk| desk.name = "Facturación" }
+      end
+    end
+
+    assert_match(/desk :billing/, error.message)
+    assert_no_match(/:default/, error.message, "the desk that has an answer is not the problem")
   end
 
   test "one assistant is the default without saying so" do
