@@ -19,7 +19,7 @@ module SupportDesk
     # --- Pause -------------------------------------------------------------------
 
     test "pausing takes her seat, her proposal and her turn" do
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
       draft = @ticket.draft!("propuesta", by: @rose, turn: turn)
       seen = []
       SupportDesk.on(:assistant_paused) { |ticket, by:| seen << [ ticket.id, by ] }
@@ -151,7 +151,7 @@ module SupportDesk
 
     test "a case she sat on past her promise goes to a person" do
       with_assistant_config(responds_within: 60) do
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
         escalated = []
         SupportDesk.on(:ticket_escalated) { |ticket, from:, reason:, by:| escalated << [ ticket.id, reason ] }
 
@@ -170,7 +170,7 @@ module SupportDesk
 
     test "the sweep leaves a person's seat alone and still asks for a person" do
       with_assistant_config(responds_within: 60) do
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
         travel 2.minutes
         # Somebody took it over between the scope and the lock.
         @ticket.assign!(to: @lucia, by: @lucia)
@@ -182,12 +182,115 @@ module SupportDesk
 
     test "an assistant with no promise is not swept" do
       with_assistant_config(responds_within: nil) do
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
         travel 1.hour
 
         assert_equal 0, SupportDesk.release_silent_assistants!
         refute_needs_human @ticket
       end
+    end
+
+    test "the sweep leaves a case whose silence ended while it was sweeping" do
+      # The sweep's predicates are true when the candidates are SELECTED. By
+      # the time it reaches the second one, a person has answered it — and
+      # escalating it anyway raises its priority and tells the customer a
+      # person is coming, on a case that already has one.
+      with_assistant_config(responds_within: 60) do
+        first = ticket_for(create_user(name: "Ana"), message: "la primera")
+        second = ticket_for(create_user(name: "Bruno"), message: "la segunda")
+        [ first, second ].each do |ticket|
+          ticket.assign!(to: @rose, by: @rose, turn: ticket.reload.assistant_turn)
+          Ticket.where(id: ticket.id).update_all(waiting_since: 1.hour.ago)
+        end
+        # Answering the second one the moment the first is handed over: the
+        # sweep is between its own SELECT and its own transition, and this
+        # needs no barrier and no stubbed transition to be exactly that.
+        SupportDesk.on(:ticket_escalated) do |ticket, **|
+          Ticket.find(second.id).reply!("Ya te contesto yo", by: @lucia) if ticket.id == first.id
+        end
+
+        moved = SupportDesk.release_silent_assistants!
+
+        assert_predicate first.reload, :human_required?
+        refute_needs_human second.reload
+        assert_assigned_to second, @lucia
+        assert_equal 1, moved, "a case whose silence had ended was counted as moved"
+        refute_ticket_event second, :escalated
+      end
+    end
+
+    # --- The kill switch, after the wait (R9) ------------------------------------
+
+    test "a kill switch that commits while she waits for the lock stops the answer" do
+      # Her eligibility was read BEFORE the case's row lock, and the record the
+      # policy then read `active?` from was that same stale copy. A job that
+      # queued behind a busy case could still speak minutes after somebody had
+      # switched her off.
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      held = turn
+      rose_id = @rose.id
+      lucia = @lucia
+      switched = false
+      @ticket.define_singleton_method(:with_lock) do |*args, **options, &block|
+        unless switched
+          switched = true
+          Assistant.find(rose_id).deactivate!(by: lucia)
+        end
+        super(*args, **options, &block)
+      end
+
+      assert_raises(NotAnAgent, AssistantNotAllowed) { @ticket.respond!("Después del interruptor", by: @rose, turn: held) }
+
+      refute_assistant_spoke @ticket
+    end
+
+    # --- Stranded seats (R6) -----------------------------------------------------
+
+    test "switching her off gives back the seats she holds, promise or no promise" do
+      # `deactivate!` promises the sweep releases her cases. The sweep only
+      # ever visited assistants with a `responds_within`, and only cases that
+      # were overdue — so an assistant with no promise kept her seat for ever.
+      with_assistant_config(responds_within: nil) do
+        @ticket.assign!(to: @rose, by: @rose, turn: turn)
+        @rose.deactivate!(by: @lucia)
+
+        moved = SupportDesk.release_silent_assistants!
+
+        assert_equal 1, moved
+        assert_unassigned @ticket.reload
+        assert_needs_human @ticket, reason: "assistant_unavailable"
+      end
+    end
+
+    test "removing her configuration gives back the seats she holds" do
+      # The documented kill switch: the host stops declaring her at all. The
+      # sweep iterated CONFIGURED assistants, so it never visited these seats.
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      SupportDesk.reset!
+      configure_support_desk!
+      SupportDesk.subscribe_to_chats!
+
+      assert_equal 1, SupportDesk.reclaim_assistant_seats!
+      assert_unassigned @ticket.reload
+      assert_needs_human @ticket, reason: "assistant_unavailable"
+    end
+
+    test "a case where a person was already asked for still gets its seat back" do
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      @ticket.update_columns(human_required_at: Time.current, human_required_reason: "phrase")
+      @rose.deactivate!(by: @lucia)
+
+      assert_equal 1, SupportDesk.reclaim_assistant_seats!
+      assert_unassigned @ticket.reload
+      assert_equal "phrase", @ticket.human_required_reason, "the reason a person was asked for is not rewritten"
+    end
+
+    test "a seat she may still hold is left exactly where it is" do
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+
+      assert_equal 0, SupportDesk.reclaim_assistant_seats!
+      assert_held_by_assistant @ticket.reload, @rose
+      refute_needs_human @ticket
     end
 
     # --- Redispatch --------------------------------------------------------------
@@ -229,6 +332,53 @@ module SupportDesk
 
         assert_equal 0, SupportDesk.redispatch_assistant_turns!(older_than: 60)
       end
+    end
+
+    # --- A lost registration is repairable (R3) ----------------------------------
+
+    test "redispatch repairs a committed message whose registration was lost" do
+      # A worker killed between the message's COMMIT and the subscriber that
+      # registers it. Nothing is wrong with the message; the case simply does
+      # not know about it, and its clocks say the customer has the last word.
+      @ticket.respond!("Lo estamos mirando", by: @rose, turn: turn)
+
+      assert_awaiting_requester @ticket
+
+      Ticket.stub(:for_conversation, nil) { ask_again(@ticket, "¿hay novedades?") }
+      @ticket.reload
+      held = @ticket.assistant_turn
+
+      # The clocks still say the customer has the last word, so the idle
+      # query — which reads those clocks — cannot see this case at all.
+      assert_predicate @ticket, :awaiting_requester?
+      assert_empty Ticket.open.assistant_idle_since(1.minute.from_now).to_a
+
+      turns = []
+      SupportDesk.on(:assistant_turn) { |_ticket, _assistant, _message, turn:| turns << turn }
+
+      travel 10.minutes do
+        SupportDesk.redispatch_assistant_turns!
+      end
+
+      refute_equal held, @ticket.reload.assistant_turn, "redispatch never repaired the case"
+      assert_awaiting_reply @ticket
+      assert_includes turns, @ticket.assistant_turn, "the repaired case has to end in an actionable turn"
+    end
+
+    test "the repair outlives the answer whose turn it made stale" do
+      Ticket.stub(:for_conversation, nil) { ask_again(@ticket, "¿hay novedades?") }
+      @ticket.reload
+      held = @ticket.assistant_turn
+
+      assert_raises(StaleTurn) { @ticket.respond!("Respuesta vieja", by: @rose, turn: held) }
+
+      # In 0.3.0 the refusal rolled the registration back with it and the next
+      # run read the very same revision — the same refusal, for ever.
+      refute_equal held, @ticket.reload.assistant_turn
+      assert_awaiting_reply @ticket
+      @ticket.respond!("Respuesta al día", by: @rose, turn: @ticket.assistant_turn)
+
+      assert_awaiting_requester @ticket
     end
 
     # --- Outreach ----------------------------------------------------------------
@@ -318,7 +468,7 @@ module SupportDesk
     # --- The record --------------------------------------------------------------
 
     test "deactivating her stops everything, everywhere, without a deploy" do
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
 
       @rose.deactivate!(by: @lucia, reason: "el modelo está caído")
 
@@ -334,7 +484,7 @@ module SupportDesk
     end
 
     test "she knows which desks are hers and what she is holding" do
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
 
       assert_equal [ SupportDesk.desk ], @rose.desks
       assert_equal [ @ticket ], @rose.held_tickets.to_a
@@ -350,7 +500,12 @@ module SupportDesk
       refute_predicate orphan, :configured?
       assert_equal "Rose", orphan.name
       assert_equal :off, orphan.autonomy
-      refute_predicate orphan, :disclosed?
+      # What she MAY do is off, and what a requester was already TOLD about
+      # her is not: disclosure is read from the snapshot on her own row, so
+      # taking her out of the initializer does not rewrite an old signature
+      # into a plain human name (R8).
+      assert_predicate orphan, :disclosed?
+      assert_equal "Rose · virtual assistant", orphan.disclosed_name
     end
   end
 end

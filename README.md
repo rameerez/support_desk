@@ -942,12 +942,47 @@ one raises `SupportDesk::StaleTurn` and writes nothing. That one integer is
 also why this gem has no idempotency keys, no claim rows and no leases —
 "is this still the case you read?" is already answered.
 
+Every verb of hers takes it, and that includes taking and giving back the
+seat: `assign!(to: rose, by: rose, turn:)` and `release!(by: rose, turn:)`
+require it when `by:` is an assistant (an omitted turn is an
+`ArgumentError`, a stale one a `StaleTurn`), because a run that finished
+after the case moved on must not release the seat a newer one took. A
+**person's** calls are unchanged and take no turn.
+
 Two consequences worth knowing:
 
 - Check `ticket.assistant_turn == turn` in your job **before you spend
   money**. A mismatch means the newer turn's job already exists.
 - A retry after a committed action is a `StaleTurn`, and that is correct:
   the work was done. Generated jobs `discard_on` it.
+
+#### Ticket, then conversation
+
+A turn is only as good as the reconciliation behind it, and reconciliation
+is a `SELECT`: on its own it cannot exclude a message that commits a
+millisecond later. Your customer never takes the case's row lock — they
+press send, and chats writes a message.
+
+What chats *does* take is the **conversation row**: every message insert
+updates `chats_conversations` inside its own transaction. So every path
+that speaks takes the ticket's row lock and then that row, before
+reconciling. A question already in flight holds it, so we wait for it and
+the turn goes stale; a question that starts after we hold it waits for us
+and raises a turn of its own. **The order is always ticket → conversation**,
+in this gem and in anything you add to it.
+
+What that does not cover: a message whose `INSERT` was already stamped when
+we won the row is still stamped earlier than the answer, so a transcript can
+show a question above an answer that did not address it. That is a
+genuinely simultaneous send, and its own turn follows.
+
+> [!IMPORTANT]
+> **This is a row lock, so it is PostgreSQL and MySQL.** SQLite has none:
+> it serializes writes, and in WAL mode a reconciliation `SELECT` reads the
+> last committed snapshot straight through a requester's open write
+> transaction, so a question committing behind an answer is still missed
+> there. Run PostgreSQL or MySQL for a production desk with an assistant —
+> `SupportDesk.doctor` warns when you haven't.
 
 ### Proposals in the console
 
@@ -1020,6 +1055,25 @@ the turn and the whole policy that allowed it, `ticket.export` labels it
 marks it for staff. What a customer is told is a product decision; what your
 records say a machine wrote is not.
 
+**Taking her configuration away does not rewrite what she already signed.**
+Her name and mode are snapshotted onto her own row whenever configuration
+resolves her, so an assistant nobody declares any more still reads back as
+"Rose · asistente virtual" on the messages she signed — the kill switch
+stops her, it does not edit history.
+
+A **rename** is different, and deliberately so: chats asks the author for a
+signature every time a message is rendered, so renaming her renames her
+everywhere, past included. One assistant, one name. Every message already
+carries what she was called at the time, and a host that wants each bubble
+frozen points chats at that instead:
+
+```ruby
+# config/initializers/chats.rb — signatures that never move
+Chats.configure do |config|
+  config.message_signature = ->(message) { message.metadata.dig("support_desk", "display_name") }
+end
+```
+
 ### Humans outrank
 
 - A person may answer a case she holds under **every** `reply_policy`.
@@ -1070,6 +1124,24 @@ each one, not just her seat back: a case that waited that long deserves one
 whatever she would have said. `redispatch_assistant_turns` re-emits the turn
 for cases nobody acted on, which is safe precisely because the turn is
 consumed by the first action and every later one is a `StaleTurn`.
+
+`release_silent_assistants` runs `SupportDesk.reclaim_assistant_seats!`
+first, and you can run that on its own
+(`rake support_desk:reclaim_assistant_seats`). It is a different question
+from silence: it reads the **seats that exist** rather than the assistants
+this process happens to have configured, and gives back every one whose
+holder is switched off, no longer declared, or no longer allowed to hold a
+case — with no `responds_within` and no overdue clock anywhere in it. That
+is what makes `deactivate!` and a flag flipped off actually release her
+cases, and it is why the doctor's seat checks keep running when the
+configuration is gone.
+
+`redispatch_assistant_turns` also repairs before it decides: a requester
+message whose registration was lost after its commit leaves the clocks
+describing a case that no longer exists, so the task looks for unregistered
+**messages** and not only for idle clocks. The repair commits on its own,
+which is what makes a dead process followed by nothing but this task end in
+an actionable turn.
 
 `rake support_desk:assistant_status` reads and writes nothing, and is the
 line to put in a deploy check. `SupportDesk.doctor` covers the same ground
@@ -1166,7 +1238,8 @@ acts_as_support_agent kind: :ai                                 # validated; see
 SupportDesk.assistant(key = nil)        # the Assistant record, memoised; nil when none is configured
 SupportDesk.reset_assistants!
 SupportDesk.ai_actor?(record)
-SupportDesk.release_silent_assistants!            # → Integer
+SupportDesk.release_silent_assistants!            # → Integer (runs reclaim_assistant_seats! first)
+SupportDesk.reclaim_assistant_seats!              # → Integer; seats she may no longer sit in
 SupportDesk.redispatch_assistant_turns!(older_than: 1.minute)   # → Integer
 ```
 
@@ -1176,7 +1249,7 @@ SupportDesk.redispatch_assistant_turns!(older_than: 1.minute)   # → Integer
 |---|---|
 | `SupportDesk::Assistant.for(key)` / `.active` | found or created; the on-duty scope |
 | `config` / `configured?` | her slice of the configuration; whether anything still declares her |
-| `name` `avatar` `autonomy` `disclosure` `max_turns` `responds_within` `may_open_conversations?` | read through the configuration, with safe answers when it is gone |
+| `name` `avatar` `autonomy` `disclosure` `max_turns` `responds_within` `may_open_conversations?` | read through the configuration; `name` and `disclosure` fall back to the snapshot on her row, the rest to the safe answer |
 | `disclosed?` `signs?` `notice?` | the mode, as predicates |
 | `disclosed_name` `display_name` `to_s` `support_agent_name` `support_agent_avatar` | what a requester sees |
 | `on_duty?` `support_capacity` | the agent contract |
@@ -1201,6 +1274,8 @@ assistant" it was).
 respond!(body, by:, turn:, files:, confidence:, sources:, metadata:, request:)   # → Outcome
 draft!(body, by:, turn:, …)                                                       # → Draft
 escalate!(by:, reason:, summary:, turn:, request:)
+assign!(to:, by:, reason:, note:, request:, turn:)   # turn: required when by: is an assistant
+release!(by:, reason: :released, request:, turn:)    # idem
 request_human!(by:, request:)          # by: must be the requester
 pause_assistant!(by:, reason:) / resume_assistant!(by:)
 
@@ -1213,6 +1288,7 @@ drafts   pending_draft   notes
 # scopes
 held_by_assistants   held_by_humans   needs_human   assistant_paused   assistant_capped
 resolved_by_assistant   with_pending_draft   assistant_idle_since(time)
+with_unregistered_requester_messages
 ```
 
 Columns: `assistant_revision`, `last_requester_message_id`,
@@ -1288,6 +1364,7 @@ the count is non-zero.
 `support_human_door(ticket)` helper.
 
 **Rake** — `support_desk:release_silent_assistants` ·
+`support_desk:reclaim_assistant_seats` ·
 `support_desk:redispatch_assistant_turns` (`OLDER_THAN=60`) ·
 `support_desk:assistant_status`.
 
@@ -1464,10 +1541,13 @@ supportable), `find_requester` (callable, one argument), `engine mount`,
 (no half-NULL `opened_by`; warns on legacy NULL rows and names the backfill
 task), `awaiting` (agrees with the transcript), `references` (unique).
 Assistants (only where one is configured): `assistants (config)`,
-`assistant turn subscriber`, `assistant authorship`, `assistant silence`,
-`assistant seats`, `assistant idle turns`, `drafts`, and `ai agents without
-policy` — which warns about any host class declared `kind: :ai`, since every
-support write by it is refused.
+`assistant turn subscriber`, `assistant serialization` — which warns when
+the adapter takes no row locks, because the turn rests on them —
+`assistant authorship`, `assistant silence`, `assistant seats`, `assistant
+idle turns`, `drafts`, and `ai agents without policy`, which warns about any
+host class declared `kind: :ai`, since every support write by it is refused.
+The seat and draft checks also run once she is no longer configured, since
+that is exactly when a seat gets stranded.
 
 ## Compatibility
 
@@ -1536,6 +1616,7 @@ SupportDesk.desk(key = :default)       # the Desk record, found or created, memo
 SupportDesk.assistant(key = nil)       # the Assistant record, memoised; nil when none is configured
 SupportDesk.reset_assistants!          SupportDesk.ai_actor?(record)
 SupportDesk.release_silent_assistants!            # the net under a dead harness (schedule it)
+SupportDesk.reclaim_assistant_seats!              # seats an assistant may no longer sit in
 SupportDesk.redispatch_assistant_turns!(older_than: 1.minute)
 SupportDesk.find_topic("billing/invoice")
 SupportDesk.on(event, key: nil) { … }  SupportDesk.off(event, key)

@@ -90,10 +90,35 @@ class AssistantDoctorTest < ActiveSupport::TestCase
     Object.send(:remove_const, :DoctorBot)
   end
 
+  test "the adapter that cannot take a row lock is a warning, and the one that can is not" do
+    # The whole turn rests on `SELECT … FOR UPDATE` blocking a concurrent
+    # writer. SQLite has no row locks, so a requester message committing
+    # behind an answer is still missed there — a host has to be told which
+    # of the two it is running.
+    configure_assistant!(autonomy: :reply)
+    serialization = check("assistant serialization")
+
+    if ActiveRecord::Base.connection.adapter_name.match?(/sqlite/i)
+      assert_equal :warn, serialization.status
+      assert_match(/committing behind an answer/, serialization.message)
+      assert_match(/PostgreSQL or MySQL/, serialization.message,
+                   "a warning that doesn't name the way out is a warning nobody can act on")
+    else
+      assert_equal :ok, serialization.status
+      assert_match(/row locks/, serialization.message)
+    end
+  end
+
+  test "a desk with no assistant is not asked which adapter it runs" do
+    ticket_for(@alice)
+
+    assert_nil check("assistant serialization")
+  end
+
   test "a case that has waited longer than her promise turns the doctor red" do
     rose = configure_assistant!(autonomy: :reply, responds_within: 60)
     ticket = ticket_for(@alice)
-    ticket.assign!(to: rose, by: rose)
+    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
 
     assert_predicate SupportDesk.doctor, :ok?
 
@@ -108,7 +133,7 @@ class AssistantDoctorTest < ActiveSupport::TestCase
   test "an assistant sitting on a case she may not work turns the doctor red" do
     rose = configure_assistant!(autonomy: :reply)
     ticket = ticket_for(@alice)
-    ticket.assign!(to: rose, by: rose)
+    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
     # Straight to the column: this is exactly the state a bug would leave,
     # and the check has to see it however it got there.
     ticket.update_columns(assistant_paused_at: Time.current)
@@ -116,6 +141,20 @@ class AssistantDoctorTest < ActiveSupport::TestCase
     assert_not_predicate SupportDesk.doctor, :ok?
     assert_match(/held by an assistant who may not hold them/, check("assistant seats").message)
     assert_match(/#{ticket.reference}/, check("assistant seats").message)
+  end
+
+  test "the seats check survives the configuration being taken away" do
+    rose = configure_assistant!(autonomy: :reply)
+    ticket = ticket_for(@alice)
+    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
+    # The documented kill switch: she is not declared any more. The seat she
+    # is holding is still a seat, and the check that finds it is the one that
+    # used to return early here (R6).
+    SupportDesk.reset!
+    configure_support_desk!
+
+    assert_not_predicate SupportDesk.doctor, :ok?
+    assert_match(/held by an assistant who may not hold them/, check("assistant seats").message)
   end
 
   test "a harness that never picks anything up is a warning that names the task" do

@@ -162,6 +162,14 @@ module SupportDesk
           ok_with("#{SupportDesk.config.assistants.size} assistant(s) configured")
         end
 
+        checks << check("assistant serialization") do
+          next ok_with("no assistant on any desk") if assistant_desks.empty?
+          next warn_with("the turn cannot exclude a requester message committing behind an answer on " \
+                         "SQLite — use PostgreSQL or MySQL") if sqlite?
+
+          ok_with("#{ActiveRecord::Base.connection.adapter_name} takes the row locks the turn rests on")
+        end
+
         checks << check("assistant turn subscriber") do
           next ok_with("no assistant on any desk") if assistant_desks.empty?
           next warn_with("nothing subscribes to :assistant_turn — no harness will ever answer. See the " \
@@ -317,10 +325,13 @@ module SupportDesk
     # and never of the policy's own verdict. A policy cannot page anybody
     # about its own bug.
     def assistant_invariant_checks
-      # Nothing about a feature nobody turned on: a host with no assistant
-      # configured runs not one extra query (I1).
-      return [] if SupportDesk.config.assistants.empty?
       return [] unless assistants_migrated?
+      # Nothing about a feature nobody turned on (I1) — but "turned on" is
+      # not "configured right now". A host that removed her configuration
+      # still has the seats she is sitting on and the proposals she wrote,
+      # and the checks about THOSE are the ones that matter most on the way
+      # down (R6).
+      return [] if SupportDesk.config.assistants.empty? && !SupportDesk::Assistant.exists?
 
       checks = []
 
@@ -374,6 +385,16 @@ module SupportDesk
       end
 
       checks
+    end
+
+    # Whether this app is on SQLite, which has no row locks: it serializes
+    # writes, and a WAL snapshot reads straight through an open write
+    # transaction. Everything the turn rests on — the ticket's row lock and
+    # the conversation's — buys nothing there, because nothing waits on it.
+    def sqlite?
+      ActiveRecord::Base.connection.adapter_name.match?(/sqlite/i)
+    rescue StandardError
+      false
     end
 
     # The desks that actually have an assistant, as Desk records.

@@ -4,6 +4,103 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-19
+
+**Hardening the assistant, after an adversarial review of 0.3.0.** Nine
+defects, every one of them in the concurrency, recovery and kill-switch
+guarantees the release advertised rather than in what a green suite
+covered. Nothing here changes what an assistant may do; it changes what
+can happen to a case while she is doing it. `assign!` and `release!` take
+a `turn:` when `by:` is an assistant — the one API change — and a host
+with no assistant is untouched.
+
+### Fixed
+
+- **A customer's next question can no longer be answered around (R1).**
+  Reconciliation is a `SELECT`, and a requester never takes the case's row
+  lock, so a question could commit between the answer reading the case and
+  the answer writing to it: she replied to the previous one, and a human
+  approved a proposal from a page that predated the new one — `seen_turn`
+  was not evidence that the reviewer had seen the last committed message.
+  Every speaking path now takes the ticket's row lock and then the
+  conversation row chats updates inside every message insert, before
+  reconciling. The lock order is ticket → conversation everywhere, and it
+  is written down. **The guarantee is a row lock, so it holds on PostgreSQL
+  and MySQL and not on SQLite**, which has no row locks and whose WAL
+  snapshot reads straight through an open write transaction: a desk with an
+  assistant belongs on PostgreSQL or MySQL, and `doctor` now warns when it
+  is not.
+- **A seat is decided under the lock (R2).** `assign!` asked whether
+  anybody held the case, and whether she could hold it, *before* the
+  transition acquired the row. No threads were needed to break it: load an
+  unassigned case into one instance, give it to a person through another,
+  and the first instance took the seat from them. A topic cap or a pause
+  committed while a take waited for the lock was read too late in the same
+  way.
+- **A lost registration is repairable (R3).** A requester message that
+  committed while the process that should have registered it died left a
+  turn nothing could ever consume: reconciliation happened inside the
+  candidate answer's savepoint, the bumped revision made that very answer
+  stale, and the `StaleTurn` rolled the repair back with it — for ever,
+  while the clocks said `awaiting_requester` so no idle query could see the
+  case. The fold is now its own committed step, and
+  `redispatch_assistant_turns!` looks for unregistered messages before it
+  looks at clocks.
+- **Messages that share an instant no longer deadlock the turn (R4).** The
+  unseen-message test was "its id is not the one the clock was set from",
+  so every other message on that timestamp read as new: reconciliation
+  folded an already-registered one in again, bumped the revision, and made
+  the answer that discovered it stale. The retry did the same thing. "Seen"
+  is now the pair `(created_at, id)` compared in chats' own transcript
+  order, by the same rule in Ruby and in SQL.
+- **The silent sweep rechecks before it escalates (R5).** Its predicates
+  were true when it SELECTED its candidates. A person who answered, took
+  the case or reset the clock in between lost anyway: the case was marked
+  human-required, its priority went up, and the customer was told a person
+  was coming — on a case that already had one.
+- **Stranded seats come back (R6).** `deactivate!` promised the sweep would
+  release her cases; the sweep only ever visited configured assistants with
+  a `responds_within`, and only cases already overdue. An assistant with no
+  promise kept her seat for ever, and one removed by the documented kill
+  switch — which takes her configuration away — was not visited at all,
+  while the doctor's assistant checks returned early on exactly that state.
+  `SupportDesk.reclaim_assistant_seats!` (and `rake
+  support_desk:reclaim_assistant_seats`) reads the seats that exist.
+- **Running out of turns tells the host (R7).** The budget branch wrote the
+  `escalated` event, released her seat and posted the public hand-off line,
+  but only the outer `escalate!` published `:ticket_escalated` — so a
+  host's "a person is needed here" notifier never heard about a
+  conversation that ran out of turns. One private method now publishes it
+  for every hand-off.
+- **Disclosure on old messages stops moving (R8).** The requester-facing
+  signature resolved live configuration, so taking her out of the
+  initializer rewrote "— Rose · asistente virtual" into "— Rose" on
+  messages nobody had touched. Her name and mode are snapshotted onto her
+  own row and read back from it when nothing declares her any more. A
+  rename still renames history, deliberately; the README shows the
+  `Chats.config.message_signature` lambda for hosts that want each bubble
+  frozen.
+- **The kill switch is read after the wait (R9).** Eligibility was checked
+  before the case's row lock, and the policy then read `active?` off that
+  same stale copy, so an already-seated assistant whose job queued behind a
+  busy case could still speak after `deactivate!` had committed. Every verb
+  resolves her under the lock now, from the row. The ordinary in-flight
+  window — a switch that commits after that read — is documented rather
+  than claimed away.
+
+### Changed
+
+- `Ticket#assign!` and `Ticket#release!` take `turn:`. It is REQUIRED when
+  `by:` is an assistant (`ArgumentError` when omitted, `StaleTurn` when
+  stale) and ignored for a person, whose calls are unchanged.
+- `SupportDesk.release_silent_assistants!` runs
+  `reclaim_assistant_seats!` first, and its count includes what that
+  reclaimed.
+- The doctor's assistant invariants run whenever an assistant ROW exists,
+  not only while one is configured.
+- `Ticket.with_unregistered_requester_messages` — the scope behind the
+  repair half of redispatch.
+
 ## [0.3.0] - 2026-09-19
 
 **A machine can answer, and a person still owns every word it sends.** An

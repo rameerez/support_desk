@@ -126,11 +126,15 @@ module SupportDesk
       # Without the fold this would have been a perfectly current turn, and
       # she would have answered a conversation missing its last question.
       assert_raises(StaleTurn) { @ticket.respond!("Hola", by: @rose, turn: held) }
-      # And the refusal took the fold with it (I15): a refused operation
-      # rolls back everything it touched, message pointers included.
+      # The refusal wrote nothing of its own…
       refute_assistant_spoke @ticket
       refute_pending_draft @ticket
-      assert_equal held, turn
+      # …but the fold that CAUSED it is committed separately and stays (R3).
+      # In 0.3.0 the StaleTurn rolled the registration back with it, the next
+      # run read the same revision, and the case could never be answered
+      # again.
+      refute_equal held, turn, "the repair has to outlive the answer it refused"
+      assert_awaiting_reply @ticket
     end
 
     test "two messages on the same instant are both registered" do
@@ -154,6 +158,86 @@ module SupportDesk
       @ticket.reload.register!(message)
 
       assert_equal before, revision
+    end
+
+
+    # --- The watermark, tie by tie (R4) ------------------------------------------
+    #
+    # Two messages can share an instant — a coarse column, an import, a
+    # frozen clock, two fast inserts. "Seen" is therefore the PAIR
+    # (created_at, id) compared in chats' own transcript order, never
+    # "the one id the clock was set from".
+
+    test "an answer is current once every message sharing one instant has registered" do
+      travel_to(1.minute.from_now.change(usec: 0)) do
+        ask_again(@ticket, "primera")
+        ask_again(@ticket, "segunda")
+        @ticket.reload
+
+        outcome = @ticket.respond!("Respondo a las dos", by: @rose, turn: @ticket.assistant_turn)
+
+        assert_predicate outcome, :sent?
+        assert_awaiting_requester @ticket
+      end
+    end
+
+    test "three messages on one instant each move the turn exactly once" do
+      travel_to(1.minute.from_now.change(usec: 0)) do
+        before = revision
+        ask_again(@ticket, "una")
+        ask_again(@ticket, "dos")
+        ask_again(@ticket, "tres")
+
+        assert_equal before + 3, revision
+      end
+    end
+
+    test "delivery out of order registers each message once and never rewinds" do
+      first = second = nil
+      travel_to(1.minute.from_now.change(usec: 0)) do
+        Ticket.stub(:for_conversation, nil) do
+          first = ask_again(@ticket, "primera")
+          second = ask_again(@ticket, "segunda")
+        end
+      end
+      # chats orders a transcript by (created_at, id), so the pair decides
+      # which of the two is "the last word" — not which arrived first.
+      first, second = [ first, second ].sort_by { |message| [ message.created_at, message.id.to_s ] }
+
+      @ticket.reload.register!(second)
+      after_second = revision
+      @ticket.reload.register!(first)
+
+      assert_equal after_second, revision, "the earlier message is behind the watermark, not new"
+      assert_equal second.id.to_s, @ticket.reload.last_requester_message_id.to_s
+    end
+
+    test "replaying a message that shares the watermark's instant writes nothing" do
+      replayed = nil
+      travel_to(1.minute.from_now.change(usec: 0)) do
+        replayed = ask_again(@ticket, "primera")
+        ask_again(@ticket, "segunda")
+      end
+      before = revision
+
+      @ticket.reload.register!(replayed)
+
+      assert_equal before, revision
+    end
+
+    test "a proposal approved after every tied message registered is not stale" do
+      with_assistant_config(autonomy: :draft) do
+        travel_to(1.minute.from_now.change(usec: 0)) do
+          ask_again(@ticket, "primera")
+          ask_again(@ticket, "segunda")
+        end
+        @ticket.reload
+        draft = @ticket.draft!("propuesta", by: @rose, turn: @ticket.assistant_turn)
+
+        message = draft.send!(by: @lucia, seen_turn: @ticket.reload.assistant_turn)
+
+        assert_equal "propuesta", message.body
+      end
     end
 
     # --- The event ---------------------------------------------------------------

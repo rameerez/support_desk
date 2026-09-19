@@ -31,6 +31,49 @@ module SupportDesk
     # the same whatever the level, and a refusal is always a named reason on
     # a record (an `assistant_withheld` event, a policy in a draft's
     # metadata), never silence.
+    #
+    # == The locking protocol: TICKET, then CONVERSATION
+    #
+    # The turn is only as good as the reconciliation behind it, and
+    # reconciliation is a SELECT: on its own it cannot exclude a requester
+    # message that commits one millisecond later. The customer does not take
+    # the ticket lock — they press send, and chats writes a message.
+    #
+    # What chats DOES take is the conversation row. Every message insert
+    # updates `chats_conversations` inside its own transaction
+    # (`Chats::Message#register_on_conversation`, plus the `messages_count`
+    # counter cache), so that row is the serialization point for writes this
+    # gem does not own. Every speaking path therefore takes the ticket's row
+    # lock and then, before reconciling, the conversation's
+    # (`#lock_conversation!`):
+    #
+    # * a requester message already in flight holds that row, so we block
+    #   until it commits — and reconciliation then sees it, which makes the
+    #   turn stale, which is exactly what should happen;
+    # * a message that starts after we hold the row blocks until we commit,
+    #   so our answer is ordered before it and its own turn follows.
+    #
+    # THE ORDER IS ALWAYS TICKET → CONVERSATION. A requester write locks only
+    # the conversation; the after-commit subscriber's `register!` locks the
+    # ticket and then, through the system lines a hand-off posts, the
+    # conversation. Nothing takes them the other way round, and nothing new
+    # may.
+    #
+    # What it does NOT cover:
+    #
+    # * A message whose INSERT was already stamped when we win the row is
+    #   still stamped earlier than our answer, so a transcript can show a
+    #   question above an answer that did not address it. That is a genuinely
+    #   simultaneous send, and its registration raises a turn of its own.
+    #
+    # * SQLITE. All of the above is a `SELECT … FOR UPDATE` blocking a
+    #   concurrent writer, which is PostgreSQL and MySQL. SQLite has no row
+    #   locks: it serializes WRITES, and in WAL mode our reconciliation reads
+    #   the last committed snapshot straight through a requester's open write
+    #   transaction. So a message committing behind the SELECT is still
+    #   missed there, exactly as it was in 0.3.0 — the conversation row buys
+    #   nothing, because nothing waits on it. Run PostgreSQL or MySQL for a
+    #   production desk with an assistant; `doctor` warns about this.
     module Assistance
       extend ActiveSupport::Concern
 
@@ -61,6 +104,34 @@ module SupportDesk
         scope :assistant_idle_since, lambda { |time|
           awaiting_reply.where(last_requester_message_at: ..time)
                         .where("assistant_acted_at IS NULL OR assistant_acted_at < last_requester_message_at")
+        }
+        # Open cases whose conversation holds a requester message the gem never
+        # folded in. The registration runs after the message's commit, so it can
+        # be LOST — a killed worker, a dropped subscriber — and the clocks then
+        # describe a case that no longer exists: `awaiting_requester` on a case
+        # that is waiting for an answer, which no idle query can see. This one
+        # asks the messages instead of the clocks (R3).
+        #
+        # Built in Arel rather than as a string, because it compares two tables'
+        # columns to each other and there is no value to bind: it has to be
+        # readable as "no user input reaches this SQL" at a glance.
+        scope :with_unregistered_requester_messages, lambda {
+          tickets = arel_table
+          messages = Chats::Message.arel_table
+          watermark = tickets[:last_requester_message_at]
+          ahead = watermark.eq(nil)
+                           .or(messages[:created_at].gt(watermark))
+                           .or(messages[:created_at].eq(watermark)
+                                 .and(tickets[:last_requester_message_id].not_eq(nil))
+                                 .and(messages[:id].gt(tickets[:last_requester_message_id])))
+
+          unregistered = Chats::Message.select(Arel.sql("1"))
+                                       .where(kind: "text")
+                                       .where(messages[:conversation_id].eq(tickets[:conversation_id]))
+                                       .where(messages[:sender_type].eq(tickets[:requester_type]))
+                                       .where(messages[:sender_id].eq(tickets[:requester_id]))
+                                       .where(ahead)
+          where(unregistered.arel.exists)
         }
       end
 
@@ -144,10 +215,15 @@ module SupportDesk
       # on, Locked when there is nobody to write to, NotAnAssistant when
       # `by:` isn't this desk's assistant.
       def respond!(body = nil, by:, turn:, files: [], confidence: nil, sources: [], metadata: {}, request: nil)
-        assistant = resolve_assistant!(by)
         raise ArgumentError, "respond! needs something to say" if body.blank? && files.blank?
 
+        # Durable repair first, in a transaction of its own: what it folds in
+        # survives the StaleTurn that folding it in may cause (R3).
+        reconcile_and_commit!
+
         with_lock(requires_new: true) do
+          assistant = resolve_assistant!(by)
+          lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
           ensure_writable!
@@ -168,9 +244,13 @@ module SupportDesk
             # the draft stays, and so does a person — a conversation that
             # ran out of turns is one somebody has to finish.
             if policy.may_reply? && left&.zero?
-              flag_human_required!(actor: assistant, kind: :escalated, reason: "max_turns",
-                                   summary: metadata[:summary] || metadata["summary"],
-                                   line: :hand_off_line, request: request)
+              handed_off, from = flag_human_required!(actor: assistant, kind: :escalated, reason: "max_turns",
+                                                      summary: metadata[:summary] || metadata["summary"],
+                                                      line: :hand_off_line, request: request)
+              # A conversation that ran out of turns is a hand-off like any
+              # other, and it says so out loud: the host's "a person is
+              # needed here" notifier listens for this and nothing else (R7).
+              publish_escalation!(from: from, reason: :max_turns, by: assistant) if handed_off
               reason = :max_turns
             end
             Outcome.new(action: :drafted, draft: draft, policy: policy, reason: reason, turn: assistant_turn)
@@ -182,10 +262,13 @@ module SupportDesk
       # `respond!` is what a harness should call; this is for a host that has
       # already decided it wants a draft. Returns the SupportDesk::Draft.
       def draft!(body = nil, by:, turn:, files: [], confidence: nil, sources: [], metadata: {}, request: nil)
-        assistant = resolve_assistant!(by)
         raise ArgumentError, "draft! needs something to say" if body.blank? && files.blank?
 
+        reconcile_and_commit!
+
         with_lock(requires_new: true) do
+          assistant = resolve_assistant!(by)
+          lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
           ensure_writable!
@@ -208,13 +291,16 @@ module SupportDesk
       def escalate!(by: nil, reason:, summary: nil, turn: nil, request: nil)
         actor = resolve_actor(by)
         ensure_agent!(actor)
-        assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
+        machine = SupportDesk.ai_actor?(actor)
         raise ArgumentError, "escalate! needs a reason" if reason.blank?
 
+        assistant = nil
         event = nil
         from = nil
         with_lock(requires_new: true) do
-          if assistant
+          if machine
+            # Under the lock, from the row (R9).
+            assistant = resolve_assistant!(actor)
             ensure_current_turn!(turn)
             policy = assistant_policy(assistant)
             raise AssistantNotAllowed.new(policy, verb: :escalate) unless policy.may_observe?
@@ -226,7 +312,7 @@ module SupportDesk
         return self unless event
 
         stamp_assistant_action! if assistant
-        SupportDesk.emit_after_commit(:ticket_escalated, self, from: from, reason: reason.to_sym, by: actor)
+        publish_escalation!(from: from, reason: reason, by: actor)
         self
       end
 
@@ -325,12 +411,121 @@ module SupportDesk
         verbs
       end
 
+      # The silent sweep's own transition: hand this case to a person ONLY if
+      # it is still the case the sweep selected — open, still hers, still owing
+      # the next word, still past her promise, and with nobody asked for yet.
+      # Returns true when it moved. See SupportDesk.release_silent_assistants!.
+      #
+      # Every one of those predicates was true when the sweep SELECTED its
+      # candidates, and a person can answer, take the case or reset the clock
+      # between that query and this write. 0.3.0 rechecked only "closed" and
+      # "already asked for", so a case somebody had just answered was marked
+      # human-required anyway: its priority went up and the customer was told a
+      # person was coming, on a case that already had one (R5).
+      def escalate_if_still_silent!(assistant, window) # :nodoc:
+        event = nil
+        from = nil
+        with_lock(requires_new: true) do
+          next unless open?
+          next unless assigned_to?(assistant)
+          next unless awaiting_reply?
+          next if human_required?
+          next unless waiting_since.present? && waiting_since <= window.ago
+
+          event, from = flag_human_required!(
+            actor: :system, kind: :escalated, reason: "assistant_silent",
+            summary: "no answer in #{SupportDesk.humanize_duration(window)}",
+            line: :hand_off_line, request: nil
+          )
+        end
+        return false unless event
+
+        publish_escalation!(from: from, reason: "assistant_silent", by: :system)
+        true
+      end
+
+      # Give a stranded seat back to people: the assistant holding this case is
+      # switched off, no longer declared, or no longer allowed to hold it.
+      # Returns true when it moved. See SupportDesk.reclaim_assistant_seats!.
+      #
+      # This is INVALID-ASSIGNEE recovery, and it is deliberately not silence
+      # detection: it needs no `responds_within`, no overdue clock and no
+      # waiting side. `deactivate!` promises the seats come back, and in 0.3.0
+      # that promise was kept only for an assistant who had a promise of her
+      # own and a case that was already late (R6).
+      def reclaim_assistant_seat! # :nodoc:
+        event = nil
+        from = nil
+        escalated = false
+        with_lock(requires_new: true) do
+          next unless open?
+          next unless held_by_assistant?
+
+          from = assignee
+          next if assistant_may_keep_seat?(from)
+
+          if human_required?
+            # Somebody has already been asked for, and why is their business —
+            # the only thing left to give back is the seat.
+            event = write_transition!(:released, actor: :system) do
+              release_assistant_seat!(reason: :released)
+              { "from" => SupportDesk.actor_key(from), "reason" => "assistant_unavailable" }
+            end
+          else
+            escalated = true
+            event, = flag_human_required!(actor: :system, kind: :escalated, reason: "assistant_unavailable",
+                                          summary: nil, line: :hand_off_line, request: nil)
+          end
+        end
+        return false unless event
+
+        if escalated
+          publish_escalation!(from: from, reason: "assistant_unavailable", by: :system)
+        else
+          SupportDesk.emit_after_commit(:ticket_released, self, from: from, reason: :assistant_unavailable)
+        end
+        true
+      end
+
+      # The ONE place `:ticket_escalated` is published. Every hand-off that
+      # takes her off a case goes through it — her own `escalate!`, the budget
+      # branch of `respond!`, the silent sweep — so no path can write the
+      # transition and forget the signal (R7). A no-op writes no event and
+      # publishes nothing.
+      def publish_escalation!(from:, reason:, by:) # :nodoc:
+        SupportDesk.emit_after_commit(:ticket_escalated, self, from: from, reason: reason.to_sym, by: by)
+      end
+
       # Bump the case's revision — the caller holds the lock. `update_columns`
       # on purpose: inside the transaction, no callbacks, no validations, and
       # the in-memory value moves with the row, so the turn a caller reads
       # next is the one the database has.
       def bump_assistant_revision! # :nodoc:
         update_columns(assistant_revision: assistant_revision.to_i + 1)
+      end
+
+      # Fold in every requester message chats has committed but nobody has
+      # registered, in a transaction of ITS OWN, and commit it — whatever the
+      # answer that discovered it then decides. Returns how many it folded in.
+      #
+      # A registration lost after commit (a worker killed between the message's
+      # COMMIT and the subscriber that registers it) used to be unrepairable:
+      # reconciliation ran inside the candidate answer's savepoint, the bumped
+      # revision made that very answer stale, and the StaleTurn rolled the
+      # repair back with it. The next run read the same revision and did the
+      # same thing, for ever (R3).
+      #
+      # Durability is the caller's: at the top level (a job, the recovery task)
+      # this really commits, and the `:assistant_turn` it emits for what it
+      # registered is an ACTIONABLE turn. Inside a host's own transaction it is
+      # a savepoint like any other, and it commits when that does.
+      def reconcile_and_commit! # :nodoc:
+        folded = 0
+        with_lock(requires_new: true) do
+          lock_conversation!
+          folded = reconcile_unregistered_messages!
+        end
+        folded
       end
 
       # When the assistant last did anything here — what the idle-turn check
@@ -358,9 +553,16 @@ module SupportDesk
         end
 
         # Fresh from the row: `active` is a cross-process kill switch, and a
-        # record loaded a minute ago is not evidence about now.
+        # record loaded a minute ago is not evidence about now — nor is one
+        # loaded before this call waited for the case's lock. The FRESH
+        # record is what is handed back, because the policy reads `active?`
+        # off the record it is given (R9).
+        #
+        # Every caller resolves inside the lock. That still leaves the
+        # ordinary in-flight window — a switch that commits after this read
+        # and before our own commit wins nothing, and its next check stops
+        # the next call — which is documented rather than claimed away.
         self.class.ensure_agent_record!(actor)
-        actor
       end
 
       # The turn check, under the lock, from the revision the row holds.
@@ -381,27 +583,67 @@ module SupportDesk
       # around it. Folding it in here makes the turn stale instead, which is
       # exactly what should happen.
       def reconcile_unregistered_messages!
-        return if conversation.nil?
+        return 0 if conversation.nil?
 
+        folded = unregistered_requester_messages.oldest_first.to_a
+        folded.each { |message| record_registration!(message) }
+        folded.size
+      end
+
+      # The requester messages chats has committed that are AHEAD of this
+      # case's watermark — the query half of the rule `registered?` answers in
+      # Ruby, written once so the two can never disagree (R4).
+      def unregistered_requester_messages
         scope = conversation.messages.where(kind: "text", sender_type: requester_type, sender_id: requester_id)
-        if last_requester_message_at.present?
-          scope = if last_requester_message_id.present?
-            # Everything after the clock, plus anything sharing its instant
-            # that ISN'T the message the clock was set from — two messages
-            # can land on one timestamp, and the second one is real.
-            scope.where(
-              "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id <> :id)",
-              at: last_requester_message_at, id: last_requester_message_id
-            )
-          else
-            # No pointer to compare against (a 0.2 row whose backfill found
-            # nothing): the clock alone, rather than a comparison against an
-            # empty string that some adapters refuse outright.
-            scope.where("chats_messages.created_at > ?", last_requester_message_at)
-          end
-        end
+        return scope if last_requester_message_at.blank?
+        # No pointer to compare against (a 0.2 row whose backfill found
+        # nothing): the clock alone, rather than a comparison against an empty
+        # string that some adapters refuse outright.
+        return scope.where("chats_messages.created_at > ?", last_requester_message_at) if
+          last_requester_message_id.blank?
 
-        scope.oldest_first.each { |message| record_registration!(message) }
+        # Everything AHEAD of the watermark in chats' transcript order
+        # (created_at, id) — two messages can land on one timestamp, and the one
+        # after the pointer is the real new one. `<> :id` was wrong here: it
+        # also matched the messages that tied with the watermark and were
+        # registered BEFORE it, so folding them in again bumped the revision and
+        # made the current answer stale for ever (R4).
+        scope.where(
+          "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id > :id)",
+          at: last_requester_message_at, id: last_requester_message_id
+        )
+      end
+
+      # A SELECT … FOR UPDATE on the conversation row, taken AFTER the ticket's
+      # and before any reconciliation. See the module comment: this row is what
+      # chats updates inside every message's own transaction, so it is the only
+      # seam that serializes a customer's write against ours without a write
+      # hook in chats (R1).
+      #
+      # Read through the id rather than the association: `lock!` refuses a
+      # record with unsaved changes, and nothing here wants the in-memory
+      # conversation reloaded.
+      def lock_conversation!
+        return if conversation_id.blank?
+
+        Chats::Conversation.lock.find_by(id: conversation_id)
+      end
+
+      # Whether the assistant sitting on this case may go on sitting on it: she
+      # is on duty, she is still declared, and her policy still lets her hold
+      # it. Read under the lock, from the reloaded assignee.
+      #
+      # A policy that RAISES — a desk pointing at an assistant nobody declares
+      # any more — is an answer too, and it is "no": a seat nothing can reason
+      # about belongs to a person.
+      def assistant_may_keep_seat?(holder)
+        return false unless holder.is_a?(SupportDesk::Assistant)
+        return false unless holder.active?
+        return false unless holder.configured?
+
+        assistant_policy(holder).may_hold?
+      rescue StandardError
+        false
       end
 
       # Nothing was written, and the reason is on the record: a policy that

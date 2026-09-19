@@ -341,10 +341,14 @@ module SupportDesk
 
       # A loaded instance may predate revocation or deletion. Check the row,
       # just as requester eligibility does; this does not serialize revocation.
+      #
+      # Returns the FRESH record, so a caller that goes on to read a runtime
+      # flag off it (the assistant's `active?`, which the policy reads) is
+      # reading the row and not the copy it was handed (R9).
       def ensure_agent_record!(record) # :nodoc:
         if record.respond_to?(:persisted?) && record.persisted? && record.respond_to?(:support_agent?)
           current = record.class.uncached { record.class.find_by(id: record.id) }
-          return if current&.support_agent?
+          return current if current&.support_agent?
         end
 
         raise NotAnAgent, "#{record.class} is not a currently eligible, persisted support agent — " \
@@ -863,6 +867,7 @@ module SupportDesk
     def reply!(body = nil, by: nil, files: [], request: nil, metadata: {}, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      reconcile_and_commit! if SupportDesk.ai_actor?(actor)
 
       reply_under_lock!(body, by: actor, files: files, request: request, metadata: metadata, turn: turn)
     end
@@ -872,11 +877,15 @@ module SupportDesk
     def note!(body, by: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
+      machine = SupportDesk.ai_actor?(actor)
       raise ArgumentError, "a note needs something to say" if body.blank?
 
+      assistant = nil
       event = write_transition!(:note, actor: actor, request: request) do
-        if assistant
+        if machine
+          # Under the lock, from the row: a kill switch that commits while
+          # this call waits for the case is a kill switch that stops it (R9).
+          assistant = resolve_assistant!(actor)
           ensure_current_turn!(turn)
           policy = assistant_policy(assistant)
           raise AssistantNotAllowed.new(policy, verb: :note) unless policy.may_observe?
@@ -891,10 +900,9 @@ module SupportDesk
     # Give the ticket to an agent. `assign!(to: lucia, by: lucia)` is
     # somebody taking it; `assign!(to: pedro, by: admin)` is somebody being
     # handed it. Repeating an assignment to the current holder does nothing.
-    def assign!(to:, by: nil, reason: nil, note: nil, request: nil)
+    def assign!(to:, by: nil, reason: nil, note: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      ensure_assistant_may_assign!(actor, to)
       ensure_assignable!(to)
 
       reason ||= to == actor ? :taken : :assigned
@@ -906,6 +914,13 @@ module SupportDesk
 
       event = write_transition!(:assigned, actor: actor, request: request) do
         raise InvalidTransition, "can't assign a closed ticket — reopen it first" if closed?
+        # Every mutable question about a seat is asked HERE, under the row
+        # lock, from the reloaded row: who holds the case, what her policy
+        # says, which turn she is on. Asked before the lock (0.3.0) they
+        # were answers about a case that has since moved, and a stale
+        # instance could take a seat a person had already been given (R2).
+        ensure_assistant_may_assign!(actor, to, turn: turn)
+        ensure_assistant_may_hold!(to)
         next false if assigned_to?(to)
 
         assignment = Assignment.open!(ticket: self, agent: to, by: actor, reason: reason, note: note)
@@ -946,6 +961,7 @@ module SupportDesk
                                 "(#{assignee ? describe_actor(assignee) : "nobody"} does) — use assign! to override"
         end
         raise InvalidTransition, "can't hand off a closed ticket" if closed?
+        ensure_assistant_may_hold!(to)
         next false if assigned_to?(to)
 
         from = assignee
@@ -969,14 +985,18 @@ module SupportDesk
     end
 
     # Put the ticket back in the unassigned pile.
-    def release!(by: nil, reason: :released, request: nil)
+    def release!(by: nil, reason: :released, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
       from = nil
       event = write_transition!(:released, actor: actor, request: request) do
         raise InvalidTransition, "can't release a closed ticket" if closed?
+        assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
         if assistant
+          # Giving a seat back is an action like any other, so it holds the
+          # turn it read: a run that finished after the case moved on must
+          # not release the seat a newer one took (R2).
+          ensure_current_turn!(internal_turn(turn))
           policy = assistant_policy(assistant)
           raise AssistantNotAllowed.new(policy, verb: :release) unless policy.may_observe?
           # Her own seat, and only hers: putting a PERSON's case back in the
@@ -1000,10 +1020,15 @@ module SupportDesk
     def close!(by: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
+      machine = SupportDesk.ai_actor?(actor)
+      reconcile_and_commit! if machine
 
       event = write_transition!(:closed, actor: actor, request: request) do
-        if assistant
+        if machine
+          # Resolved under the lock, so the kill switch is read after the
+          # wait rather than before it (R9).
+          assistant = resolve_assistant!(actor)
+          lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
           policy = assistant_policy(assistant)
@@ -1327,22 +1352,30 @@ module SupportDesk
       end
 
       ensure_agent!(agent)
+    end
+
+    # "Could she hold this case once the human-side flags were lifted?" —
+    # the hand-back question, so the very flags a hand-back exists to clear
+    # are not what refuses it. Her autonomy, the topic and the host's cap
+    # block still decide.
+    #
+    # Asked UNDER THE LOCK (R2): a cap that lands while a take waits for the
+    # row is the cap that applies to it.
+    def ensure_assistant_may_hold!(agent)
       return unless SupportDesk.ai_actor?(agent)
 
-      # "Could she hold this case once the human-side flags were lifted?" —
-      # the hand-back question, so the very flags a hand-back exists to
-      # clear are not what refuses it. Her autonomy, the topic and the host's
-      # cap block still decide.
       policy = assistant_policy(agent, hand_back: true)
       raise AssistantNotAllowed.new(policy, verb: :take) unless policy.may_hold?
     end
 
     # An assistant may take a case, and that is all: only herself, only when
-    # nobody holds it, and only at a level that may answer.
-    def ensure_assistant_may_assign!(actor, to)
+    # nobody holds it, only at a level that may answer, and only holding the
+    # turn she read. Called under the row lock, from the reloaded row.
+    def ensure_assistant_may_assign!(actor, to, turn:)
       return unless SupportDesk.ai_actor?(actor)
 
       assistant = resolve_assistant!(actor)
+      ensure_current_turn!(internal_turn(turn))
       policy = assistant_policy(assistant)
       unless self.class.same_actor?(actor, to)
         raise AssistantNotAllowed.new(policy, verb: :assign,
@@ -1352,6 +1385,12 @@ module SupportDesk
       raise AssistantNotAllowed.new(policy, verb: :take) unless unassigned?
       raise AssistantNotAllowed.new(policy, verb: :take) unless policy.may_hold?
     end
+
+    # `:current` means "the turn as this lock sees it" — the one turn the
+    # gem supplies itself, for the self-take inside a reply that has ALREADY
+    # verified the turn under this very lock. It is reachable from nowhere
+    # else: a caller passing a real turn is checked against the row.
+    def internal_turn(turn) = turn == :current ? assistant_turn : turn
 
     def ensure_agent!(actor)
       return if actor.is_a?(Symbol)
@@ -1428,7 +1467,8 @@ module SupportDesk
       # `:current` means "the turn as this lock sees it" — the one place the
       # gem supplies a turn itself, because an outreach reply into an
       # existing case has no earlier turn for anybody to have held.
-      turn = assistant_turn if turn == :current
+      turn = internal_turn(turn)
+      lock_conversation!
       reconcile_unregistered_messages!
       ensure_current_turn!(turn)
       ensure_writable!
@@ -1458,14 +1498,16 @@ module SupportDesk
                             "take it first"
         end
 
-        assign!(to: actor, by: actor, request: request)
+        # `turn: :current` is consumed only when the actor is the assistant
+        # taking her own seat inside a reply this lock already authorized.
+        assign!(to: actor, by: actor, request: request, turn: :current)
       elsif !assigned_to?(actor)
         # Humans outrank assistants, under EVERY reply policy (I8). A person
         # answering a case a machine is holding takes it over: there is
         # nothing to ask about "who owns this" when one of the two can't
         # want it, and leaving her seated would keep her answering next.
         if held_by_assistant? && !SupportDesk.ai_actor?(actor)
-          return assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request)
+          return assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request, turn: :current)
         end
         # Belt: the `held_by_human` floor already turned this into a draft,
         # so an assistant reaching here is a bug, not a policy question.
@@ -1476,7 +1518,7 @@ module SupportDesk
           raise NotAllowed, "ticket #{reference} is held by #{describe_actor(assignee)} and this desk only " \
                             "lets the assignee reply"
         when :take_over
-          assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request)
+          assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request, turn: :current)
         else
           write_transition!(:drop_in, actor: actor, request: request) do
             { "assignee" => SupportDesk.actor_key(assignee) }
@@ -1626,30 +1668,68 @@ module SupportDesk
     # the clock counts as folded in: idempotency is the documented promise,
     # and the cost of the rare tie is one clock that doesn't advance until
     # the next message.
+    #
+    # For the REQUESTER the clock is not a timestamp but a WATERMARK — the
+    # pair (last_requester_message_at, last_requester_message_id) — and a
+    # message counts as folded in when its own pair is at or behind it, in
+    # chats' transcript order. See #after_requester_watermark?.
     def registered?(message)
       return true if last_registered_message_id.present? && last_registered_message_id.to_s == message.id.to_s
 
       role = role_of(message)
-      clock = case role
-      when :requester then last_requester_message_at
-      when :agent then last_agent_message_at
-      end
+      return !after_requester_watermark?(message) if role == :requester
+
+      clock = (last_agent_message_at if role == :agent)
       return false if clock.blank?
       return true if message.created_at < clock
-      return false unless message.created_at == clock
 
       # Equal timestamps are NOT the same message. A coarse column, a frozen
       # clock in a test, or two very fast inserts can put two different
       # messages on one instant, and a `<=` here folded the second one in
       # without moving anything — so the assistant answered a question the
-      # case had never registered. The only equal-timestamp message that
-      # counts as folded in is the one the clock was set FROM.
-      case role
-      when :requester then last_requester_message_id.present? &&
-                           last_requester_message_id.to_s == message.id.to_s
-      else false
+      # case had never registered. On the agent side the id pointer the
+      # requester side compares against does not exist, so a tie is new.
+      false
+    end
+
+    # Whether +message+ is AHEAD of the requester watermark — the one
+    # definition of "she hasn't seen this yet", shared by `registered?` and
+    # by the reconciliation query, so the two can never disagree about a
+    # message and loop refusing it (R4).
+    #
+    # The watermark is the PAIR (last_requester_message_at,
+    # last_requester_message_id) and the comparison is chats' own transcript
+    # order — `created_at ASC, id ASC` — never chronology alone. For a uuid
+    # primary key that order is arbitrary, but it is the order the thread is
+    # DISPLAYED in, which is the only order "the last word" can mean.
+    def after_requester_watermark?(message)
+      watermark = last_requester_message_at
+      return true if watermark.blank?
+      return true if message.created_at > watermark
+      return false if message.created_at < watermark
+      # A tie with no pointer to break it (a 0.2 row whose backfill found
+      # nothing) is new: the alternative silently drops it.
+      return true if last_requester_message_id.blank?
+
+      compare_message_ids(message.id, last_requester_message_id).positive?
+    end
+
+    # Order two chats message ids the way the DATABASE orders that column,
+    # because the reconciliation query compares them in SQL and this one
+    # compares them in Ruby. Integers compare numerically (10 is after 9);
+    # anything else — a uuid, a ULID — compares as a string, which is how
+    # every adapter orders those columns too.
+    def compare_message_ids(one, other)
+      if one.is_a?(Integer) && other.is_a?(Integer)
+        one <=> other
+      elsif integerish?(one) && integerish?(other)
+        one.to_i <=> other.to_i
+      else
+        one.to_s <=> other.to_s
       end
     end
+
+    def integerish?(value) = value.to_s.match?(/\A-?\d+\z/)
 
     def opening_message?
       last_registered_message_id.blank? && last_requester_message_at.nil? && last_agent_message_at.nil?

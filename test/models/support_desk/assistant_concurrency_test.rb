@@ -115,8 +115,13 @@ module SupportDesk
 
         answer = results.first
 
-        assert_equal 2, @ticket.conversation.messages.where(kind: "text").count - 1,
-                     "the customer's message always lands"
+        # Whether SHE answered is the race's to decide; the customer's own
+        # message is not. (Until 0.3.1 this counted three messages, which
+        # quietly also demanded that she always got her answer in — the very
+        # thing the conversation lock now refuses when the question commits
+        # first.)
+        assert_includes @ticket.conversation.messages.where(kind: "text").pluck(:body), "¿hay novedades?",
+                        "the customer's message always lands"
         assert_operator assistant_messages.size, :<=, 1, "never two answers to one question"
 
         if answer.is_a?(StaleTurn)
@@ -129,9 +134,51 @@ module SupportDesk
         end
       end
 
+      # --- The customer's own write, against the lock (R1) -------------------
+
+      test "an answer is refused when the customer's next question commits behind it" do
+        held = @ticket.assistant_turn
+        result = nil
+
+        with_requester_writing_behind_the_lock("¿Y el reembolso?") do
+          result = begin
+            @ticket.respond!("Le respondo a la primera pregunta", by: @rose, turn: held)
+          rescue StaleTurn => e
+            e
+          end
+        end
+
+        assert_includes conversation_bodies, "¿Y el reembolso?", "the barrier has to actually write"
+        refute(result.is_a?(Outcome) && result.sent?,
+               "she answered around a question that had already committed")
+        assert_empty assistant_messages
+      end
+
+      test "a proposal is refused when the customer's next question commits behind the approval" do
+        with_assistant_config(autonomy: :draft) do
+          draft = @ticket.draft!("propuesta", by: @rose, turn: @ticket.assistant_turn)
+          @ticket.reload
+          held = @ticket.assistant_turn
+          result = nil
+
+          with_requester_writing_behind_the_lock("Da igual, era otra cosa") do
+            result = begin
+              draft.send!(by: @lucia, seen_turn: held)
+            rescue StaleTurn => e
+              e
+            end
+          end
+
+          assert_includes conversation_bodies, "Da igual, era otra cosa", "the barrier has to actually write"
+          refute_instance_of(Chats::Message, result,
+                             "a proposal was approved from a page that predated the next question")
+          assert_predicate draft.reload, :pending?
+        end
+      end
+
       test "the sweep racing a takeover never moves a person's seat" do
         SupportDesk.config.assistant(:rose).responds_within = 1
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
         Ticket.where(id: @ticket.id).update_all(waiting_since: 1.hour.ago)
 
         results = run_together(2) do |index|
@@ -154,6 +201,47 @@ module SupportDesk
     end
 
     private
+
+    def conversation_bodies
+      @ticket.conversation.messages.where(kind: "text").order(:created_at, :id).pluck(:body)
+    end
+
+    # Commit a requester message in the window between "the answer has read
+    # the case" and "the answer writes to it", from a second connection, and
+    # run +block+ inside that window. Nothing here suspends a callback or
+    # patches a transition: the message is an ordinary `message!`.
+    #
+    # The writer holds its transaction open — and with it the conversation
+    # row chats updates inside every message insert — until EITHER the answer
+    # reconciles (0.3.0: it read the transcript before this commit, so it
+    # never saw the message) OR one second passes (0.3.1: the answer is
+    # blocked on that very row, which is the whole fix). One barrier, two
+    # schedules, and the rule is the same in both: a committed question is
+    # never answered around.
+    def with_requester_writing_behind_the_lock(body)
+      inserted = ::Queue.new
+      reconciled = ::Queue.new
+      original = Ticket.instance_method(:reconcile_unregistered_messages!)
+      Ticket.send(:define_method, :reconcile_unregistered_messages!) do
+        original.bind_call(self).tap { reconciled << true }
+      end
+
+      writer = ::Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          ActiveRecord::Base.transaction do
+            User.find(@alice.id).message!(Chats::Conversation.find(@ticket.conversation_id), body)
+            inserted << true
+            reconciled.pop(timeout: 1)
+          end
+        end
+      end
+
+      inserted.pop
+      yield
+    ensure
+      Ticket.send(:define_method, :reconcile_unregistered_messages!, original) if original
+      writer&.join(15)
+    end
 
     # Run +count+ blocks at once, each on its own connection, and hand back
     # what each of them returned — or the exception it raised, because a

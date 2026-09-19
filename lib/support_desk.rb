@@ -124,7 +124,11 @@ module SupportDesk
               "`config.assistant #{key.inspect} do |assistant| … end`"
       end
 
-      assistants[key] ||= Assistant.for(key)
+      # Resolving her is also when what she is CALLED is written down, so a
+      # message she signed still says the same thing after somebody takes
+      # her out of the initializer (R8). It writes only when configuration
+      # and the row disagree.
+      (assistants[key] ||= Assistant.for(key)).snapshot_disclosure!
     end
 
     # Every assistant record this process has resolved, keyed by key.
@@ -146,6 +150,31 @@ module SupportDesk
       record.respond_to?(:support_agent_kind) && record.support_agent_kind == :ai
     end
 
+    # Give back every seat an assistant can no longer sit in — she was
+    # switched off, her configuration was removed, or her policy no longer
+    # lets her hold a case — and ask for a person on each of them.
+    #
+    # Invalid-assignee recovery, NOT silence detection: it reads the seats
+    # that exist rather than the assistants a running process happens to
+    # have configured, so a `deactivate!`, a flag flipped off and a topic
+    # cap tightened are all covered, with no `responds_within` and no
+    # overdue clock anywhere in it (R6). `release_silent_assistants!` runs
+    # it first; `rake support_desk:reclaim_assistant_seats` runs it alone.
+    #
+    # Returns how many seats it reclaimed.
+    def reclaim_assistant_seats!
+      return 0 unless Assistant.table_exists?
+
+      reclaimed = 0
+      Ticket.open.held_by_assistants.find_each do |ticket|
+        reclaimed += 1 if ticket.reclaim_assistant_seat!
+      rescue StandardError => e
+        report_error(e, context: { hook: :reclaim_assistant_seats, ticket: ticket.id })
+      end
+      logger&.info("[support_desk] reclaimed #{reclaimed} stranded assistant seat(s)") if reclaimed.positive?
+      reclaimed
+    end
+
     # Release every assistant who has sat on a case longer than her
     # `responds_within` without answering — and ask for a person on it.
     #
@@ -154,18 +183,19 @@ module SupportDesk
     # Run it every minute (`rake support_desk:release_silent_assistants`).
     # Returns how many cases it moved.
     def release_silent_assistants!
-      moved = 0
+      # A seat nobody can sit in any more is not a silence problem, and it
+      # must not need a `responds_within` to be noticed (R6).
+      moved = reclaim_assistant_seats!
       config.assistants.each_key do |key|
         agent = assistant(key)
         window = agent&.responds_within
         next if window.nil?
 
         Ticket.open.assigned_to(agent).awaiting_reply.waiting_over(window).find_each do |ticket|
-          next if ticket.human_required?
-
-          ticket.escalate!(by: :system, reason: "assistant_silent",
-                           summary: "no answer in #{humanize_duration(window)}")
-          moved += 1 if ticket.human_required?
+          # Conditional, under the case's own lock: every predicate above was
+          # true when this row was SELECTED, and a person may have answered
+          # it since (R5).
+          moved += 1 if ticket.escalate_if_still_silent!(agent, window)
         rescue StandardError => e
           report_error(e, context: { hook: :release_silent_assistants, ticket: ticket.id })
         end
@@ -187,6 +217,19 @@ module SupportDesk
       config.desks.each_key do |key|
         agent = desk(key)&.assistant
         next if agent.nil?
+
+        # Repair before deciding. A requester message whose registration was
+        # lost after commit leaves the clocks describing a case that no longer
+        # exists — and `assistant_idle_since` reads those clocks, so the case
+        # it most needs to find is the one it cannot see. Folding the message
+        # in COMMITS on its own and emits the turn it produces, so a dead
+        # process followed by nothing but this task still ends in an
+        # actionable turn (R3).
+        Ticket.open.for_desk(key).with_unregistered_requester_messages.find_each do |ticket|
+          emitted += 1 if ticket.reconcile_and_commit!.positive?
+        rescue StandardError => e
+          report_error(e, context: { hook: :redispatch_assistant_turns, ticket: ticket.id })
+        end
 
         Ticket.open.for_desk(key).assistant_idle_since(older_than.ago).find_each do |ticket|
           next unless ticket.assistant_policy(agent).may_observe?

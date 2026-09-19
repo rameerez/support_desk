@@ -3,8 +3,8 @@
 require "test_helper"
 require "rake"
 
-# §12.11 — the three maintenance tasks. Two of them are the nets under a
-# dead harness and have to be scheduled; the third is the read-only "what is
+# §12.11 — the four maintenance tasks. Three of them are the nets under a
+# dead harness and have to be scheduled; the fourth is the read-only "what is
 # she doing right now".
 class AssistantTasksTest < ActiveSupport::TestCase
   setup do
@@ -24,7 +24,7 @@ class AssistantTasksTest < ActiveSupport::TestCase
 
   test "release_silent_assistants hands over the cases she sat on, and says how many" do
     ticket = ticket_for(@alice)
-    ticket.assign!(to: @rose, by: @rose)
+    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
     travel 2.minutes
 
     output = run_task("release_silent_assistants")
@@ -38,6 +38,18 @@ class AssistantTasksTest < ActiveSupport::TestCase
     ticket_for(@alice)
 
     assert_match(/0 case\(s\)/, run_task("release_silent_assistants"))
+  end
+
+  test "reclaim_assistant_seats gives back a switched-off assistant's cases" do
+    ticket = ticket_for(@alice)
+    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
+    @rose.deactivate!(by: @lucia)
+
+    output = run_task("reclaim_assistant_seats")
+
+    assert_match(/1 stranded seat/, output)
+    assert_unassigned ticket.reload
+    assert_needs_human ticket, reason: "assistant_unavailable"
   end
 
   test "redispatch_assistant_turns re-emits what nobody picked up" do
@@ -64,7 +76,7 @@ class AssistantTasksTest < ActiveSupport::TestCase
 
   test "assistant_status reads the numbers and writes nothing" do
     ticket = ticket_for(@alice)
-    ticket.assign!(to: @rose, by: @rose)
+    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
     other = ticket_for(@alice, topic: :order, message: "Otra")
     other.escalate!(by: @lucia, reason: "para una persona")
     with_assistant_config(autonomy: :draft) do
