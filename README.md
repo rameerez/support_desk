@@ -1,4 +1,4 @@
-# 🎫 `support_desk` - Customer support for your Rails app, as conversations
+# 🎫 `support_desk` - Customer support for your Rails app, as conversations — answered by your team and by AI agents on a leash
 
 [![Gem Version](https://badge.fury.io/rb/support_desk.svg)](https://badge.fury.io/rb/support_desk) [![Build Status](https://github.com/rameerez/support_desk/workflows/Tests/badge.svg)](https://github.com/rameerez/support_desk/actions)
 
@@ -6,6 +6,8 @@
 > **🚀 Ship your next Rails app 10x faster!** I've built **[RailsFast](https://railsfast.com/?ref=support_desk)**, a production-ready Rails boilerplate template that comes with everything you need to launch a software business in days, not weeks. Go [check it out](https://railsfast.com/?ref=support_desk)!
 
 `support_desk` gives your Rails app a **support desk**: tickets that are real conversations. Somebody asks for help about something in your app (a ride, an order, a withdrawal) or about nothing in particular, your desk answers, humans sign the answers, and your team works a queue.
+
+**AI agents are first-class citizens of that desk.** An assistant is an agent with a policy: a seat, a name, a turn budget and a level (`observe · draft · reply · resolve`) that says what she may *produce* on a case. At the default level she proposes and a person sends, signed by them; raise her level per topic and she answers customers herself, hands off when she is unsure, and can never touch a case a human holds, a money topic you capped, or a customer who asked for a person. The gem ships the guardrails — policy, drafts and review, the turn that makes a late model answer harmless, disclosure, the two exits, the sweep that catches a dead harness — and **no LLM**: bring any provider, any prompt, any retrieval, in a job of about ten lines. [→ Assistants](#-assistants)
 
 Here is the whole thing — the kind of support desk a DoorDash, an Uber Eats or a Grab needs — running on a made-up delivery app called Pepperbox. These are the **bundled views**, unmodified, themed by the host with a handful of CSS variables:
 
@@ -19,7 +21,17 @@ Here is the whole thing — the kind of support desk a DoorDash, an Uber Eats or
 
 It is a product gem on the [`chats`](https://github.com/rameerez/chats) kernel: chats owns the transcript, realtime, attachments, read state and moderation; `support_desk` owns the case — topics, assignment, SLA clocks, events and the console API.
 
-Every app eventually needs a support inbox, and everyone rebuilds the same ticket table, the same "assigned to me" tab, the same "which order is this about?" picker and the same email bridge. `support_desk` is that whole rebuild, done once, done right, on top of the messaging you already have.
+Every app eventually needs a support inbox, and everyone rebuilds the same ticket table, the same "assigned to me" tab, the same "which order is this about?" picker and the same email bridge — and, lately, the same "let the model answer, but not *that*" rules. `support_desk` is that whole rebuild, done once, done right, on top of the messaging you already have.
+
+What "AI-native" means here, concretely:
+
+- **One verb for the harness.** `ticket.respond!(text, by: rose, turn:)` — policy decides whether it is sent, drafted for a person, or withheld with the reason on the record. The job never encodes the rules.
+- **Bounded authority, in the model.** Levels, topic caps, a per-case cap, pause, and floors for closed / human-held / human-requested cases — enforced inside every transition, not in a prompt or a button.
+- **A turn, not a lock-free hope.** Every message and transition moves `assistant_turn`; every assistant action requires and consumes it, so a late, retried or redelivered job writes nothing.
+- **Human in the loop by default.** Proposals a person sends verbatim or edited — as *their* message — or rejects with a reason you can raise her level on.
+- **Two exits, always.** She escalates; the customer has a door to a person that never disappears.
+- **Disclosure is your explicit choice**, and the record tells the truth in every mode.
+- **Context as data.** `ticket.brief` and `ticket.transcript` — facts, roles, `may` / `may_not` — for any provider.
 
 **Contents:** [Example](#-example) · [Quickstart](#quickstart) · [Configuration reference](#configuration-reference) · [Topics](#topics) · [Model macros](#the-model-macros) · [Tickets](#tickets) · [Queues and presenters](#queues-and-presenters) · [The requester experience](#the-requester-experience) · [The agent console](#the-agent-console) · [Writing first](#writing-first) · [Assistants](#-assistants) · [The wizard](#the-wizard) · [Events](#events) · [Errors](#errors) · [Locales](#locales) · [Doctor](#doctor) · [Compatibility](#compatibility) · [Testing](#testing) · [Module-level API](#module-level-api)
 
@@ -44,9 +56,14 @@ ticket.reply!("We're on it", by: lucia)                               # you answ
 ticket.close!(by: lucia)
 
 lucia.open_support_conversation_with!(alice, "We saw your refund bounced", about: order)   # you write first
+
+config.assistant(:rose) { |rose| rose.autonomy = :draft; rose.disclosure = :signature }  # an AI agent, on a leash
+rose = SupportDesk.assistant(:rose)
+ticket.respond!(answer_from_your_model, by: rose, turn: ticket.assistant_turn)         # she proposes; policy decides
+ticket.pending_draft.send!(by: lucia, seen_turn: ticket.assistant_turn)                # a person sends it, signed by them
 ```
 
-That's a ticket, a conversation, an assignment history, an append-only audit trail and four events your app can subscribe to.
+That's a ticket, a conversation, an assignment history, an append-only audit trail, an AI agent whose every action is policy-checked under the row lock, and a dozen events your app can subscribe to.
 
 ## Quickstart
 
