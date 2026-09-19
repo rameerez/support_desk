@@ -219,6 +219,31 @@ module SupportDesk
       end
     end
 
+    # --- The kill switch, after the wait (R9) ------------------------------------
+
+    test "a kill switch that commits while she waits for the lock stops the answer" do
+      # Her eligibility was read BEFORE the case's row lock, and the record the
+      # policy then read `active?` from was that same stale copy. A job that
+      # queued behind a busy case could still speak minutes after somebody had
+      # switched her off.
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      held = turn
+      rose_id = @rose.id
+      lucia = @lucia
+      switched = false
+      @ticket.define_singleton_method(:with_lock) do |*args, **options, &block|
+        unless switched
+          switched = true
+          Assistant.find(rose_id).deactivate!(by: lucia)
+        end
+        super(*args, **options, &block)
+      end
+
+      assert_raises(NotAnAgent, AssistantNotAllowed) { @ticket.respond!("Después del interruptor", by: @rose, turn: held) }
+
+      refute_assistant_spoke @ticket
+    end
+
     # --- Stranded seats (R6) -----------------------------------------------------
 
     test "switching her off gives back the seats she holds, promise or no promise" do

@@ -341,10 +341,14 @@ module SupportDesk
 
       # A loaded instance may predate revocation or deletion. Check the row,
       # just as requester eligibility does; this does not serialize revocation.
+      #
+      # Returns the FRESH record, so a caller that goes on to read a runtime
+      # flag off it (the assistant's `active?`, which the policy reads) is
+      # reading the row and not the copy it was handed (R9).
       def ensure_agent_record!(record) # :nodoc:
         if record.respond_to?(:persisted?) && record.persisted? && record.respond_to?(:support_agent?)
           current = record.class.uncached { record.class.find_by(id: record.id) }
-          return if current&.support_agent?
+          return current if current&.support_agent?
         end
 
         raise NotAnAgent, "#{record.class} is not a currently eligible, persisted support agent — " \
@@ -873,11 +877,15 @@ module SupportDesk
     def note!(body, by: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
+      machine = SupportDesk.ai_actor?(actor)
       raise ArgumentError, "a note needs something to say" if body.blank?
 
+      assistant = nil
       event = write_transition!(:note, actor: actor, request: request) do
-        if assistant
+        if machine
+          # Under the lock, from the row: a kill switch that commits while
+          # this call waits for the case is a kill switch that stops it (R9).
+          assistant = resolve_assistant!(actor)
           ensure_current_turn!(turn)
           policy = assistant_policy(assistant)
           raise AssistantNotAllowed.new(policy, verb: :note) unless policy.may_observe?
@@ -1012,11 +1020,14 @@ module SupportDesk
     def close!(by: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
-      reconcile_and_commit! if assistant
+      machine = SupportDesk.ai_actor?(actor)
+      reconcile_and_commit! if machine
 
       event = write_transition!(:closed, actor: actor, request: request) do
-        if assistant
+        if machine
+          # Resolved under the lock, so the kill switch is read after the
+          # wait rather than before it (R9).
+          assistant = resolve_assistant!(actor)
           lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)

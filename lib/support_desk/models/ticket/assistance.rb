@@ -203,7 +203,6 @@ module SupportDesk
       # on, Locked when there is nobody to write to, NotAnAssistant when
       # `by:` isn't this desk's assistant.
       def respond!(body = nil, by:, turn:, files: [], confidence: nil, sources: [], metadata: {}, request: nil)
-        assistant = resolve_assistant!(by)
         raise ArgumentError, "respond! needs something to say" if body.blank? && files.blank?
 
         # Durable repair first, in a transaction of its own: what it folds in
@@ -211,6 +210,7 @@ module SupportDesk
         reconcile_and_commit!
 
         with_lock(requires_new: true) do
+          assistant = resolve_assistant!(by)
           lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
@@ -250,12 +250,12 @@ module SupportDesk
       # `respond!` is what a harness should call; this is for a host that has
       # already decided it wants a draft. Returns the SupportDesk::Draft.
       def draft!(body = nil, by:, turn:, files: [], confidence: nil, sources: [], metadata: {}, request: nil)
-        assistant = resolve_assistant!(by)
         raise ArgumentError, "draft! needs something to say" if body.blank? && files.blank?
 
         reconcile_and_commit!
 
         with_lock(requires_new: true) do
+          assistant = resolve_assistant!(by)
           lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
@@ -279,13 +279,16 @@ module SupportDesk
       def escalate!(by: nil, reason:, summary: nil, turn: nil, request: nil)
         actor = resolve_actor(by)
         ensure_agent!(actor)
-        assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
+        machine = SupportDesk.ai_actor?(actor)
         raise ArgumentError, "escalate! needs a reason" if reason.blank?
 
+        assistant = nil
         event = nil
         from = nil
         with_lock(requires_new: true) do
-          if assistant
+          if machine
+            # Under the lock, from the row (R9).
+            assistant = resolve_assistant!(actor)
             ensure_current_turn!(turn)
             policy = assistant_policy(assistant)
             raise AssistantNotAllowed.new(policy, verb: :escalate) unless policy.may_observe?
@@ -538,9 +541,16 @@ module SupportDesk
         end
 
         # Fresh from the row: `active` is a cross-process kill switch, and a
-        # record loaded a minute ago is not evidence about now.
+        # record loaded a minute ago is not evidence about now — nor is one
+        # loaded before this call waited for the case's lock. The FRESH
+        # record is what is handed back, because the policy reads `active?`
+        # off the record it is given (R9).
+        #
+        # Every caller resolves inside the lock. That still leaves the
+        # ordinary in-flight window — a switch that commits after this read
+        # and before our own commit wins nothing, and its next check stops
+        # the next call — which is documented rather than claimed away.
         self.class.ensure_agent_record!(actor)
-        actor
       end
 
       # The turn check, under the lock, from the revision the row holds.
