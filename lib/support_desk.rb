@@ -161,11 +161,10 @@ module SupportDesk
         next if window.nil?
 
         Ticket.open.assigned_to(agent).awaiting_reply.waiting_over(window).find_each do |ticket|
-          next if ticket.human_required?
-
-          ticket.escalate!(by: :system, reason: "assistant_silent",
-                           summary: "no answer in #{humanize_duration(window)}")
-          moved += 1 if ticket.human_required?
+          # Conditional, under the case's own lock: every predicate above was
+          # true when this row was SELECTED, and a person may have answered
+          # it since (R5).
+          moved += 1 if ticket.escalate_if_still_silent!(agent, window)
         rescue StandardError => e
           report_error(e, context: { hook: :release_silent_assistants, ticket: ticket.id })
         end

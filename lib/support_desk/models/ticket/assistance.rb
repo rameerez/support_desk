@@ -232,9 +232,13 @@ module SupportDesk
             # the draft stays, and so does a person — a conversation that
             # ran out of turns is one somebody has to finish.
             if policy.may_reply? && left&.zero?
-              flag_human_required!(actor: assistant, kind: :escalated, reason: "max_turns",
-                                   summary: metadata[:summary] || metadata["summary"],
-                                   line: :hand_off_line, request: request)
+              handed_off, from = flag_human_required!(actor: assistant, kind: :escalated, reason: "max_turns",
+                                                      summary: metadata[:summary] || metadata["summary"],
+                                                      line: :hand_off_line, request: request)
+              # A conversation that ran out of turns is a hand-off like any
+              # other, and it says so out loud: the host's "a person is
+              # needed here" notifier listens for this and nothing else (R7).
+              publish_escalation!(from: from, reason: :max_turns, by: assistant) if handed_off
               reason = :max_turns
             end
             Outcome.new(action: :drafted, draft: draft, policy: policy, reason: reason, turn: assistant_turn)
@@ -293,7 +297,7 @@ module SupportDesk
         return self unless event
 
         stamp_assistant_action! if assistant
-        SupportDesk.emit_after_commit(:ticket_escalated, self, from: from, reason: reason.to_sym, by: actor)
+        publish_escalation!(from: from, reason: reason, by: actor)
         self
       end
 
@@ -390,6 +394,48 @@ module SupportDesk
         verbs -= %i[reply] unless awaiting_reply?
         verbs -= %i[close] unless assigned_to?(assistant) && awaiting_requester? && !human_required?
         verbs
+      end
+
+      # The silent sweep's own transition: hand this case to a person ONLY if
+      # it is still the case the sweep selected — open, still hers, still owing
+      # the next word, still past her promise, and with nobody asked for yet.
+      # Returns true when it moved. See SupportDesk.release_silent_assistants!.
+      #
+      # Every one of those predicates was true when the sweep SELECTED its
+      # candidates, and a person can answer, take the case or reset the clock
+      # between that query and this write. 0.3.0 rechecked only "closed" and
+      # "already asked for", so a case somebody had just answered was marked
+      # human-required anyway: its priority went up and the customer was told a
+      # person was coming, on a case that already had one (R5).
+      def escalate_if_still_silent!(assistant, window) # :nodoc:
+        event = nil
+        from = nil
+        with_lock(requires_new: true) do
+          next unless open?
+          next unless assigned_to?(assistant)
+          next unless awaiting_reply?
+          next if human_required?
+          next unless waiting_since.present? && waiting_since <= window.ago
+
+          event, from = flag_human_required!(
+            actor: :system, kind: :escalated, reason: "assistant_silent",
+            summary: "no answer in #{SupportDesk.humanize_duration(window)}",
+            line: :hand_off_line, request: nil
+          )
+        end
+        return false unless event
+
+        publish_escalation!(from: from, reason: "assistant_silent", by: :system)
+        true
+      end
+
+      # The ONE place `:ticket_escalated` is published. Every hand-off that
+      # takes her off a case goes through it — her own `escalate!`, the budget
+      # branch of `respond!`, the silent sweep — so no path can write the
+      # transition and forget the signal (R7). A no-op writes no event and
+      # publishes nothing.
+      def publish_escalation!(from:, reason:, by:) # :nodoc:
+        SupportDesk.emit_after_commit(:ticket_escalated, self, from: from, reason: reason.to_sym, by: by)
       end
 
       # Bump the case's revision — the caller holds the lock. `update_columns`

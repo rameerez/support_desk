@@ -19,6 +19,27 @@ module SupportDesk
 
     def turn = @ticket.reload.assistant_turn
 
+    # --- Every hand-off tells the host (R7) --------------------------------------
+
+    test "running out of turns publishes the escalation the host subscribes to" do
+      # The budget branch wrote the event row, released her seat and posted
+      # the public line — everything except the one signal a host's "a person
+      # is needed here" notifier listens for.
+      with_assistant_config(max_turns: 1) do
+        @ticket.respond!("Primera respuesta", by: @rose, turn: turn)
+        ask_again(@ticket, "sigo sin saberlo")
+        @ticket.reload
+        seen = []
+        SupportDesk.on(:ticket_escalated) { |ticket, from:, reason:, by:| seen << [ ticket.id, reason, by ] }
+
+        outcome = @ticket.respond!("Última propuesta", by: @rose, turn: turn)
+
+        assert_equal :max_turns, outcome.reason
+        assert_needs_human @ticket, reason: "max_turns"
+        assert_equal [ [ @ticket.id, :max_turns, @rose ] ], seen
+      end
+    end
+
     # --- She hands it over -------------------------------------------------------
 
     test "escalating releases her seat, flags the case and tells the customer" do

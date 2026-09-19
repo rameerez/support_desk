@@ -190,6 +190,35 @@ module SupportDesk
       end
     end
 
+    test "the sweep leaves a case whose silence ended while it was sweeping" do
+      # The sweep's predicates are true when the candidates are SELECTED. By
+      # the time it reaches the second one, a person has answered it — and
+      # escalating it anyway raises its priority and tells the customer a
+      # person is coming, on a case that already has one.
+      with_assistant_config(responds_within: 60) do
+        first = ticket_for(create_user(name: "Ana"), message: "la primera")
+        second = ticket_for(create_user(name: "Bruno"), message: "la segunda")
+        [ first, second ].each do |ticket|
+          ticket.assign!(to: @rose, by: @rose, turn: ticket.reload.assistant_turn)
+          Ticket.where(id: ticket.id).update_all(waiting_since: 1.hour.ago)
+        end
+        # Answering the second one the moment the first is handed over: the
+        # sweep is between its own SELECT and its own transition, and this
+        # needs no barrier and no stubbed transition to be exactly that.
+        SupportDesk.on(:ticket_escalated) do |ticket, **|
+          Ticket.find(second.id).reply!("Ya te contesto yo", by: @lucia) if ticket.id == first.id
+        end
+
+        moved = SupportDesk.release_silent_assistants!
+
+        assert_predicate first.reload, :human_required?
+        refute_needs_human second.reload
+        assert_assigned_to second, @lucia
+        assert_equal 1, moved, "a case whose silence had ended was counted as moved"
+        refute_ticket_event second, :escalated
+      end
+    end
+
     # --- Redispatch --------------------------------------------------------------
 
     test "a turn nobody acted on is re-emitted" do
