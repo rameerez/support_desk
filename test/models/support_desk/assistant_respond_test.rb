@@ -289,6 +289,24 @@ module SupportDesk
       end
     end
 
+    test "taking her configuration away does not rewrite what she already signed" do
+      # The kill switch removes her from the initializer. Her old bubbles are
+      # already in somebody's transcript, and the requester-facing signature
+      # resolved live configuration — so "— Rose · virtual assistant" quietly
+      # became "— Rose" on a message nobody touched (R8).
+      outcome = respond
+      signed = Chats.message_signature_for(outcome.message)
+
+      assert_match(/virtual assistant/, signed.to_s)
+
+      SupportDesk.reset!
+      configure_support_desk!
+      SupportDesk.subscribe_to_chats!
+
+      assert_equal signed, Chats.message_signature_for(outcome.message.reload)
+      assert_equal "Rose · virtual assistant", SupportDesk::Assistant.find_by(key: "rose").disclosed_name
+    end
+
     test "the export names her whatever the mode" do
       with_assistant_config(disclosure: :none) do
         respond

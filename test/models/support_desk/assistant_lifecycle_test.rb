@@ -500,7 +500,12 @@ module SupportDesk
       refute_predicate orphan, :configured?
       assert_equal "Rose", orphan.name
       assert_equal :off, orphan.autonomy
-      refute_predicate orphan, :disclosed?
+      # What she MAY do is off, and what a requester was already TOLD about
+      # her is not: disclosure is read from the snapshot on her own row, so
+      # taking her out of the initializer does not rewrite an old signature
+      # into a plain human name (R8).
+      assert_predicate orphan, :disclosed?
+      assert_equal "Rose · virtual assistant", orphan.disclosed_name
     end
   end
 end

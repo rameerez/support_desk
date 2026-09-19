@@ -124,7 +124,11 @@ module SupportDesk
               "`config.assistant #{key.inspect} do |assistant| … end`"
       end
 
-      assistants[key] ||= Assistant.for(key)
+      # Resolving her is also when what she is CALLED is written down, so a
+      # message she signed still says the same thing after somebody takes
+      # her out of the initializer (R8). It writes only when configuration
+      # and the row disagree.
+      (assistants[key] ||= Assistant.for(key)).snapshot_disclosure!
     end
 
     # Every assistant record this process has resolved, keyed by key.

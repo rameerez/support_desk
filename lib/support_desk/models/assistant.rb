@@ -52,7 +52,9 @@ module SupportDesk
     # assistant a host removed from the initializer and kept the history of.
     def configured? = SupportDesk.config.assistant?(key)
 
-    def name = settings_config&.name || key.to_s.humanize
+    # What she is called — from configuration while there is any, and from
+    # the snapshot below once there is not. See #snapshot_disclosure!.
+    def name = settings_config&.name.presence || settings["name"].presence || key.to_s.humanize
 
     # Anything `image_tag` accepts, or nil. A callable is passed the record.
     def avatar
@@ -63,14 +65,42 @@ module SupportDesk
     # An unconfigured assistant is capped at :off by construction: there is
     # no rule left saying what she may do, so she may do nothing.
     def autonomy = settings_config&.autonomy || :off
-    def disclosure = settings_config&.disclosure
+    def disclosure = settings_config&.disclosure || settings["disclosure"]&.to_sym
     def max_turns = settings_config&.max_turns
     def responds_within = settings_config&.responds_within
     def may_open_conversations? = settings_config&.may_open_conversations? || false
 
-    def disclosed? = settings_config ? settings_config.disclosed? : false
-    def signs? = settings_config ? settings_config.signs? : false
-    def notice? = settings_config ? settings_config.notice? : false
+    # Read from configuration while there is any, and from the snapshot
+    # otherwise — never simply `false`, because these three decide what a
+    # requester is shown next to a message she already sent (R8).
+    def disclosed? = disclosure.present? && disclosure != :none
+    def signs? = %i[signature_and_notice signature].include?(disclosure)
+    def notice? = %i[signature_and_notice notice].include?(disclosure)
+
+    # Remember what she is called and what is disclosed about her, on her own
+    # row. Written whenever configuration resolves her and the two disagree —
+    # one UPDATE in the life of a setting, and none on the usual read.
+    #
+    # Chats asks the AUTHOR for a signature every time a message is rendered,
+    # so before this the requester-facing line was whatever configuration said
+    # right now: taking her out of the initializer turned "— Rose · virtual
+    # assistant" into "— Rose" on messages nobody had touched, and a host
+    # reading an old transcript could no longer tell that a machine had
+    # written it (R8).
+    #
+    # A RENAME still renames history, deliberately: one assistant, one name,
+    # and the metadata on every message keeps what it was called at the time.
+    # A host that wants per-message immutability points
+    # `Chats.config.message_signature` at that metadata — see the README.
+    def snapshot_disclosure! # :nodoc:
+      return self unless configured?
+
+      snapshot = { "name" => name, "disclosure" => disclosure&.to_s }.compact
+      return self if snapshot.all? { |field, value| settings[field] == value }
+
+      update_columns(settings: settings.merge(snapshot))
+      self
+    end
 
     # --- Who she looks like -----------------------------------------------------
 
