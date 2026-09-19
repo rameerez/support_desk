@@ -125,9 +125,18 @@ module SupportDesk
         raise ArgumentError, "an edited draft can't be blank — reject it instead"
       end
 
+      # The repair commits on its own, so a message whose registration
+      # callback was lost is folded in for good even when the approval this
+      # call was making is then refused as stale (R3).
+      ticket.reconcile_and_commit!
+
       message = nil
       ticket.with_lock(requires_new: true) do
         reload
+        # Ticket, then conversation: an in-flight customer message holds the
+        # conversation row, so `seen_turn` cannot be compared against a case
+        # whose next question is one commit away (R1).
+        ticket.send(:lock_conversation!)
         ticket.send(:reconcile_unregistered_messages!)
         raise InvalidTransition, "draft #{id} is #{status}, not pending" unless pending?
         unless seen_turn.to_s == ticket.assistant_turn

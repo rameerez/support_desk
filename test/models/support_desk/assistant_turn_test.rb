@@ -126,11 +126,15 @@ module SupportDesk
       # Without the fold this would have been a perfectly current turn, and
       # she would have answered a conversation missing its last question.
       assert_raises(StaleTurn) { @ticket.respond!("Hola", by: @rose, turn: held) }
-      # And the refusal took the fold with it (I15): a refused operation
-      # rolls back everything it touched, message pointers included.
+      # The refusal wrote nothing of its own…
       refute_assistant_spoke @ticket
       refute_pending_draft @ticket
-      assert_equal held, turn
+      # …but the fold that CAUSED it is committed separately and stays (R3).
+      # In 0.3.0 the StaleTurn rolled the registration back with it, the next
+      # run read the same revision, and the case could never be answered
+      # again.
+      refute_equal held, turn, "the repair has to outlive the answer it refused"
+      assert_awaiting_reply @ticket
     end
 
     test "two messages on the same instant are both registered" do

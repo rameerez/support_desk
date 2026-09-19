@@ -31,6 +31,39 @@ module SupportDesk
     # the same whatever the level, and a refusal is always a named reason on
     # a record (an `assistant_withheld` event, a policy in a draft's
     # metadata), never silence.
+    #
+    # == The locking protocol: TICKET, then CONVERSATION
+    #
+    # The turn is only as good as the reconciliation behind it, and
+    # reconciliation is a SELECT: on its own it cannot exclude a requester
+    # message that commits one millisecond later. The customer does not take
+    # the ticket lock — they press send, and chats writes a message.
+    #
+    # What chats DOES take is the conversation row. Every message insert
+    # updates `chats_conversations` inside its own transaction
+    # (`Chats::Message#register_on_conversation`, plus the `messages_count`
+    # counter cache), so that row is the serialization point for writes this
+    # gem does not own. Every speaking path therefore takes the ticket's row
+    # lock and then, before reconciling, the conversation's
+    # (`#lock_conversation!`):
+    #
+    # * a requester message already in flight holds that row, so we block
+    #   until it commits — and reconciliation then sees it, which makes the
+    #   turn stale, which is exactly what should happen;
+    # * a message that starts after we hold the row blocks until we commit,
+    #   so our answer is ordered before it and its own turn follows.
+    #
+    # THE ORDER IS ALWAYS TICKET → CONVERSATION. A requester write locks only
+    # the conversation; the after-commit subscriber's `register!` locks the
+    # ticket and then, through the system lines a hand-off posts, the
+    # conversation. Nothing takes them the other way round, and nothing new
+    # may.
+    #
+    # What it does NOT cover: a message whose INSERT was already stamped when
+    # we win the row is still stamped earlier than our answer, so a transcript
+    # can show a question above an answer that did not address it. That is a
+    # genuinely simultaneous send, and its registration raises a turn of its
+    # own.
     module Assistance
       extend ActiveSupport::Concern
 
@@ -61,6 +94,32 @@ module SupportDesk
         scope :assistant_idle_since, lambda { |time|
           awaiting_reply.where(last_requester_message_at: ..time)
                         .where("assistant_acted_at IS NULL OR assistant_acted_at < last_requester_message_at")
+        }
+        # Open cases whose conversation holds a requester message the gem never
+        # folded in. The registration runs after the message's commit, so it can
+        # be LOST — a killed worker, a dropped subscriber — and the clocks then
+        # describe a case that no longer exists: `awaiting_requester` on a case
+        # that is waiting for an answer, which no idle query can see. This one
+        # asks the messages instead of the clocks (R3).
+        scope :with_unregistered_requester_messages, lambda {
+          tickets = quoted_table_name
+          messages = connection.quote_table_name(Chats::Message.table_name)
+          where(<<~SQL.squish)
+            EXISTS (
+              SELECT 1 FROM #{messages} unregistered
+              WHERE unregistered.conversation_id = #{tickets}.conversation_id
+                AND unregistered.kind = 'text'
+                AND unregistered.sender_type = #{tickets}.requester_type
+                AND unregistered.sender_id = #{tickets}.requester_id
+                AND (
+                  #{tickets}.last_requester_message_at IS NULL
+                  OR unregistered.created_at > #{tickets}.last_requester_message_at
+                  OR (unregistered.created_at = #{tickets}.last_requester_message_at
+                      AND #{tickets}.last_requester_message_id IS NOT NULL
+                      AND unregistered.id > #{tickets}.last_requester_message_id)
+                )
+            )
+          SQL
         }
       end
 
@@ -147,7 +206,12 @@ module SupportDesk
         assistant = resolve_assistant!(by)
         raise ArgumentError, "respond! needs something to say" if body.blank? && files.blank?
 
+        # Durable repair first, in a transaction of its own: what it folds in
+        # survives the StaleTurn that folding it in may cause (R3).
+        reconcile_and_commit!
+
         with_lock(requires_new: true) do
+          lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
           ensure_writable!
@@ -185,7 +249,10 @@ module SupportDesk
         assistant = resolve_assistant!(by)
         raise ArgumentError, "draft! needs something to say" if body.blank? && files.blank?
 
+        reconcile_and_commit!
+
         with_lock(requires_new: true) do
+          lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
           ensure_writable!
@@ -333,6 +400,30 @@ module SupportDesk
         update_columns(assistant_revision: assistant_revision.to_i + 1)
       end
 
+      # Fold in every requester message chats has committed but nobody has
+      # registered, in a transaction of ITS OWN, and commit it — whatever the
+      # answer that discovered it then decides. Returns how many it folded in.
+      #
+      # A registration lost after commit (a worker killed between the message's
+      # COMMIT and the subscriber that registers it) used to be unrepairable:
+      # reconciliation ran inside the candidate answer's savepoint, the bumped
+      # revision made that very answer stale, and the StaleTurn rolled the
+      # repair back with it. The next run read the same revision and did the
+      # same thing, for ever (R3).
+      #
+      # Durability is the caller's: at the top level (a job, the recovery task)
+      # this really commits, and the `:assistant_turn` it emits for what it
+      # registered is an ACTIONABLE turn. Inside a host's own transaction it is
+      # a savepoint like any other, and it commits when that does.
+      def reconcile_and_commit! # :nodoc:
+        folded = 0
+        with_lock(requires_new: true) do
+          lock_conversation!
+          folded = reconcile_unregistered_messages!
+        end
+        folded
+      end
+
       # When the assistant last did anything here — what the idle-turn check
       # and the redispatch task read to tell "she decided not to speak" from
       # "nothing is running".
@@ -381,31 +472,50 @@ module SupportDesk
       # around it. Folding it in here makes the turn stale instead, which is
       # exactly what should happen.
       def reconcile_unregistered_messages!
-        return if conversation.nil?
+        return 0 if conversation.nil?
 
+        folded = unregistered_requester_messages.oldest_first.to_a
+        folded.each { |message| record_registration!(message) }
+        folded.size
+      end
+
+      # The requester messages chats has committed that are AHEAD of this
+      # case's watermark — the query half of the rule `registered?` answers in
+      # Ruby, written once so the two can never disagree (R4).
+      def unregistered_requester_messages
         scope = conversation.messages.where(kind: "text", sender_type: requester_type, sender_id: requester_id)
-        if last_requester_message_at.present?
-          scope = if last_requester_message_id.present?
-            # Everything AHEAD of the watermark in chats' transcript order
-            # (created_at, id) — two messages can land on one timestamp, and
-            # the one after the pointer is the real new one. `<> :id` was
-            # wrong here: it also matched the messages that tied with the
-            # watermark and were registered BEFORE it, so folding them in
-            # again bumped the revision and made the current answer stale
-            # for ever (R4).
-            scope.where(
-              "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id > :id)",
-              at: last_requester_message_at, id: last_requester_message_id
-            )
-          else
-            # No pointer to compare against (a 0.2 row whose backfill found
-            # nothing): the clock alone, rather than a comparison against an
-            # empty string that some adapters refuse outright.
-            scope.where("chats_messages.created_at > ?", last_requester_message_at)
-          end
-        end
+        return scope if last_requester_message_at.blank?
+        # No pointer to compare against (a 0.2 row whose backfill found
+        # nothing): the clock alone, rather than a comparison against an empty
+        # string that some adapters refuse outright.
+        return scope.where("chats_messages.created_at > ?", last_requester_message_at) if
+          last_requester_message_id.blank?
 
-        scope.oldest_first.each { |message| record_registration!(message) }
+        # Everything AHEAD of the watermark in chats' transcript order
+        # (created_at, id) — two messages can land on one timestamp, and the one
+        # after the pointer is the real new one. `<> :id` was wrong here: it
+        # also matched the messages that tied with the watermark and were
+        # registered BEFORE it, so folding them in again bumped the revision and
+        # made the current answer stale for ever (R4).
+        scope.where(
+          "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id > :id)",
+          at: last_requester_message_at, id: last_requester_message_id
+        )
+      end
+
+      # A SELECT … FOR UPDATE on the conversation row, taken AFTER the ticket's
+      # and before any reconciliation. See the module comment: this row is what
+      # chats updates inside every message's own transaction, so it is the only
+      # seam that serializes a customer's write against ours without a write
+      # hook in chats (R1).
+      #
+      # Read through the id rather than the association: `lock!` refuses a
+      # record with unsaved changes, and nothing here wants the in-memory
+      # conversation reloaded.
+      def lock_conversation!
+        return if conversation_id.blank?
+
+        Chats::Conversation.lock.find_by(id: conversation_id)
       end
 
       # Nothing was written, and the reason is on the record: a policy that

@@ -231,6 +231,53 @@ module SupportDesk
       end
     end
 
+    # --- A lost registration is repairable (R3) ----------------------------------
+
+    test "redispatch repairs a committed message whose registration was lost" do
+      # A worker killed between the message's COMMIT and the subscriber that
+      # registers it. Nothing is wrong with the message; the case simply does
+      # not know about it, and its clocks say the customer has the last word.
+      @ticket.respond!("Lo estamos mirando", by: @rose, turn: turn)
+
+      assert_awaiting_requester @ticket
+
+      Ticket.stub(:for_conversation, nil) { ask_again(@ticket, "¿hay novedades?") }
+      @ticket.reload
+      held = @ticket.assistant_turn
+
+      # The clocks still say the customer has the last word, so the idle
+      # query — which reads those clocks — cannot see this case at all.
+      assert_predicate @ticket, :awaiting_requester?
+      assert_empty Ticket.open.assistant_idle_since(1.minute.from_now).to_a
+
+      turns = []
+      SupportDesk.on(:assistant_turn) { |_ticket, _assistant, _message, turn:| turns << turn }
+
+      travel 10.minutes do
+        SupportDesk.redispatch_assistant_turns!
+      end
+
+      refute_equal held, @ticket.reload.assistant_turn, "redispatch never repaired the case"
+      assert_awaiting_reply @ticket
+      assert_includes turns, @ticket.assistant_turn, "the repaired case has to end in an actionable turn"
+    end
+
+    test "the repair outlives the answer whose turn it made stale" do
+      Ticket.stub(:for_conversation, nil) { ask_again(@ticket, "¿hay novedades?") }
+      @ticket.reload
+      held = @ticket.assistant_turn
+
+      assert_raises(StaleTurn) { @ticket.respond!("Respuesta vieja", by: @rose, turn: held) }
+
+      # In 0.3.0 the refusal rolled the registration back with it and the next
+      # run read the very same revision — the same refusal, for ever.
+      refute_equal held, @ticket.reload.assistant_turn
+      assert_awaiting_reply @ticket
+      @ticket.respond!("Respuesta al día", by: @rose, turn: @ticket.assistant_turn)
+
+      assert_awaiting_requester @ticket
+    end
+
     # --- Outreach ----------------------------------------------------------------
 
     test "she may not write first unless she is allowed to and works at :reply" do

@@ -863,6 +863,7 @@ module SupportDesk
     def reply!(body = nil, by: nil, files: [], request: nil, metadata: {}, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      reconcile_and_commit! if SupportDesk.ai_actor?(actor)
 
       reply_under_lock!(body, by: actor, files: files, request: request, metadata: metadata, turn: turn)
     end
@@ -1012,9 +1013,11 @@ module SupportDesk
       actor = resolve_actor(by)
       ensure_agent!(actor)
       assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
+      reconcile_and_commit! if assistant
 
       event = write_transition!(:closed, actor: actor, request: request) do
         if assistant
+          lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
           policy = assistant_policy(assistant)
@@ -1454,6 +1457,7 @@ module SupportDesk
       # gem supplies a turn itself, because an outreach reply into an
       # existing case has no earlier turn for anybody to have held.
       turn = internal_turn(turn)
+      lock_conversation!
       reconcile_unregistered_messages!
       ensure_current_turn!(turn)
       ensure_writable!
