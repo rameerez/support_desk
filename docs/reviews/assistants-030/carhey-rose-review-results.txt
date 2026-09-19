@@ -1,0 +1,9 @@
+Running 42 tests in a single process (parallelization threshold is 50)
+Run options: --seed 4199
+
+# Running:
+
+..........................................
+
+Finished in 3.908635s, 10.7454 runs/s, 53.7272 assertions/s.
+42 runs, 210 assertions, 0 failures, 0 errors, 0 skips

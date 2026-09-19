@@ -32,6 +32,7 @@ tickets that are conversations — built as a *product gem* on the `chats`
 | 14 | [assistants.md](14-assistants.md) | AI agents as first-class citizens: `SupportDesk::Assistant`, autonomy levels, drafts + human review, the turn token, `escalate!` / `request_human!`, brief + transcript. Design only, not implemented (2026-09-18). |
 | 15 | [assistants-prd.md](15-assistants-prd.md) | **The implementation contract for 14 (v3)**: full API, algorithms under lock, migration, surfaces, locales, harness contract + generator, test plan, CHANGELOG, delivery, CarHey "Rose" rollout, edge-case register. **Implemented**: rameerez/support_desk#6 → v0.3.0 (2026-09-19). |
 | 15r | [assistants-review-1.md](15-assistants-review-1.md) · [assistants-review-2.md](15-assistants-review-2.md) | The adversarial review of v1 (46 findings) and the disposition of each in v3. |
+| 16 | [assistants-implementation-review.md](16-assistants-implementation-review.md) · [reviews/assistants-030/](reviews/assistants-030/) | Adversarial review of the shipped 0.3.0 (9 defects, executable probes) → fixed in support_desk#8 / v0.3.1 (2026-09-19). |
 
 ## Ecosystem context (facts, verified 2026-09-15)
 

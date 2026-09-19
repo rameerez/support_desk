@@ -1,0 +1,35 @@
+Run options: --seed 35736
+
+# Running:
+
+RACE MESSAGE ORDER: ["Original question", "New question", "Answer based on old question"]
+F
+
+Failure:
+AdversarialConcurrencyReviewTest#test_a_requester_commit_after_reconciliation_prevents_a_stale_answer [test/adversarial_concurrency_review_test.rb:43]:
+assistant answered after the unseen requester message committed
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_concurrency_review_test.rb:7
+
+RACE MESSAGE ORDER: ["Original question", "New question", "Proposed answer"]
+F
+
+Failure:
+AdversarialConcurrencyReviewTest#test_a_requester_commit_after_reconciliation_prevents_an_unseen_draft_approval [test/adversarial_concurrency_review_test.rb:84]:
+reviewer sent a draft without seeing the committed new requester message.
+Expected #<Chats::Message id: 22, conversation_id: 7, sender_type: "SupportDesk::Desk", sender_id: 1, author_type: "User", author_id: 10, kind: "text", body: "Proposed answer", reply_to_id: nil, edited_at: nil, deleted_at: nil, metadata: {"support_desk" => {"drafted_by" => "Z2lkOi8vZHVtbXkvU3VwcG9ydERlc2s6OkFzc2lzdGFudC8x", "draft_id" => "3", "edited" => false}}, created_at: "2026-09-19 01:51:01.323297000 +0000", updated_at: "2026-09-19 01:51:01.323297000 +0000"> to be nil.
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_concurrency_review_test.rb:45
+
+Stopped processing SimpleCov as a previous error not related to SimpleCov has been detected
+
+
+Finished in 0.217590s, 9.1916 runs/s, 27.5748 assertions/s.
+2 runs, 6 assertions, 2 failures, 0 errors, 0 skips
+
+============================================================
+COVERAGE SUMMARY
+============================================================
+Line Coverage:   97.22%
+Branch Coverage: 81.71%
+============================================================

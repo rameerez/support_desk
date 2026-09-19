@@ -1,0 +1,86 @@
+Run options: --seed 40277
+
+# Running:
+
+F
+
+Failure:
+AdversarialReviewTest#test_deactivation_releases_held_cases_even_with_no_silent_timeout [test/adversarial_review_test.rb:44]:
+inactive assistant retains case forever
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_review_test.rb:39
+
+F
+
+Failure:
+AdversarialReviewTest#test_a_committed_kill_switch_is_checked_after_waiting_for_the_ticket_lock [test/adversarial_review_test.rb:95]:
+assistant wrote after deactivation committed while acquiring the case lock
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_review_test.rb:81
+
+F
+
+Failure:
+AdversarialReviewTest#test_removing_config_preserves_historical_disclosed_signatures [test/adversarial_review_test.rb:103]:
+flag off rewrites existing assistant disclosure.
+Expected: "— Rose · virtual assistant"
+  Actual: "— Rose"
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_review_test.rb:98
+
+F
+
+Failure:
+AdversarialReviewTest#test_a_stale_assistant_instance_cannot_take_a_case_from_a_human [test/adversarial_review_test.rb:65]:
+assistant stole the human seat using stale pre-lock checks
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_review_test.rb:57
+
+F
+
+Failure:
+AdversarialReviewTest#test_max_turn_escalation_publishes_the_human_alert_event [test/adversarial_review_test.rb:78]:
+max-turns handoff never notifies the host escalation subscriber.
+Expected: 1
+  Actual: 0
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_review_test.rb:68
+
+F
+
+Failure:
+AdversarialReviewTest#test_silent_sweep_rechecks_a_candidate_after_an_answer_wins_the_race [test/adversarial_review_test.rb:33]:
+sweep escalated a case that was already answered
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_review_test.rb:21
+
+F
+
+Failure:
+AdversarialReviewTest#test_redispatch_repairs_a_committed_requester_message_whose_callback_was_lost [test/adversarial_review_test.rb:55]:
+redispatch keeps retrying the same stale token forever.
+Expected "t4-r2" to not be equal to "t4-r2".
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_review_test.rb:47
+
+E
+
+Error:
+AdversarialReviewTest#test_equal_timestamp_messages_allow_an_answer_after_both_have_been_registered:
+SupportDesk::StaleTurn: t4-r4 is stale on T-YZ638D: the case has changed (now t4-r5)
+    test/adversarial_review_test.rb:17:in 'block in <class:AdversarialReviewTest>'
+
+bin/rails test /private/tmp/support-desk-030-adversarial/test/adversarial_review_test.rb:11
+
+Stopped processing SimpleCov as a previous error not related to SimpleCov has been detected
+
+
+Finished in 0.374846s, 21.3421 runs/s, 26.6776 assertions/s.
+8 runs, 10 assertions, 7 failures, 1 errors, 0 skips
+
+============================================================
+COVERAGE SUMMARY
+============================================================
+Line Coverage:   97.22%
+Branch Coverage: 81.71%
+============================================================
