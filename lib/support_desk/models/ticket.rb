@@ -61,6 +61,12 @@ module SupportDesk
     has_many :events, class_name: "SupportDesk::Event", inverse_of: :ticket, dependent: :delete_all
     has_many :messages, through: :conversation, source: :messages
 
+    # The assistant surface — the turn, the policy gates, her two verbs and
+    # the two exits — in its own file. The GATES inside the verbs below stay
+    # here, next to the verbs they guard: a reader looking at `close!` has to
+    # see what stops a machine closing a case.
+    include Assistance
+
     # Persist only the path. Resolving behavior needs this ticket's desk;
     # an attribute caster has no record context and cannot choose the tree.
     attribute :topic, Topic::Type.new
@@ -224,12 +230,14 @@ module SupportDesk
         # something to infer from Current.actor, and an agent passed as their
         # own requester is asking for help, not writing to themselves.
         by_support = !same_actor?(opener, requester)
-        ensure_opener!(opener) if by_support
+        ensure_opener!(opener, desk) if by_support
 
         # The subject is checked BEFORE the topic: "this isn't supportable" is
         # the useful error, and an unsupportable record has no topic to find.
         validate_subject!(about, requester)
         node = resolve_topic!(topic, about, desk, requester, about, by_support: by_support)
+        # The topic is what caps her, so the cap is checked once it is known.
+        ensure_assistant_may_open!(opener, requester, desk, node) if by_support && SupportDesk.ai_actor?(opener)
 
         cardinality = cardinality_key_for(requester: requester, subject: about, topic: node)
         existing = existing_for(requester: requester, desk: desk, subject: about, topic: node)
@@ -362,7 +370,7 @@ module SupportDesk
       # Automation (`by: :system`) is refused by name rather than by
       # NoMethodError three frames in — it is deferred work, not a typo (see
       # docs/12-open-questions.md Q17).
-      def ensure_opener!(opener)
+      def ensure_opener!(opener, desk)
         if opener.is_a?(Symbol)
           raise NotAnAgent, "can't open a ticket as #{opener.inspect} — a case is opened by somebody who can " \
                             "answer it, and automation openers aren't supported yet; pass an agent record"
@@ -371,6 +379,37 @@ module SupportDesk
           raise NotAnAgent, "can't open a ticket as an unsaved #{opener.class} — save the agent first"
         end
         ensure_agent_record!(opener)
+        return unless SupportDesk.ai_actor?(opener)
+
+        # Writing to somebody who never wrote to you is the one thing an
+        # assistant does that nobody asked for, so it takes its own
+        # permission on top of everything else.
+        unless opener.is_a?(SupportDesk::Assistant) && same_actor?(opener, desk.assistant)
+          raise NotAnAssistant,
+                "only desk #{desk.key}'s own assistant can open a case, and only when she may"
+        end
+        unless opener.may_open_conversations?
+          raise AssistantNotAllowed.new(nil, verb: :open,
+                                             message: "#{opener.key} may not open conversations — set " \
+                                                      "`may_open_conversations = true` if that is the intent")
+        end
+        return if AssistantPolicy::RANK.fetch(opener.autonomy) >= AssistantPolicy::RANK.fetch(:reply)
+
+        raise AssistantNotAllowed.new(nil, verb: :open,
+                                           message: "#{opener.key} works at #{opener.autonomy}: opening a " \
+                                                    "case means speaking first, which takes :reply")
+      end
+
+      # The topic's cap and the host's `cap` block, asked of the case this is
+      # ABOUT to be. Her per-case budget is not checked here: a brand new
+      # case has spent none of it, so the only way it could refuse is
+      # `max_turns 0`, and the policy below covers her level anyway.
+      def ensure_assistant_may_open!(opener, requester, desk, node)
+        candidate = new(desk: desk, requester: requester, topic: node)
+        policy = AssistantPolicy.for(candidate, opener)
+        return if policy.may_reply?
+
+        raise AssistantNotAllowed.new(policy, verb: :open)
       end
 
       def describe_record(record)
@@ -560,9 +599,12 @@ module SupportDesk
       # subscriber then finds the message already registered and does
       # nothing.
       def post_opening!(ticket, message, files:, by:, by_support:)
-        notice = post_opening_line!(ticket)
+        notices = [ post_opening_line!(ticket) ]
 
-        posted = if by_support
+        posted = if by_support && SupportDesk.ai_actor?(by)
+          notices << ticket.send(:post_disclosure_notice!, by) if by.notice?
+          ticket.send(:post_assistant_opening!, message, files: files, assistant: by)
+        elsif by_support
           # Never the inbound "no message, hand the ticket back" shortcut: a
           # desk that writes first with nothing to say is a chats validation
           # error, and this whole transaction goes with it.
@@ -572,7 +614,8 @@ module SupportDesk
         end
 
         ticket.send(:record_registration!, posted) if posted
-        pin_opening_line!(ticket, notice, posted)
+        ticket.send(:stamp_assistant_action!) if by_support && SupportDesk.ai_actor?(by)
+        pin_opening_lines!(ticket, notices, posted)
         ticket
       end
 
@@ -595,11 +638,16 @@ module SupportDesk
       # Only this new notice moves, never anybody's real message, and the
       # human message still owns the conversation's last-message pointer, so
       # nothing has to be recomputed afterwards.
-      def pin_opening_line!(ticket, notice, posted)
-        return if notice.nil?
+      def pin_opening_lines!(ticket, notices, posted)
+        notices = Array(notices).compact
+        return if notices.empty?
 
         anchor = posted&.created_at || ticket.opened_at
-        notice.update_columns(created_at: anchor - ordering_tick)
+        # Backwards, one tick each, so the last line written sits closest to
+        # the message and the first one opens the thread.
+        notices.reverse.each_with_index do |notice, index|
+          notice.update_columns(created_at: anchor - (ordering_tick * (index + 1)))
+        end
         # When there IS a first message it owns the conversation's
         # last-message pointer and nothing needs repairing. When there isn't,
         # the notice is that pointer, and chats denormalised its timestamp
@@ -622,8 +670,12 @@ module SupportDesk
       # running before any of it.
       def reply_into!(ticket, message, files:, by:, by_support:, request:, authorize_reuse:)
         if by_support
+          # `turn: :current` is for the assistant: reuse turns outreach into
+          # an ordinary reply, with her full rules — and the turn she has to
+          # hold is the one this lock reads, because there was never an
+          # earlier one to give her.
           ticket.send(:reply_under_lock!, message, by: by, files: files, request: request,
-                                                   authorize: authorize_reuse)
+                                                   authorize: authorize_reuse, turn: :current)
         else
           ticket.with_lock(requires_new: true) do
             authorize_reuse&.call(ticket)
@@ -803,21 +855,35 @@ module SupportDesk
     # by whoever answers first and a drop-in on somebody else's ticket is
     # recorded; under :take_over the drop-in takes it; under :assignee_only
     # it raises SupportDesk::NotAllowed. Returns the Chats::Message.
-    def reply!(body = nil, by: nil, files: [], request: nil)
+    #
+    # `by:` the assistant needs `turn:` and her policy's permission — see
+    # SupportDesk::Ticket::Assistance. `metadata:` rides on the message
+    # (provenance for a draft a human sent; hosts nest their own under
+    # "host").
+    def reply!(body = nil, by: nil, files: [], request: nil, metadata: {}, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
 
-      reply_under_lock!(body, by: actor, files: files, request: request)
+      reply_under_lock!(body, by: actor, files: files, request: request, metadata: metadata, turn: turn)
     end
 
     # An internal note: in the timeline and the console, never in the
     # conversation, never mirrored to any channel. Returns the Event.
-    def note!(body, by: nil, request: nil)
+    def note!(body, by: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
       raise ArgumentError, "a note needs something to say" if body.blank?
 
-      event = write_transition!(:note, actor: actor, request: request) { { "note" => body.to_s } }
+      event = write_transition!(:note, actor: actor, request: request) do
+        if assistant
+          ensure_current_turn!(turn)
+          policy = assistant_policy(assistant)
+          raise AssistantNotAllowed.new(policy, verb: :note) unless policy.may_observe?
+        end
+        { "note" => body.to_s }
+      end
+      stamp_assistant_action! if assistant && event
       SupportDesk.emit_after_commit(:note_added, self, event) if event
       event
     end
@@ -828,9 +894,14 @@ module SupportDesk
     def assign!(to:, by: nil, reason: nil, note: nil, request: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      ensure_assistant_may_assign!(actor, to)
       ensure_assignable!(to)
 
       reason ||= to == actor ? :taken : :assigned
+      # A PERSON giving the case back to the assistant is the one action that
+      # lifts the three human-side flags — and it says so out loud, in the
+      # payload, because nothing else may clear them (I9).
+      handing_back = SupportDesk.ai_actor?(to) && !SupportDesk.ai_actor?(actor)
       assignment = nil
 
       event = write_transition!(:assigned, actor: actor, request: request) do
@@ -838,13 +909,20 @@ module SupportDesk
         next false if assigned_to?(to)
 
         assignment = Assignment.open!(ticket: self, agent: to, by: actor, reason: reason, note: note)
-        update!(assignee: to)
-        { "assignee" => SupportDesk.actor_key(to), "reason" => reason.to_s }
+        attributes = { assignee: to }
+        if handing_back
+          attributes.merge!(human_required_at: nil, human_required_reason: nil, assistant_paused_at: nil,
+                            assistant_paused_reason: nil, assistant_cap: nil)
+        end
+        update!(attributes)
+        { "assignee" => SupportDesk.actor_key(to), "reason" => reason.to_s,
+          "handed_back" => (true if handing_back) }.compact
       end
       return self unless event
 
       announce_assignment!(to, first: assignments.count <= 1)
       SupportDesk.emit_after_commit(:ticket_assigned, self, assignment)
+      emit_assistant_turn if handing_back && awaiting_reply?
       self
     end
 
@@ -853,7 +931,13 @@ module SupportDesk
     def hand_off!(to:, note: nil, by: nil, request: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      if SupportDesk.ai_actor?(actor)
+        # She does not choose who picks a case up. `escalate!` is her way
+        # out: it asks for a person rather than naming one.
+        raise AssistantNotAllowed.new(assistant_policy(resolve_assistant!(actor)), verb: :hand_off)
+      end
       ensure_assignable!(to)
+      handing_back = SupportDesk.ai_actor?(to)
       from = nil
       assignment = nil
       event = write_transition!(:handed_off, actor: actor, request: request) do
@@ -867,13 +951,20 @@ module SupportDesk
         from = assignee
         assignment = Assignment.open!(ticket: self, agent: to, by: actor, reason: :handed_off, note: note,
                                       release_reason: :handed_off)
-        update!(assignee: to)
-        { "from" => SupportDesk.actor_key(from), "to" => SupportDesk.actor_key(to), "note" => note }
+        attributes = { assignee: to }
+        if handing_back
+          attributes.merge!(human_required_at: nil, human_required_reason: nil, assistant_paused_at: nil,
+                            assistant_paused_reason: nil, assistant_cap: nil)
+        end
+        update!(attributes)
+        { "from" => SupportDesk.actor_key(from), "to" => SupportDesk.actor_key(to), "note" => note,
+          "handed_back" => (true if handing_back) }
       end
       return self unless event
 
       announce_assignment!(to, first: false)
       SupportDesk.emit_after_commit(:ticket_handed_off, self, assignment, from: from, note: note)
+      emit_assistant_turn if handing_back && awaiting_reply?
       self
     end
 
@@ -881,9 +972,17 @@ module SupportDesk
     def release!(by: nil, reason: :released, request: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
       from = nil
       event = write_transition!(:released, actor: actor, request: request) do
         raise InvalidTransition, "can't release a closed ticket" if closed?
+        if assistant
+          policy = assistant_policy(assistant)
+          raise AssistantNotAllowed.new(policy, verb: :release) unless policy.may_observe?
+          # Her own seat, and only hers: putting a PERSON's case back in the
+          # pile is not something a machine gets to decide.
+          raise AssistantNotAllowed.new(policy, verb: :release) unless assigned_to?(assistant)
+        end
         next false if unassigned?
 
         from = assignee
@@ -898,17 +997,32 @@ module SupportDesk
     end
 
     # Close the case. Closing a closed ticket is a no-op, not an error.
-    def close!(by: nil, request: nil)
+    def close!(by: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
 
       event = write_transition!(:closed, actor: actor, request: request) do
+        if assistant
+          reconcile_unregistered_messages!
+          ensure_current_turn!(turn)
+          policy = assistant_policy(assistant)
+          # Four conditions, and every one of them is somebody else's word:
+          # her level allows it, she is the one holding the case, the
+          # customer has the last word (so nothing is waiting for an answer)
+          # and nobody has asked for a person.
+          raise AssistantNotAllowed.new(policy, verb: :close) unless policy.may_close?
+          raise AssistantNotAllowed.new(policy, verb: :close) unless assigned_to?(assistant)
+          raise AssistantNotAllowed.new(policy, verb: :close) unless awaiting_requester?
+          raise AssistantNotAllowed.new(policy, verb: :close) if human_required?
+        end
         next false if closed?
 
+        expired = expire_pending_drafts!
         assignments.open.each { |assignment| assignment.release!(reason: :closed) }
         update!(status: "closed", closed_at: Time.current, closed_by: record_actor(actor),
                 awaiting: "none", waiting_since: nil)
-        {}
+        { "expired_drafts" => (expired if expired.positive?) }
       end
       return self unless event
 
@@ -924,10 +1038,17 @@ module SupportDesk
     # the pool.
     def reopen!(by: nil, request: nil)
       actor = resolve_actor(by)
+      if SupportDesk.ai_actor?(actor)
+        raise AssistantNotAllowed.new(assistant_policy(resolve_assistant!(actor)), verb: :reopen)
+      end
 
       event = write_transition!(:reopened, actor: actor, request: request) do
         next false unless closed?
 
+        # Read BEFORE the update clears it: whether the case we are bringing
+        # back is one the assistant closed is the whole question behind the
+        # cap below, and `closed_by` is where it is written down.
+        closed_by_assistant = closed_by_type == SupportDesk::Assistant.polymorphic_name
         # Order matters: waiting_since is DERIVED from awaiting, so awaiting
         # has to be the reopened value before it is read. Computing both in
         # one update! hash reads the closed ticket's "none" and stores nil —
@@ -937,8 +1058,8 @@ module SupportDesk
                           cardinality_key: "reopened:#{id}")
         self.waiting_since = waiting_since_from_clocks
         save!
-        restore_assignment!(by: actor)
-        { "reopen_count" => reopen_count }
+        capped = restore_assignment!(by: actor, closed_by_assistant: closed_by_assistant)
+        { "reopen_count" => reopen_count, "assistant_capped" => (true if capped) }.compact
       end
       return self unless event
 
@@ -953,6 +1074,12 @@ module SupportDesk
       # Agents may file onto any topic in the tree, including ones no
       # requester is offered (`only:`); requesters may not file at all.
       ensure_agent!(actor)
+      # Triage is where authority comes from — a topic decides the cap she
+      # works under, so refiling her own case would be widening her own
+      # policy (I10). 0.3 refuses it outright.
+      if SupportDesk.ai_actor?(actor)
+        raise AssistantNotAllowed.new(assistant_policy(resolve_assistant!(actor)), verb: :triage)
+      end
       node = desk_config.topics.find(to.to_s) ||
              raise(UnknownTopic, "no topic #{to.inspect} on desk #{desk.key}")
 
@@ -962,7 +1089,11 @@ module SupportDesk
 
         update!(topic: node, priority: [ priority.to_i, node.priority ].max,
                 cardinality_key: recomputed_cardinality_key(subject: subject, topic: node))
-        { "from" => from&.path, "to" => node.path }
+        # A refile onto a capped topic is a refile onto a case she may no
+        # longer answer, so her seat goes with it — in the same transition,
+        # so the queue never shows a machine holding a case it can't work.
+        released = release_assistant_if_unfit!
+        { "from" => from&.path, "to" => node.path, "assistant_released" => (true if released) }
       end
       return self unless event
 
@@ -974,6 +1105,11 @@ module SupportDesk
     def attach_subject!(record, by: nil, request: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      # Same reason as `change_topic!`: what a case is ABOUT decides what may
+      # be done on it, so a machine does not get to say.
+      if SupportDesk.ai_actor?(actor)
+        raise AssistantNotAllowed.new(assistant_policy(resolve_assistant!(actor)), verb: :triage)
+      end
       unless record.respond_to?(:supportable?) && record.supportable?
         raise NotSupportable, "#{record.class} isn't supportable — add `supportable topic: :something` to it"
       end
@@ -1052,6 +1188,9 @@ module SupportDesk
     # test instead of quietly moving the boundary.
     def actions_for(agent)
       return [] unless agent.respond_to?(:support_agent?) && agent.support_agent?
+      # A machine's verbs are its policy's, filtered by the same state. Same
+      # boundary, different vocabulary — see #assistant_actions_for.
+      return assistant_actions_for(agent) if SupportDesk.ai_actor?(agent)
       # Off duty is a real answer: the console can still show the case, and
       # an agent passing by can still leave a note, but nothing that speaks
       # to the requester is offered to somebody who isn't working.
@@ -1070,6 +1209,11 @@ module SupportDesk
         actions << :release if assigned?
         actions << :change_topic
         actions << :close
+        if pending_draft
+          actions << :send_draft if may_reply?(agent) && !requester_unavailable?
+          actions << :reject_draft
+        end
+        actions << (assistant_paused? ? :resume_assistant : :pause_assistant) if assistant
       end
       actions
     end
@@ -1077,6 +1221,10 @@ module SupportDesk
     # Whether +agent+ may answer right now under this desk's reply policy.
     def may_reply?(agent)
       return false unless agent.respond_to?(:support_agent?) && agent.support_agent?
+      # A case a machine is holding is a case any person may answer,
+      # whatever the desk says about assignees: `:assignee_only` exists so
+      # two people don't answer at once, and she is not one (I8).
+      return true if held_by_assistant? && !SupportDesk.ai_actor?(agent)
       return true unless desk_config.reply_policy == :assignee_only
 
       assigned_to?(agent)
@@ -1086,9 +1234,11 @@ module SupportDesk
     # the whole on-duty pool while it's unheld. The gem computes it; the
     # host delivers it.
     def agents_to_notify
-      return [ assignee ].compact if assigned?
+      # A case the assistant holds is a case no person has seen, so the pool
+      # hears about it: notifying a machine is notifying nobody.
+      return [ assignee ].compact if assigned? && !held_by_assistant?
 
-      desk.on_duty_agents.to_a
+      desk.on_duty_agents.to_a.reject { |agent| SupportDesk.ai_actor?(agent) }
     end
 
     # Generic on purpose: a lock screen shouldn't spell out what somebody's
@@ -1132,8 +1282,15 @@ module SupportDesk
     # Post a message as the DESK, signed by the agent who wrote it — every
     # answer, and the desk's first word when it writes first. One place knows
     # "the desk sends, the human signs".
-    def post_agent_message!(body, files: [], by:) # :nodoc:
-      desk.message!(conversation, body, files: files, author: by)
+    # `metadata:` is the provenance a message carries: who drafted it, what
+    # policy allowed it, what the machine declared about it. Posted through
+    # `messages.create!` rather than `desk.message!` for one reason only —
+    # chats' sugar takes no metadata, and the validations are the same.
+    def post_agent_message!(body, files: [], by:, metadata: {}) # :nodoc:
+      attributes = { sender: desk, body: body, author: by }
+      attributes[:files] = files if files.present?
+      attributes[:metadata] = metadata if metadata.present?
+      conversation.messages.create!(**attributes)
     end
 
     def inspect
@@ -1170,10 +1327,44 @@ module SupportDesk
       end
 
       ensure_agent!(agent)
+      return unless SupportDesk.ai_actor?(agent)
+
+      # "Could she hold this case once the human-side flags were lifted?" —
+      # the hand-back question, so the very flags a hand-back exists to
+      # clear are not what refuses it. Her autonomy, the topic and the host's
+      # cap block still decide.
+      policy = assistant_policy(agent, hand_back: true)
+      raise AssistantNotAllowed.new(policy, verb: :take) unless policy.may_hold?
+    end
+
+    # An assistant may take a case, and that is all: only herself, only when
+    # nobody holds it, and only at a level that may answer.
+    def ensure_assistant_may_assign!(actor, to)
+      return unless SupportDesk.ai_actor?(actor)
+
+      assistant = resolve_assistant!(actor)
+      policy = assistant_policy(assistant)
+      unless self.class.same_actor?(actor, to)
+        raise AssistantNotAllowed.new(policy, verb: :assign,
+                                              message: "#{assistant.key} may not give #{reference} to " \
+                                                       "anybody — an assistant can only take a case herself")
+      end
+      raise AssistantNotAllowed.new(policy, verb: :take) unless unassigned?
+      raise AssistantNotAllowed.new(policy, verb: :take) unless policy.may_hold?
     end
 
     def ensure_agent!(actor)
       return if actor.is_a?(Symbol)
+      # An AI-kind actor that is not a SupportDesk::Assistant is refused on
+      # every write, by it or to it (I2). A host model declared `kind: :ai`
+      # is a machine the gem knows nothing about, and treating it as a human
+      # agent — which is what 0.2 did — hands it every human's authority.
+      if SupportDesk.ai_actor?(actor) && !actor.is_a?(SupportDesk::Assistant)
+        raise NotAnAssistant,
+              "#{describe_actor(actor)} is declared `acts_as_support_agent kind: :ai` but isn't this gem's " \
+              "assistant — configure one with `config.assistant` and act as SupportDesk.assistant(key)"
+      end
+
       self.class.ensure_agent_record!(actor)
     end
 
@@ -1211,15 +1402,46 @@ module SupportDesk
     # `authorize:` is the console's hook (see Ticket.open_or_reply!): it runs
     # under this lock, before any policy side effect, and a raise there rolls
     # the whole thing back.
-    def reply_under_lock!(body, by:, files:, request:, authorize: nil)
+    def reply_under_lock!(body, by:, files:, request:, authorize: nil, metadata: {}, turn: nil)
       with_lock(requires_new: true) do
         authorize&.call(self)
+        next assistant_reply_under_lock!(body, assistant: by, files: files, request: request,
+                                               metadata: metadata, turn: turn) if SupportDesk.ai_actor?(by)
+
         ensure_writable!
         apply_reply_policy!(by, request: request)
-        posted = post_agent_message!(body, files: files, by: by)
+        posted = post_agent_message!(body, files: files, by: by, metadata: metadata)
+        # A person answering makes every machine proposal on this case out of
+        # date — including one they are about to send, which is why the draft
+        # being sent says so and is left alone.
+        supersede_pending_drafts!(except: metadata.dig("support_desk", "draft_id"))
         record_registration!(posted)
         posted
       end
+    end
+
+    # `reply!` by the assistant: her full rules, under the lock the caller
+    # already holds. Everything here is also what `respond!` runs — this is
+    # the path for a host that decided to answer rather than ask policy.
+    def assistant_reply_under_lock!(body, assistant:, files:, request:, metadata:, turn:)
+      assistant = resolve_assistant!(assistant)
+      # `:current` means "the turn as this lock sees it" — the one place the
+      # gem supplies a turn itself, because an outreach reply into an
+      # existing case has no earlier turn for anybody to have held.
+      turn = assistant_turn if turn == :current
+      reconcile_unregistered_messages!
+      ensure_current_turn!(turn)
+      ensure_writable!
+
+      policy = assistant_policy(assistant)
+      raise AssistantNotAllowed.new(policy, verb: :reply) unless policy.may_reply?
+      raise AssistantNotAllowed.new(policy, verb: :not_your_turn) unless awaiting_reply?
+
+      left = assistant_turns_left
+      raise AssistantNotAllowed.new(policy, verb: :max_turns) if left&.zero?
+
+      speak!(body, assistant, policy: policy, turn: turn, files: files, confidence: nil, sources: [],
+                              metadata: metadata, request: request)
     end
 
     def apply_reply_policy!(actor, request: nil)
@@ -1238,6 +1460,17 @@ module SupportDesk
 
         assign!(to: actor, by: actor, request: request)
       elsif !assigned_to?(actor)
+        # Humans outrank assistants, under EVERY reply policy (I8). A person
+        # answering a case a machine is holding takes it over: there is
+        # nothing to ask about "who owns this" when one of the two can't
+        # want it, and leaving her seated would keep her answering next.
+        if held_by_assistant? && !SupportDesk.ai_actor?(actor)
+          return assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request)
+        end
+        # Belt: the `held_by_human` floor already turned this into a draft,
+        # so an assistant reaching here is a bug, not a policy question.
+        raise AssistantNotAllowed.new(assistant_policy(actor), verb: :reply) if SupportDesk.ai_actor?(actor)
+
         case policy
         when :assignee_only
           raise NotAllowed, "ticket #{reference} is held by #{describe_actor(assignee)} and this desk only " \
@@ -1270,7 +1503,11 @@ module SupportDesk
       payload = yield
       return nil if payload == false || payload.nil?
 
-      Event.record!(ticket: self, kind: kind, actor: actor, payload: payload.compact)
+      event = Event.record!(ticket: self, kind: kind, actor: actor, payload: payload.compact)
+      # A real transition changed the case, so it moves the turn — a
+      # no-op one wrote no event and moves nothing.
+      bump_assistant_revision!
+      event
     end
 
     # The half that tells the world, once the write is durable. Every
@@ -1288,6 +1525,10 @@ module SupportDesk
     end
 
     def announce_assignment!(agent, first:)
+      # "Rose se ocupa de tu consulta" is a promise about a person. Her
+      # disclosure line is her announcement, and it is the only one.
+      return if SupportDesk.ai_actor?(agent)
+
       mode = desk_config.announce_assignments
       return if mode == :never
       return if mode == :first_only && !first
@@ -1321,10 +1562,16 @@ module SupportDesk
       reopen_event = nil
 
       attributes = { last_registered_message_id: message.id }
+      closed_by_assistant = false
       case role
       when :requester
         attributes[:last_requester_message_at] = message.created_at
+        # The pointer the turn's reconciliation reads: which requester
+        # message the clocks are standing on, by id and not only by time.
+        attributes[:last_requester_message_id] = message.id
         if closed? && message.created_at > closed_at && desk_config.closed_tickets == :reopen_on_reply
+          # Read before the merge below clears it — see #reopen!.
+          closed_by_assistant = closed_by_type == SupportDesk::Assistant.polymorphic_name
           attributes.merge!(status: "open", closed_at: nil, closed_by: nil,
                             reopen_count: reopen_count.to_i + 1, cardinality_key: "reopened:#{id}")
           reopened = true
@@ -1348,11 +1595,21 @@ module SupportDesk
       self.awaiting = closed? ? "none" : awaiting_from_clocks
       self.waiting_since = waiting_since_from_clocks
       save!
+      # Every registered message moves the case on, so every one of them
+      # moves the turn: an assistant holding the turn she read a second ago
+      # is holding a case that has not changed since (I4).
+      bump_assistant_revision!
 
       if reopened
-        restore_assignment!(by: :system)
-        reopen_event = record_transition!(:reopened, actor: requester) { { "via" => "requester_reply" } }
+        capped = restore_assignment!(by: :system, closed_by_assistant: closed_by_assistant)
+        reopen_event = record_transition!(:reopened, actor: requester) do
+          { "via" => "requester_reply", "assistant_capped" => (true if capped) }.compact
+        end
       end
+
+      # After the bump, and after any reopen: the hook decides about a case
+      # in the state this message left it in.
+      evaluate_hand_off_phrase!(message) if role == :requester
 
       publish_transition(reopen_event, :reopened, requester, nil) if reopen_event
       announce_registration(message, role: role, opening: opening, reopened: reopened)
@@ -1372,12 +1629,26 @@ module SupportDesk
     def registered?(message)
       return true if last_registered_message_id.present? && last_registered_message_id.to_s == message.id.to_s
 
-      clock = case role_of(message)
+      role = role_of(message)
+      clock = case role
       when :requester then last_requester_message_at
       when :agent then last_agent_message_at
       end
+      return false if clock.blank?
+      return true if message.created_at < clock
+      return false unless message.created_at == clock
 
-      clock.present? && message.created_at <= clock
+      # Equal timestamps are NOT the same message. A coarse column, a frozen
+      # clock in a test, or two very fast inserts can put two different
+      # messages on one instant, and a `<=` here folded the second one in
+      # without moving anything — so the assistant answered a question the
+      # case had never registered. The only equal-timestamp message that
+      # counts as folded in is the one the clock was set FROM.
+      case role
+      when :requester then last_requester_message_id.present? &&
+                           last_requester_message_id.to_s == message.id.to_s
+      else false
+      end
     end
 
     def opening_message?
@@ -1432,14 +1703,26 @@ module SupportDesk
     # disagree on a live ticket. A closed ticket keeps its assignee as the
     # record of who dealt with it, with no open row — that pair is the one
     # shape `doctor` expects to see.
-    def restore_assignment!(by:)
-      return if unassigned?
+    def restore_assignment!(by:, closed_by_assistant: false)
+      return false if unassigned?
+
+      # A case the assistant closed and the customer reopened is a case she
+      # got wrong (12 #21). It comes back to PEOPLE — unassigned, and capped
+      # at :draft on this case for good, whatever her level is elsewhere. An
+      # explicit hand-back is the only thing that lifts it, and the cap can
+      # only tighten: an existing :observe stays :observe.
+      if closed_by_assistant
+        cap = [ assistant_cap&.to_sym, :draft ].compact.min_by { |level| AssistantPolicy::RANK.fetch(level) }
+        update!(assignee: nil, assistant_cap: cap.to_s)
+        return true
+      end
 
       if assignee.respond_to?(:support_agent?) && assignee.support_agent?
         Assignment.open!(ticket: self, agent: assignee, by: by, reason: :reopened)
       else
         update!(assignee: nil)
       end
+      false
     end
 
     def awaiting_from_clocks
@@ -1464,6 +1747,10 @@ module SupportDesk
 
       case role
       when :requester
+        # The opening message included: a case that starts with a question
+        # is a case with something to answer, and the harness should hear
+        # about it the same way it hears about every later message.
+        emit_assistant_turn(message)
         SupportDesk.emit_after_commit(:requester_replied, self, message) unless opening
       when :agent
         # The desk's OWN first word announces nothing: it is the start of a
@@ -1497,11 +1784,21 @@ module SupportDesk
       conversation.messages.visible.oldest_first.map do |message|
         {
           at: message.created_at,
-          from: role_of(message) == :requester ? "you" : "support",
+          # "assistant" in every disclosure mode, silent ones included: what
+          # a customer was told is a product decision, what an export says a
+          # machine wrote is not.
+          from: export_from(message),
           body: message.visible_body,
           attachments: message.try(:files)&.map { |file| file.try(:filename).to_s } || []
         }
       end
+    end
+
+    def export_from(message)
+      return "you" if role_of(message) == :requester
+      return "assistant" if assistant_message?(message)
+
+      "support"
     end
   end
 end

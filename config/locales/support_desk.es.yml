@@ -4,6 +4,17 @@ es:
     system:
       assigned: "%{agent} se ocupa de tu consulta"
       reassigned: "%{agent} se ocupa ahora de tu consulta"
+      # Las tres líneas del asistente. Cada una tiene su variante con
+      # promesa: una mesa que no promete un plazo no debe inventarlo.
+      assistant_disclosure: "%{name} es el asistente virtual de %{desk}. Si prefieres hablar con una persona, usa el botón de esta conversación."
+      handed_off_to_humans: "Te paso con una persona del equipo."
+      handed_off_to_humans_with_promise: "Te paso con una persona del equipo. Normalmente contestamos en menos de %{reply_within}."
+      human_requested: "Una persona del equipo seguirá con tu consulta."
+      human_requested_with_promise: "Una persona del equipo seguirá con tu consulta. Normalmente contestamos en menos de %{reply_within}."
+    assistant:
+      # La divulgación no es una insignia que alguien pueda no ver: cuando
+      # se divulga, el nombre mismo dice qué es.
+      disclosed_name: "%{name} · asistente virtual"
     thread:
       closed_notice: "Esta conversación está cerrada. Abre una nueva si necesitas algo más."
       reopened_notice: "Hemos vuelto a abrir esta conversación."
@@ -13,6 +24,16 @@ es:
       # qué es esto.
       opened_by_support: "%{desk} ha abierto esta conversación contigo sobre «%{label}». Puedes responder aquí mismo."
       unavailable_notice: "Esta cuenta ya no puede enviar ni recibir mensajes. La conversación se queda aquí para consultarla."
+      human_door: "Prefiero hablar con una persona"
+      human_requested_notice: "Hecho. Una persona del equipo seguirá con tu consulta."
+      handled_by_assistant: "Atendida por %{name}"
+      handled_by_humans: "Una persona del equipo seguirá con tu consulta"
+    transcript:
+      # Un mensaje borrado sigue siendo un turno. Quien lea la conversación
+      # después, una persona o el modelo al que el host se la pasa, tiene
+      # que ver que ahí se dijo algo y se retiró: un hueco sin marcar se lee
+      # como que nunca pasó nada.
+      deleted: "[mensaje eliminado]"
     notifications:
       # Generic on purpose: una pantalla de bloqueo no debe contar de qué va
       # el caso de nadie. El detalle va en el cuerpo.
@@ -20,6 +41,7 @@ es:
     queue:
       tabs:
         awaiting: "Pendientes"
+        needs_human: "Necesitan persona"
         mine: "Mi cola"
         unassigned: "Sin asignar"
         open: "Abiertos"
@@ -27,6 +49,7 @@ es:
         closed: "Cerrados"
     summary:
       awaiting_reply: "esperando respuesta"
+      needs_human: "necesita una persona"
       awaiting_requester: "esperando al cliente"
       open: "abierto"
       closed: "cerrado"

@@ -25,3 +25,49 @@ namespace :support_desk do
     puts "[support_desk] #{updated} case(s) now point at their requester."
   end
 end
+
+namespace :support_desk do
+  desc "Hand over every case an assistant has sat on without answering (run every minute)"
+  task release_silent_assistants: :environment do
+    # The net under a dead harness: a queue worker that stopped, a provider
+    # that is down, a job that spent its last retry. Each case it finds has
+    # its seat released AND a person asked for — a case that waited that
+    # long deserves one, whatever the assistant would have said.
+    moved = SupportDesk.release_silent_assistants!
+
+    puts "[support_desk] #{moved} case(s) handed to a person."
+  end
+
+  desc "Re-emit the turn for cases nobody answered (OLDER_THAN=60 seconds; run every 5 minutes)"
+  task redispatch_assistant_turns: :environment do
+    # At-least-once, and that is safe: the turn is consumed by the first
+    # action, so a duplicate one is a StaleTurn and writes nothing.
+    older_than = (ENV["OLDER_THAN"] || 60).to_i.seconds
+    emitted = SupportDesk.redispatch_assistant_turns!(older_than: older_than)
+
+    puts "[support_desk] #{emitted} turn(s) re-emitted (idle for more than #{older_than.inspect})."
+  end
+
+  desc "What the assistants are doing right now (read-only)"
+  task assistant_status: :environment do
+    if SupportDesk.config.assistants.empty?
+      puts "[support_desk] no assistant is configured."
+      next
+    end
+
+    SupportDesk.config.assistants.each_key do |key|
+      assistant = SupportDesk.assistant(key)
+      held = assistant.held_tickets.count
+      idle_window = assistant.responds_within
+      idle = if idle_window
+        SupportDesk::Ticket.open.assistant_idle_since(idle_window.ago).count
+      end
+
+      puts "[support_desk] #{key} (#{assistant.active? ? "active" : "inactive"}, #{assistant.autonomy}): " \
+           "#{held} case(s) held, #{idle || "—"} idle turn(s)"
+    end
+
+    puts "[support_desk] #{SupportDesk::Ticket.open.needs_human.count} case(s) need a person, " \
+         "#{SupportDesk::Draft.pending.count} proposal(s) waiting to be reviewed."
+  end
+end

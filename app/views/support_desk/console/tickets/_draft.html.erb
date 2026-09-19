@@ -1,0 +1,114 @@
+<%# The assistant's proposal, and the two decisions a person makes about it.
+
+    The card sits ABOVE the composer on purpose: it is the first thing on
+    the screen that wants an answer, and the composer underneath is where
+    the same person writes their own words when this one is wrong.
+
+    Nothing here is sent by a machine. "Enviar" posts a reply FROM THE
+    AGENT — their signature, their case, their responsibility — carrying
+    the turn this page was rendered with, so a proposal approved from a page
+    that predates the customer's next message comes back as a warning
+    instead of landing in a conversation that moved on.
+
+    Buttons come from `actions`, like everywhere else in this console: a
+    desk where this agent may not answer shows the proposal and offers only
+    "Descartar", which is exactly what the server would accept. %>
+<%# The author by the name the requester is reading (`support_agent_name` is
+    her disclosed name): whoever sends this is about to own what it says, so
+    the card names her the way the conversation does. %>
+<% assistant_name = draft.author.try(:support_agent_name) || draft.author.to_s %>
+
+<section class="rounded-lg border border-indigo-200 bg-indigo-50 p-4" id="<%= dom_id(draft) %>">
+  <header class="flex flex-wrap items-center justify-between gap-2">
+    <h2 class="text-sm font-semibold text-indigo-900">
+      <span aria-hidden="true">🤖</span>
+      <%= t("support_desk.console.draft.title", name: assistant_name) %>
+    </h2>
+
+    <% if draft.confidence_percent %>
+      <span class="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-indigo-700">
+        <%= t("support_desk.console.draft.confidence", percent: draft.confidence_percent) %>
+      </span>
+    <% end %>
+  </header>
+
+  <%# Escaped text with pre-wrap, never simple_format: what a model wrote is
+      literal text, and it is about to be sent as somebody's own words. %>
+  <div class="mt-3 whitespace-pre-wrap break-words rounded-md bg-white p-3 text-sm text-slate-900"><%= draft.body %></div>
+
+  <% sources = Array(draft.sources).select { |source| source.is_a?(Hash) && source["title"].present? } %>
+  <% if sources.any? %>
+    <div class="mt-3 text-xs">
+      <p class="font-semibold text-indigo-900"><%= t("support_desk.console.draft.sources") %></p>
+      <ul class="mt-1 space-y-0.5">
+        <% sources.each do |source| %>
+          <li>
+            <%# http(s) only, and checked HERE as well as on the model: a
+                `javascript:` url in a citation is a link an agent clicks. %>
+            <% if source["url"].to_s.match?(%r{\Ahttps?://}i) %>
+              <%= link_to source["title"], source["url"], target: "_blank", rel: "noopener",
+                    class: "text-indigo-700 underline underline-offset-2" %>
+            <% else %>
+              <span class="text-slate-600"><%= source["title"] %></span>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <% if draft.files_attached? %>
+    <div class="mt-3 text-xs">
+      <p class="font-semibold text-indigo-900"><%= t("support_desk.console.draft.attachments") %></p>
+      <ul class="mt-1 space-y-0.5">
+        <% draft.files.each do |file| %>
+          <li>
+            <%= link_to file.filename.to_s, console_file_path(file), target: "_blank", rel: "noopener",
+                  class: "text-indigo-700 underline underline-offset-2" %>
+          </li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <% if draft.stale? %>
+    <p class="mt-3 rounded-md bg-amber-100 p-2 text-xs font-medium text-amber-900">
+      <%= t("support_desk.console.draft.stale") %>
+    </p>
+  <% end %>
+
+  <div class="mt-3 flex flex-wrap items-center gap-2">
+    <% if actions.include?(:send_draft) %>
+      <%# `id: nil` on every hidden field in this card: the composer below
+          carries the same two names in its edit mode, and two elements with
+          one id is a form field that `fill_in` and a label can both reach
+          the wrong one of. The NAME is what a request is made of. %>
+      <%= form_with url: console_ticket_path(ticket, :send_draft), method: :post, class: "inline" do %>
+        <%= hidden_field_tag :draft_id, draft.id, id: nil %>
+        <%# The turn THIS page was rendered with. Not the one the form
+            submits at: the whole point is to compare them. %>
+        <%= hidden_field_tag :seen_turn, support_seen_turn(ticket), id: nil %>
+        <%= submit_tag t("support_desk.console.actions.send_draft"),
+              class: "rounded-md bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-800" %>
+      <% end %>
+
+      <%= link_to t("support_desk.console.actions.edit_draft"),
+            console_ticket_path(ticket, :show, compose: :reply, draft: draft.id),
+            class: "rounded-md border border-indigo-300 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-white" %>
+    <% end %>
+
+    <% if actions.include?(:reject_draft) %>
+      <%= form_with url: console_ticket_path(ticket, :reject_draft), method: :post,
+            class: "flex flex-wrap items-center gap-2" do %>
+        <%# WHICH proposal is being discarded, in the form: the action looks
+            the row up by id in any status, so a discard with nothing to name
+            is refused before the model is asked. %>
+        <%= hidden_field_tag :draft_id, draft.id, id: nil %>
+        <%= text_field_tag :reason, nil, placeholder: t("support_desk.console.draft.reason_placeholder"),
+              class: "rounded-md border border-indigo-200 px-2 py-1.5 text-sm" %>
+        <%= submit_tag t("support_desk.console.actions.reject_draft"),
+              class: "rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50" %>
+      <% end %>
+    <% end %>
+  </div>
+</section>

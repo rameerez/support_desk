@@ -18,7 +18,7 @@ module SupportDesk
       include ActiveRecord::Generators::Migration
 
       source_root File.expand_path("templates", __dir__)
-      desc "Add the migrations a support_desk version bump needs (0.2.0: opened_by)"
+      desc "Add the migrations a support_desk version bump needs (0.2.0: opened_by, 0.3.0: assistants)"
 
       # Rails' migration numbering, borrowed from ActiveRecord's generators.
       def self.next_migration_number(dir)
@@ -28,6 +28,11 @@ module SupportDesk
       def create_opened_by_migration
         migration_template "add_opened_by_to_support_desk_tickets.rb.erb",
                            File.join(db_migrate_path, "add_opened_by_to_support_desk_tickets.rb")
+      end
+
+      def create_assistants_migration
+        migration_template "add_assistants_to_support_desk.rb.erb",
+                           File.join(db_migrate_path, "add_assistants_to_support_desk.rb")
       end
 
       def display_post_upgrade_message
@@ -43,7 +48,12 @@ module SupportDesk
         say "     ALL old web requests and workers. This is NOT a rolling deployment."
         say "     Keep traffic paused, run 'rake support_desk:backfill_opened_by' under 0.2,"
         say "     verify no NULL openers remain, then start only 0.2 and resume traffic."
-        say "  4. See the CHANGELOG for the full list.\n", :green
+        say "  4. New in 0.3.0 — assistants. The migration is ADDITIVE and rolling-safe:"
+        say "     add `config.assistant` only once every process is on 0.3.0. Then"
+        say "       rails g support_desk:assistant Rose --disclosure signature"
+        say "     writes the harness and prints the stanza, the subscription and the two"
+        say "     scheduled tasks. It never edits your initializer."
+        say "  5. See the CHANGELOG for the full list.\n", :green
       end
 
       private

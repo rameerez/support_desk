@@ -9,6 +9,12 @@ module SupportDesk
   #   alice.support_desk
   #   alice.awaiting_support_reply?
   #   alice.unread_support_count
+  #
+  #   class User < ApplicationRecord
+  #     has_support_tickets
+  #
+  #     def support_context = { "Plan" => plan.name, "Viajes" => rides.count }
+  #   end
   module Requester
     extend ActiveSupport::Concern
 
@@ -68,6 +74,18 @@ module SupportDesk
         requester_role: self.class.support_desk_requester_options[:as]
       )
     end
+
+    # Key/value pairs about the PERSON, the way `Supportable#support_context`
+    # is key/value pairs about the thing they are asking about: their plan,
+    # how long they have been here, whatever your agents always look up
+    # anyway. Rendered in the console's context card, and included in
+    # `Ticket#brief`.
+    #
+    # Empty by default, and it stays empty until you fill it — everything
+    # in here is read by whoever answers the case, and by whatever model a
+    # harness hands the brief to. Put what an agent needs to help; leave out
+    # what they don't.
+    def support_context = {}
 
     # True when any of this requester's open tickets is waiting on the desk.
     def awaiting_support_reply?

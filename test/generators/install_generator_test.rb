@@ -81,6 +81,33 @@ class InstallGeneratorTest < Rails::Generators::TestCase
                     "the tables have to exist before anything can be added to them"
   end
 
+  test "a fresh install gets the assistants migration, after the tables it adds to" do
+    run_generator
+
+    assert_migration "db/migrate/add_assistants_to_support_desk.rb" do |migration|
+      assert_match(/create_table :support_desk_assistants/, migration)
+      assert_match(/create_table :support_desk_drafts/, migration)
+      assert_match(/sql_type_of\(:chats_messages, "id"\)/, migration)
+    end
+
+    create = migration_file_name("db/migrate/create_support_desk_tables.rb")
+    assistants = migration_file_name("db/migrate/add_assistants_to_support_desk.rb")
+
+    assert_operator File.basename(create), :<, File.basename(assistants),
+                    "the tables have to exist before anything can point at them"
+  end
+
+  test "the initializer documents the assistant, disclosure and all" do
+    run_generator
+
+    assert_file "config/initializers/support_desk.rb" do |initializer|
+      assert_match(/config\.assistant :rose do \|rose\|/, initializer)
+      assert_match(/rose\.disclosure\s+= :signature_and_notice/, initializer)
+      assert_match(/config\.default_assistant = :rose/, initializer)
+      assert_match(/SupportDesk\.on\(:assistant_turn/, initializer)
+    end
+  end
+
   test "the install migration and the upgrade template are the same file" do
     run_generator
 

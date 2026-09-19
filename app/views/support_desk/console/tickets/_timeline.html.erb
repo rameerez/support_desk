@@ -4,7 +4,12 @@
 
     Collapsed by default, because an agent opens a case to answer it, not to
     audit it. `<details>` rather than a toggle controller: the browser has
-    had this for a decade and it survives a broken bundle. %>
+    had this for a decade and it survives a broken bundle.
+
+    Three kinds of moment now. A message and an event read as they always
+    did. A DRAFT reads greyed, because it is the one thing here that was
+    never said to anybody: a proposal somebody discarded, replaced, or sent
+    in somebody else's words. %>
 <details class="rounded-lg border border-slate-200 bg-white p-4">
   <summary class="cursor-pointer text-sm font-semibold"><%= t("support_desk.console.timeline.title") %></summary>
 
@@ -15,22 +20,71 @@
           <%= l(entry.at, format: :short) if entry.at %>
         </time>
 
-        <div class="min-w-0">
-          <span class="font-medium text-slate-700">
-            <%= t("support_desk.console.timeline.kinds.#{entry.kind}", default: entry.kind.to_s.humanize) %>
-          </span>
+        <% actor = entry.actor %>
+        <% actor_name = if actor.nil?
+                          nil
+                        elsif actor.is_a?(Symbol)
+                          t("support_desk.console.timeline.system")
+                        else
+                          actor.try(:support_agent_name) || Chats.display_name_for(actor)
+                        end %>
 
-          <% actor = entry.actor %>
-          <% if actor %>
-            <span class="text-slate-500">
-              · <%= actor.is_a?(Symbol) ? t("support_desk.console.timeline.system") : (actor.try(:support_agent_name) || Chats.display_name_for(actor)) %>
+        <% if entry.draft? %>
+          <%# What the machine proposed, and what became of it. The event
+              beside it says who decided; this is what they decided ABOUT. %>
+          <% draft = entry.draft %>
+          <div class="min-w-0 text-slate-400">
+            <span class="font-medium">
+              <% case draft.status %>
+              <% when "sent" %>
+                <%= t("support_desk.console.draft.sent_by", name: actor_name) %>
+              <% when "rejected" %>
+                <%= t("support_desk.console.draft.rejected_by", name: actor_name) %>
+              <% when "superseded" %>
+                <%= t("support_desk.console.timeline.draft_superseded") %>
+              <% else %>
+                <%= t("support_desk.console.timeline.draft_expired") %>
+              <% end %>
             </span>
-          <% end %>
+            <% if entry.body.present? %>
+              <p class="truncate"><%= truncate(entry.body, length: 120) %></p>
+            <% end %>
+            <% if draft.rejection_reason.present? %>
+              <p class="truncate italic"><%= truncate(draft.rejection_reason, length: 120) %></p>
+            <% end %>
+          </div>
 
-          <% if entry.body.present? %>
-            <p class="truncate text-slate-600"><%= truncate(entry.body, length: 120) %></p>
-          <% end %>
-        </div>
+        <% elsif (sentence = support_console_timeline_sentence(entry, actor_name)) %>
+          <%# The kinds the assistants added say the whole thing in one
+              sentence, with their own payload in it: "who did what to whom"
+              is the only reading of these that helps. %>
+          <div class="min-w-0">
+            <span class="text-slate-700"><%= sentence %></span>
+            <% if entry.kind == :escalated && entry.event.summary.present? %>
+              <%# Her hand-over note: the one piece of a machine's reasoning
+                  a person actually needs, so it gets room rather than a
+                  truncated line. %>
+              <p class="mt-1 whitespace-pre-wrap rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+                <%= entry.event.summary %>
+              </p>
+            <% end %>
+          </div>
+
+        <% else %>
+          <div class="min-w-0">
+            <span class="font-medium text-slate-700">
+              <%= t("support_desk.console.timeline.kinds.#{entry.kind}", default: entry.kind.to_s.humanize) %>
+            </span>
+
+            <% if actor_name %>
+              <span class="text-slate-500">· <%= actor_name %></span>
+            <% end %>
+
+            <% if entry.body.present? %>
+              <p class="truncate text-slate-600"><%= truncate(entry.body, length: 120) %></p>
+            <% end %>
+          </div>
+        <% end %>
       </li>
     <% end %>
   </ol>

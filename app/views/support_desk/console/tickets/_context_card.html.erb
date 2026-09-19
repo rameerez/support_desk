@@ -49,7 +49,35 @@
         <dd class="text-right"><%= value %></dd>
       </div>
     <% end %>
+
+    <%# What she may do here, and the rule that decided it. The LEVEL is the
+        answer an agent needs ("she can only propose on this one"); the
+        `because` is written for whoever is reading a stack trace, so it
+        rides in the tooltip rather than on the card. %>
+    <% if (assistant = card.ticket.assistant) %>
+      <% policy = card.ticket.assistant_policy(assistant) %>
+      <div class="flex justify-between gap-3">
+        <dt class="text-slate-500"><%= t("support_desk.console.context.assistant") %></dt>
+        <dd class="text-right font-medium" title="<%= policy.because %>"><%= policy.level %></dd>
+      </div>
+    <% end %>
   </dl>
+
+  <%# The host's own words about the person who is asking — the same
+      `support_context` a brief hands the machine, on the screen for the
+      person doing the same job. %>
+  <% requester_context = card.requester.try(:support_context) || {} %>
+  <% if requester_context.respond_to?(:each_pair) && requester_context.any? %>
+    <h3 class="mt-4 text-sm font-semibold text-slate-900"><%= t("support_desk.console.context.requester_context") %></h3>
+    <dl class="mt-2 space-y-2 text-sm">
+      <% requester_context.each_pair do |key, value| %>
+        <div class="flex justify-between gap-3">
+          <dt class="text-slate-500"><%= key.to_s.humanize %></dt>
+          <dd class="text-right"><%= value %></dd>
+        </div>
+      <% end %>
+    </dl>
+  <% end %>
 
   <% if card.subject_url.present? %>
     <%= link_to t("support_desk.console.context.open_subject"), card.subject_url,

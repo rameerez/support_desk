@@ -19,7 +19,10 @@ module SupportDesk
     # Their cases: open ones as rows, closed ones folded away, and the door
     # to open another.
     def index
-      tickets = current_requester.support_tickets.includes(:desk, :subject, conversation: { last_message: :sender })
+      # `:assignee` because a row says who is on the case when that is a
+      # machine, and a name per row is a query per row.
+      tickets = current_requester.support_tickets
+                                 .includes(:desk, :subject, :assignee, conversation: { last_message: :sender })
       @open_tickets = tickets.not_closed.recent_activity_first.to_a
       @closed_tickets = tickets.closed.newest_first.limit(CLOSED_TICKETS_SHOWN).to_a
       @closed_count = tickets.closed.count
@@ -68,6 +71,25 @@ module SupportDesk
     # nothing else.
     def show
       redirect_to conversation_path_for(find_ticket)
+    end
+
+    # "Prefiero hablar con una persona." The one thing a requester can
+    # always do on their own case, and the reason an assistant is allowed to
+    # answer at all: nobody is ever trapped in a conversation with a machine.
+    #
+    # Scoped through their OWN cases, so a foreign id is a 404 and not a
+    # refusal that confirms the case exists. Idempotent by the model, so a
+    # second press is a second notice and nothing else.
+    def request_human
+      ticket = find_ticket
+      ticket.request_human!(by: current_requester, request: request)
+      redirect_to ticket_path(ticket), status: :see_other,
+                  notice: t("support_desk.thread.human_requested_notice")
+    rescue SupportDesk::Locked, SupportDesk::InvalidTransition
+      # A closed case on a desk that locks them, or one the model won't
+      # reopen. The case is still theirs to read, so this is the door they
+      # came from with the reason on it — never a 500, and never silence.
+      redirect_to ticket_path(ticket), status: :see_other, alert: ticket.chat_locked_notice
     end
 
     private

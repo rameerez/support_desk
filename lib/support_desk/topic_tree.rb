@@ -163,7 +163,7 @@ module SupportDesk
 
       KNOWN_OPTIONS = %i[
         label about ask candidates subject prefill placeholder only priority route_to desk retired icon
-        free_form
+        free_form assistant
       ].freeze
 
       def validate!(key, options)
@@ -188,6 +188,12 @@ module SupportDesk
           raise ConfigurationError,
                 "topic #{key.inspect}: priority must be one of #{Topic::PRIORITIES.keys.inspect}, " \
                 "got #{options[:priority].inspect}"
+        end
+
+        if options.key?(:assistant) && !AssistantPolicy::LEVELS.include?(options[:assistant]&.to_sym)
+          raise ConfigurationError,
+                "topic #{key.inspect}: assistant must be one of #{AssistantPolicy::LEVELS.inspect}, " \
+                "got #{options[:assistant].inspect}"
         end
 
         %i[candidates only prefill].each do |option|

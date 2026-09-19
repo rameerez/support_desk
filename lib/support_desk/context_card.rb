@@ -59,6 +59,14 @@ module SupportDesk
       Chats.avatar_for(requester)
     end
 
+    # Key/value pairs about the PERSON, from `Requester#support_context` —
+    # the same idea as #pairs, one row up: `pairs` describes the thing the
+    # case is about, these describe whoever is asking. Empty unless the host
+    # filled it in.
+    def requester_pairs
+      requester.try(:support_context) || {}
+    end
+
     # When this requester joined — context for "is this a new user?".
     def requester_since = requester.try(:created_at)
 
@@ -102,7 +110,8 @@ module SupportDesk
         requester: {
           name: requester_name,
           since: requester_since,
-          open_tickets: requester_open_tickets
+          open_tickets: requester_open_tickets,
+          context: requester_pairs
         }
       }
     end

@@ -57,11 +57,24 @@ module SupportDesk
     # subject of the sentence (`ticket.assign!(to: lucia)`).
     def acts_as_support_agent(kind: :human, **options)
       condition = Macros.condition!(options, macro: "acts_as_support_agent", known: ":if, :kind")
+      kind = Macros.kind!(kind)
 
       include SupportDesk::Agent
 
-      self.support_desk_agent_options = { if: condition, kind: kind.to_sym }.freeze
+      self.support_desk_agent_options = { if: condition, kind: kind }.freeze
       SupportDesk.register_agent(self)
+    end
+
+    # Who the agent IS: a person, or a machine. There are two kinds because
+    # they are answerable to different rules, and an unknown third would be
+    # treated as a human by every check that isn't looking for :ai — so it
+    # fails at class definition instead.
+    def self.kind!(kind)
+      kind = kind.to_sym if kind.respond_to?(:to_sym)
+      return kind if %i[human ai].include?(kind)
+
+      raise ConfigurationError,
+            "acts_as_support_agent kind: must be :human or :ai, got #{kind.inspect}"
     end
 
     # The `if:` both macros take: a method name or a callable, and the only

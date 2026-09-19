@@ -1,0 +1,223 @@
+# frozen_string_literal: true
+
+# A migrated COPY of add_assistants_to_support_desk.rb.erb with the migration
+# version pinned. Keep the two IN SYNC: a drift test in
+# test/generators/upgrade_generator_test.rb compares everything below this line.
+
+class AddAssistantsToSupportDesk < ActiveRecord::Migration[7.2]
+  TICKET_INDEX = "index_support_desk_tickets_on_needs_human"
+
+  def up
+    create_assistants_table
+    create_drafts_table
+    add_ticket_columns
+    backfill_requester_pointer
+  end
+
+  # Exactly what `up` added. Only meaningful BEFORE an assistant has
+  # answered anything: dropping these tables throws away every proposal a
+  # human reviewed and every reason a case was handed over. A code rollback
+  # to 0.2 does NOT need this — the columns are nullable and the tables are
+  # simply ignored.
+  def down
+    remove_index :support_desk_tickets, name: TICKET_INDEX if
+      index_exists?(:support_desk_tickets, [ :desk_id, :human_required_at ], name: TICKET_INDEX)
+
+    ticket_columns.each_key do |name|
+      remove_column :support_desk_tickets, name if column_exists?(:support_desk_tickets, name)
+    end
+
+    drop_table :support_desk_drafts if table_exists?(:support_desk_drafts)
+    drop_table :support_desk_assistants if table_exists?(:support_desk_assistants)
+  end
+
+  private
+
+  # ---------------------------------------------------------------------------
+  # support_desk_assistants
+  #
+  # Who she is, and whether she is on. Everything she MAY DO lives in the
+  # initializer, in code — so a policy change is a deploy and a diff, not a
+  # row somebody edited. `active` is the exception on purpose: it is the
+  # cross-process kill switch, read fresh before every write she makes.
+  # ---------------------------------------------------------------------------
+  def create_assistants_table
+    unless table_exists?(:support_desk_assistants)
+      create_table :support_desk_assistants, id: primary_key_type do |t|
+        t.string :key, null: false
+        t.boolean :active, null: false, default: true
+        t.send(json_column_type, :settings, default: json_column_default)
+
+        t.timestamps
+      end
+    end
+
+    return if index_exists?(:support_desk_assistants, :key, name: "index_support_desk_assistants_on_key")
+
+    add_index :support_desk_assistants, :key, unique: true, name: "index_support_desk_assistants_on_key"
+  end
+
+  # ---------------------------------------------------------------------------
+  # support_desk_drafts
+  #
+  # A reply she proposed and a human sent, edited or threw away. `body` is
+  # what she wrote and `sent_body` what went out when they differ, so the
+  # verbatim/edited/rejected split a host reads before raising her level is
+  # a query and not a guess. `proposed_turn` is the case's turn when she
+  # wrote it — what makes `stale?` mean "the conversation moved on".
+  # ---------------------------------------------------------------------------
+  def create_drafts_table
+    unless table_exists?(:support_desk_drafts)
+      create_table :support_desk_drafts, id: primary_key_type do |t|
+        t.column :ticket_id, sql_type_of(:support_desk_tickets, "id"), null: false
+        t.string :author_type, null: false
+        t.column :author_id, sql_type_of(:support_desk_assignments, "agent_id"), null: false
+        t.string :reviewed_by_type
+        t.column :reviewed_by_id, sql_type_of(:support_desk_assignments, "agent_id")
+        t.column :sent_message_id, sql_type_of(:chats_messages, "id")
+
+        t.string :proposed_turn, null: false
+        # Null for an attachment-only proposal — a screenshot with nothing
+        # to add is a whole answer.
+        t.text :body
+        t.text :sent_body
+        t.string :status, null: false, default: "pending"
+        # 0.000 to 1.000: what the model declared, never what it was worth.
+        t.decimal :confidence, precision: 4, scale: 3
+        t.send(json_column_type, :sources, default: json_column_default)
+        t.send(json_column_type, :metadata, default: json_column_default)
+        t.string :rejection_reason
+        t.datetime :reviewed_at
+
+        t.timestamps
+      end
+
+      add_foreign_key :support_desk_drafts, :support_desk_tickets, column: :ticket_id
+    end
+
+    unless index_exists?(:support_desk_drafts, [ :ticket_id, :created_at ],
+                         name: "index_support_desk_drafts_on_ticket")
+      add_index :support_desk_drafts, [ :ticket_id, :created_at ], name: "index_support_desk_drafts_on_ticket"
+    end
+
+    unless index_exists?(:support_desk_drafts, [ :author_type, :author_id, :status ],
+                         name: "index_support_desk_drafts_on_author")
+      add_index :support_desk_drafts, [ :author_type, :author_id, :status ],
+                name: "index_support_desk_drafts_on_author"
+    end
+
+    # ONE pending proposal per case — the belt under the row lock that
+    # serialises them. Enforced on every adapter that has partial indexes
+    # (all but MySQL, Trilogy included); elsewhere the model's
+    # supersede-then-create is the whole story and `doctor` checks it.
+    return unless partial_indexes?
+    return if index_exists?(:support_desk_drafts, :ticket_id, name: "index_support_desk_drafts_on_pending")
+
+    add_index :support_desk_drafts, :ticket_id, unique: true, where: "status = 'pending'",
+              name: "index_support_desk_drafts_on_pending"
+  end
+
+  # ---------------------------------------------------------------------------
+  # support_desk_tickets (+)
+  #
+  # `assistant_revision` is the turn: one integer, bumped by every
+  # registered message and every transition, which is what makes a late or
+  # redelivered answer a no-op instead of a second reply.
+  #
+  # The three human-side flags are THREE columns and not one status, because
+  # they are three different decisions made by three different people:
+  # somebody asked for a person, a human paused her here, and this case caps
+  # her (what a reopen after she closed it writes). Resuming her lifts one
+  # of them, and only an explicit hand-back lifts all three.
+  # ---------------------------------------------------------------------------
+  def add_ticket_columns
+    ticket_columns.each do |name, options|
+      next if column_exists?(:support_desk_tickets, name)
+
+      add_column :support_desk_tickets, name, options[:type], **options.except(:type)
+    end
+
+    return if index_exists?(:support_desk_tickets, [ :desk_id, :human_required_at ], name: TICKET_INDEX)
+
+    add_index :support_desk_tickets, [ :desk_id, :human_required_at ], name: TICKET_INDEX
+  end
+
+  def ticket_columns
+    {
+      assistant_revision: { type: :bigint, null: false, default: 0 },
+      last_requester_message_id: { type: sql_type_of(:chats_messages, "id") },
+      assistant_turns_count: { type: :integer, null: false, default: 0 },
+      assistant_acted_at: { type: :datetime },
+      assistant_paused_at: { type: :datetime },
+      assistant_paused_reason: { type: :string },
+      assistant_cap: { type: :string },
+      human_required_at: { type: :datetime },
+      human_required_reason: { type: :string }
+    }
+  end
+
+  # The pointer the turn's reconciliation reads: which requester message the
+  # clocks are standing on, by id and not only by time.
+  #
+  # SQL, and deliberately not the model: a backfill that loaded today's
+  # Ticket would run this release's validations, callbacks and events over
+  # last release's rows. ORDER BY rather than MAX(id), because ids can be
+  # uuids and "the biggest uuid" is not "the newest message".
+  def backfill_requester_pointer
+    execute(<<~SQL.squish)
+      UPDATE support_desk_tickets SET last_requester_message_id = (
+        SELECT m.id FROM chats_messages m
+         WHERE m.conversation_id = support_desk_tickets.conversation_id
+           AND m.sender_type = support_desk_tickets.requester_type
+           AND m.sender_id = support_desk_tickets.requester_id
+           AND m.kind = 'text'
+         ORDER BY m.created_at DESC, m.id DESC LIMIT 1)
+       WHERE last_requester_message_id IS NULL AND conversation_id IS NOT NULL
+    SQL
+  end
+
+  # The storage this schema already uses for that column — uuid, bigint,
+  # integer. A new column that points at those records has to be stored the
+  # same way, whatever the generator is configured with today.
+  def sql_type_of(table, column)
+    found = connection.columns(table).find { |candidate| candidate.name == column }
+    unless found
+      raise ActiveRecord::MigrationError,
+            "#{table} has no #{column} column — run support_desk's and chats' install migrations first."
+    end
+
+    found.sql_type
+  end
+
+  # Honor the host's configured primary key type (uuid vs bigint) for the
+  # tables this migration CREATES. Everything it points at is derived above.
+  def primary_key_type
+    config = Rails.configuration.generators
+    config.options[config.orm][:primary_key_type] || :primary_key
+  end
+
+  # Whether this adapter can enforce a rule over SOME rows ("one pending
+  # draft per case"). Everything but MySQL can — and Trilogy is MySQL under
+  # a different ADAPTER_NAME, so a /mysql/ pattern alone would hand such a
+  # host an index it cannot create.
+  def partial_indexes?
+    !connection.adapter_name.match?(/mysql|trilogy/i)
+  end
+
+  # jsonb on every PostgreSQL adapter — matched by prefix because PostGIS
+  # answers "PostGIS", not "PostgreSQL".
+  def json_column_type
+    return :jsonb if connection.adapter_name.match?(/\Apostg/i)
+
+    :json
+  end
+
+  # MySQL 8+ doesn't allow default values on JSON columns. `sources`
+  # defaults to [] in Ruby (see SupportDesk::Draft) for the same reason it
+  # can't default here.
+  def json_column_default
+    return nil if connection.adapter_name.match?(/mysql|trilogy/i)
+
+    {}
+  end
+end

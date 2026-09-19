@@ -18,6 +18,19 @@
 
       <span class="chats-row__subject"><%= support_ticket_state(ticket) %></span>
 
+      <%# Who is on it, when that is not simply "us". A machine answering is
+          something the person is entitled to know before they read the
+          answer, so the row says so by her disclosed name — and the moment
+          a person has been asked for, it says THAT instead, because it is
+          the only one of the two that is a promise. %>
+      <% if ticket.human_required? %>
+        <span class="chats-row__subject"><%= t("support_desk.thread.handled_by_humans") %></span>
+      <% elsif ticket.held_by_assistant? %>
+        <span class="chats-row__subject">
+          <%= t("support_desk.thread.handled_by_assistant", name: ticket.assignee.support_agent_name) %>
+        </span>
+      <% end %>
+
       <span class="chats-row__bottom">
         <span class="chats-row__preview">
           <%= ticket.conversation ? chats_preview_for(ticket.conversation, current_requester) : "" %>

@@ -101,6 +101,158 @@ module SupportDesk
                    "expected no #{kind} event on #{ticket.reference}"
     end
 
+    # --- Assistants -------------------------------------------------------------
+
+    # The assistant record for +key+ (the desk's default when omitted).
+    def support_assistant(key = nil)
+      SupportDesk.assistant(key)
+    end
+
+    # Answer as the assistant and let policy decide what that becomes.
+    # Returns the SupportDesk::Outcome.
+    def respond_as(assistant, ticket, body = nil, turn: ticket.assistant_turn, **options)
+      ticket.respond!(body, by: assistant, turn: turn, **options)
+    end
+
+    # Propose a reply as the assistant. Returns the SupportDesk::Draft.
+    def draft_as(assistant, ticket, body = nil, turn: ticket.assistant_turn, **options)
+      ticket.draft!(body, by: assistant, turn: turn, **options)
+    end
+
+    # --- Assistant assertions ---------------------------------------------------
+
+    # There is a proposal waiting, optionally matching its text (a String is
+    # a substring, a Regexp is a match). Returns the draft.
+    def assert_pending_draft(ticket, body: nil)
+      ticket.reload
+      draft = ticket.pending_draft
+
+      refute_nil draft, "expected a pending proposal on #{ticket.reference}, found " \
+                        "#{ticket.drafts.map(&:status).join(", ").presence || "none"}"
+      case body
+      when Regexp then assert_match body, draft.body.to_s
+      when String then assert_includes draft.body.to_s, body
+      end
+      draft
+    end
+
+    # Nothing is waiting to be sent.
+    def refute_pending_draft(ticket)
+      ticket.reload
+
+      assert_nil ticket.pending_draft,
+                 "expected no pending proposal on #{ticket.reference}, found #{ticket.pending_draft&.body.inspect}"
+    end
+
+    # Somebody has asked for a person on this case, optionally for this
+    # reason ("requester_request", "phrase", "assistant_silent", …).
+    def assert_needs_human(ticket, reason: nil)
+      ticket.reload
+
+      assert_predicate ticket, :human_required?,
+                       "expected #{ticket.reference} to need a person"
+      return if reason.nil?
+
+      assert_equal reason.to_s, ticket.human_required_reason,
+                   "#{ticket.reference} needs a person for a different reason"
+    end
+
+    # Nobody has.
+    def refute_needs_human(ticket)
+      ticket.reload
+
+      refute_predicate ticket, :human_required?,
+                       "expected #{ticket.reference} not to need a person " \
+                       "(#{ticket.human_required_reason})"
+    end
+
+    # The assistant is sitting on this case.
+    def assert_held_by_assistant(ticket, assistant = nil)
+      ticket.reload
+
+      assert_predicate ticket, :held_by_assistant?,
+                       "expected #{ticket.reference} to be held by an assistant, was #{ticket.assignee.inspect}"
+      return if assistant.nil?
+
+      assert ticket.assigned_to?(assistant),
+             "expected #{ticket.reference} to be held by #{assistant.key}, was #{ticket.assignee.inspect}"
+    end
+
+    # No machine has said anything to the requester in this case.
+    def refute_assistant_spoke(ticket)
+      ticket.reload
+      spoken = ticket.conversation.messages.to_a.select { |message| ticket.assistant_message?(message) }
+
+      assert_empty spoken.map(&:body),
+                   "expected the assistant to have said nothing on #{ticket.reference}"
+    end
+
+    # What she may do here, and why. `because:` takes a String (substring) or
+    # a Regexp, because the sentence is the point: a level with no reason is
+    # a refusal nobody can act on.
+    def assert_assistant_policy(ticket, level, because: nil)
+      policy = ticket.reload.assistant_policy
+
+      assert_equal level.to_sym, policy.level,
+                   "expected #{ticket.reference} to be at #{level} for the assistant (#{policy.because})"
+      case because
+      when Regexp then assert_match because, policy.because
+      when String then assert_includes policy.because, because
+      end
+      policy
+    end
+
+    # --- Assistant configuration ------------------------------------------------
+
+    # Run a block with different assistant settings, then put them back:
+    #
+    #   with_assistant_config(autonomy: :reply) { … }
+    #   with_assistant_config(:rose, max_turns: 1) { … }
+    def with_assistant_config(key = nil, **overrides)
+      key ||= SupportDesk.config.default_assistant_key
+      configuration = SupportDesk.config.assistant(key)
+      previous = overrides.keys.index_with { |name| configuration.read(name) }
+      had = overrides.keys.index_with { |name| configuration.own?(name) }
+
+      overrides.each { |name, value| configuration.public_send(:"#{name}=", value) }
+      yield
+    ensure
+      previous.each do |name, value|
+        had[name] ? configuration.public_send(:"#{name}=", value) : configuration.send(:reset_setting, name)
+      end
+    end
+
+    # Run a block with one topic capped, then put the tree back.
+    #
+    # The tree is frozen at boot, so this REBUILDS it with the cap applied —
+    # the same shape a host would have declared with `topic :payments,
+    # assistant: :draft`, without asking a test to restate the whole tree.
+    def with_topic_assistant_cap(path, level, desk: :default)
+      configuration = SupportDesk.config.desk(desk)
+      original = configuration.topics
+      configuration.instance_variable_set(:@topics, rebuild_topics_with_cap(original, path.to_s, level))
+      yield
+    ensure
+      configuration.instance_variable_set(:@topics, original)
+    end
+
+    private
+
+    def rebuild_topics_with_cap(tree, path, level) # :nodoc:
+      rebuilt = SupportDesk::TopicTree.new
+      copy = lambda do |node, parent|
+        options = node.options.dup
+        options[:assistant] = level if node.path == path
+        fresh = SupportDesk::Topic.new(key: node.key, parent: parent, **options)
+        rebuilt.add(fresh, parent: parent)
+        node.children.each { |child| copy.call(child, fresh) }
+      end
+      tree.roots.each { |root| copy.call(root, nil) }
+      rebuilt.freeze!
+    end
+
+    public
+
     # --- Configuration ----------------------------------------------------------
 
     # Run a block with different desk settings, then put them back:

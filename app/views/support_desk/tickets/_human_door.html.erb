@@ -1,0 +1,24 @@
+<%# "Prefiero hablar con una persona."
+
+    The one control on this screen that is never taken away while a machine
+    is in play: a customer who wants a person gets a person, and pressing
+    this is the whole of it — no wording to get right, no phrase to guess.
+
+    Three states, and the middle one is the point. While the assistant is in
+    play the button is here. Once somebody has asked (the customer, the
+    assistant, or the sweep that notices she went quiet) the button becomes
+    the promise, because a door that stays pressable after it worked is a
+    door people press again wondering whether it did. A case nobody can
+    write to shows nothing at all: it is over, and a button that only 500s
+    is worse than silence.
+
+    `ticket.assistant_in_play?` counts HISTORY as well as configuration, so
+    the door does not vanish from a live conversation because somebody
+    edited an initializer. %>
+<% if ticket.human_required? %>
+  <p class="support-desk-notice__title"><%= t("support_desk.thread.handled_by_humans") %></p>
+<% elsif ticket.assistant_in_play? && !ticket.chat_locked? %>
+  <%= button_to t("support_desk.thread.human_door"),
+        support_desk_routes.request_human_ticket_path(ticket),
+        method: :post, class: "support-desk-button support-desk-button--quiet" %>
+<% end %>

@@ -34,6 +34,17 @@ module SupportDesk
       ticket_topic_changed: "ticket, from:, to:, by:",
       subject_attached: "ticket, subject, by:",
       note_added: "ticket, event",
+      # The assistants (0.3). `assistant_turn` is the one a harness
+      # subscribes to: everything else is something to notify a human about.
+      assistant_turn: "ticket, assistant, message, turn:",
+      draft_proposed: "ticket, draft",
+      draft_sent: "ticket, draft, message, by:",
+      draft_rejected: "ticket, draft, by:, reason:",
+      assistant_withheld: "ticket, assistant, reason:, policy:",
+      ticket_escalated: "ticket, from:, reason:, by:",
+      human_requested: "ticket, by:, reason:",
+      assistant_paused: "ticket, by:",
+      assistant_resumed: "ticket, by:",
       ticket_transitioned: "ticket, kind, by:, request:, payload:"
     }.freeze
 
@@ -112,11 +123,7 @@ module SupportDesk
     end
 
     def report_subscriber_error(error, event)
-      if defined?(Rails) && Rails.respond_to?(:error) && Rails.error
-        Rails.error.report(error, handled: true, source: "support_desk", context: { event: event })
-      else
-        logger&.error("[support_desk] subscriber raised on #{event}: #{error.class}: #{error.message}")
-      end
+      report_error(error, context: { event: event, hook: :subscriber })
     end
   end
 end

@@ -79,12 +79,35 @@ module SupportDesk
       config.read(:email) || settings["email"].presence
     end
 
-    # The agent pool, resolved from `config.agents`.
-    def agents
-      config.agent_pool
+    # The assistant who works this desk, or nil. Resolved through
+    # `SupportDesk.assistant`, so it is the same memoised record everywhere.
+    def assistant
+      key = config.assistant_key
+      return nil if key.nil?
+
+      SupportDesk.assistant(key)
     end
 
-    # The pool, minus anyone who says they're off duty.
+    # Whether this desk has one at all.
+    def assistant? = !assistant.nil?
+
+    # The PEOPLE in the pool. What `agents_to_notify` pages, what a human
+    # picker offers, and the reason a host never has to reject machines in
+    # its own notifier.
+    def humans
+      config.agent_pool.to_a.reject { |agent| SupportDesk.ai_actor?(agent) }
+    end
+
+    # Everybody who can answer here, the assistant included — pickers and
+    # routing. An Array, not a relation: the assistant isn't in the host's
+    # scope, and a pool that is half a query and half a record is a pool
+    # that can't be either.
+    def agents
+      humans + [ assistant ].compact
+    end
+
+    # The pool, minus anyone who says they're off duty (a deactivated
+    # assistant says so).
     def on_duty_agents
       agents.select { |agent| !agent.respond_to?(:on_duty?) || agent.on_duty? }
     end

@@ -36,6 +36,14 @@ module SupportDesk
                            File.join(db_migrate_path, "add_opened_by_to_support_desk_tickets.rb")
       end
 
+      # The assistants (0.3). The SAME file `support_desk:upgrade` copies,
+      # for the same reason: one migration owns those tables and columns
+      # wherever they came from.
+      def create_assistants_migration
+        migration_template "add_assistants_to_support_desk.rb.erb",
+                           File.join(db_migrate_path, "add_assistants_to_support_desk.rb")
+      end
+
       # The annotated initializer — every setting the gem has, with what it
       # means and what it defaults to.
       def create_initializer
@@ -85,6 +93,10 @@ module SupportDesk
         say "  only the migrations the new version needs (0.2.0: who opened the case), and"
         say "  nothing you own. Follow the CHANGELOG's drained cutover: migrate, pause"
         say "  support traffic, drain old web/workers, backfill, then serve only 0.2."
+
+        say "\n  Assistants (0.3): when a machine should answer first, 'rails g support_desk:assistant"
+        say "  Rose --disclosure signature' writes the harness and prints the stanza. Read the"
+        say "  README's Assistants section before you flip it on — disclosure is a required choice."
 
         say "\nCheck your work any time with SupportDesk.doctor.print"
         say "You now have support tickets that are real conversations. 🚀\n", :green

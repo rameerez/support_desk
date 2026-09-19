@@ -3,17 +3,31 @@ en:
     system:
       assigned: "%{agent} is taking care of your request"
       reassigned: "%{agent} is now taking care of your request"
+      assistant_disclosure: "%{name} is %{desk}’s virtual assistant. If you’d rather talk to a person, use the button in this conversation."
+      handed_off_to_humans: "I’m passing you to somebody on the team."
+      handed_off_to_humans_with_promise: "I’m passing you to somebody on the team. We usually reply in under %{reply_within}."
+      human_requested: "Somebody from the team will take it from here."
+      human_requested_with_promise: "Somebody from the team will take it from here. We usually reply in under %{reply_within}."
+    assistant:
+      disclosed_name: "%{name} · virtual assistant"
     thread:
       closed_notice: "This conversation is closed. Start a new one if you need anything else."
       reopened_notice: "We reopened this conversation."
       promise: "We usually reply in under %{time}"
       opened_by_support: "%{desk} opened this conversation with you about “%{label}”. You can reply right here."
       unavailable_notice: "This account can no longer send or receive messages. The conversation stays here to read."
+      human_door: "I’d rather talk to a person"
+      human_requested_notice: "Done. Somebody from the team will take it from here."
+      handled_by_assistant: "Handled by %{name}"
+      handled_by_humans: "Somebody from the team will take it from here"
+    transcript:
+      deleted: "[message deleted]"
     notifications:
       title: "%{desk} · new message"
     queue:
       tabs:
         awaiting: "Needs a reply"
+        needs_human: "Needs a person"
         mine: "Mine"
         unassigned: "Unassigned"
         open: "Open"
@@ -21,6 +35,7 @@ en:
         closed: "Closed"
     summary:
       awaiting_reply: "awaiting reply"
+      needs_human: "needs a person"
       awaiting_requester: "awaiting requester"
       open: "open"
       closed: "closed"

@@ -22,6 +22,21 @@
           class: "rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50" %>
   <% end %>
 
+  <%# Pausing is not a policy change: it switches her off on THIS case and
+      throws away whatever she had proposed for it. Only one of the two ever
+      shows, because `actions_for` offers only one. %>
+  <% if actions.include?(:pause_assistant) %>
+    <%= button_to t("support_desk.console.actions.pause_assistant"),
+          console_ticket_path(ticket, :pause_assistant), method: :post,
+          class: "rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50" %>
+  <% end %>
+
+  <% if actions.include?(:resume_assistant) %>
+    <%= button_to t("support_desk.console.actions.resume_assistant"),
+          console_ticket_path(ticket, :resume_assistant), method: :post,
+          class: "rounded-md border border-indigo-300 px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-50" %>
+  <% end %>
+
   <% if actions.include?(:reopen) %>
     <%= button_to t("support_desk.console.actions.reopen"), console_ticket_path(ticket, :reopen), method: :post,
           class: "rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700" %>

@@ -14,7 +14,18 @@
   <h2 class="text-sm font-semibold"><%= t("support_desk.console.assignment.title") %></h2>
 
   <p class="mt-2 text-sm text-slate-600">
-    <% if ticket.assigned? %>
+    <% if ticket.held_by_assistant? %>
+      <%# A machine holding a case is not the same sentence as a colleague
+          holding it: what matters is how much rope she has left, because
+          that is when a person has to be here. %>
+      <% assistant = ticket.assignee %>
+      <% if assistant.max_turns %>
+        <%= t("support_desk.console.badges.assistant_holds", name: assistant.support_agent_name,
+              used: ticket.assistant_turns_count.to_i, max: assistant.max_turns) %>
+      <% else %>
+        <%= t("support_desk.console.badges.assistant_holds_unlimited", name: assistant.support_agent_name) %>
+      <% end %>
+    <% elsif ticket.assigned? %>
       <%= t("support_desk.console.assignment.held_by", agent: ticket.assignee.support_agent_name) %>
     <% else %>
       <%= t("support_desk.console.assignment.unassigned") %>
@@ -36,8 +47,11 @@
     <% if agents.any? && (actions.include?(:hand_off) || actions.include?(:assign)) %>
       <% handing_off = actions.include?(:hand_off) %>
       <%= form_with url: console_ticket_path(ticket, handing_off ? :hand_off : :assign), method: :post, class: "space-y-2" do %>
+        <%# Values are actor KEYS, not ids: the pool is people and a machine,
+            drawn from different tables, and a bare "1" could name either. %>
         <%= select_tag :agent_id,
-              options_from_collection_for_select(agents, :id, :support_agent_name),
+              options_from_collection_for_select(agents, ->(agent) { SupportDesk.actor_key(agent) },
+                                                 :support_agent_name),
               include_blank: t("support_desk.console.assignment.choose_agent"),
               required: true,
               class: "w-full rounded-md border border-slate-300 p-2 text-sm" %>

@@ -1,0 +1,72 @@
+# frozen_string_literal: true
+
+module Support
+  # <%= assistant_name %>'s turn.
+  #
+  # The gem emits `:assistant_turn` when there is something to answer; this
+  # job is the only thing that runs between that event and a word reaching a
+  # customer.
+  #
+  # Four rules, and they are the whole contract (README → Assistants):
+  #
+  # 1. **Arguments are ids, never records and never a prompt.** A serialized
+  #    ticket is a ticket as it was when the job was enqueued, and by the
+  #    time a worker picks it up that is a guess.
+  # 2. **Check the turn before spending money.** `assistant_turn` moves on
+  #    every message and every transition, so a mismatch means the case
+  #    changed while this job waited — and the newer turn's job already
+  #    exists. Returning here costs nothing; calling a model costs money to
+  #    produce an answer that would be refused anyway.
+  # 3. **Hand the answer to exactly one verb**, all of them `by:` her and
+  #    `turn:` this turn. Each consumes the turn and returns the successor
+  #    (`Outcome#turn` / `ticket.assistant_turn`); a second action in the
+  #    same run uses that one.
+  # 4. **`SupportDesk::StaleTurn` and `Locked` are normal outcomes**, not
+  #    failures — hence `discard_on` below. `SupportDesk::AssistantNotAllowed`
+  #    is NOT: the brief said `may_not`, so reaching it is a bug in here.
+  class <%= key.camelize %>TurnJob < ApplicationJob
+    queue_as :support
+
+    # A late job, a redelivered one and a case that moved on all land as
+    # StaleTurn, and all three mean the same thing: somebody else has this.
+    # Locked means there is nobody to write to any more. RecordNotFound
+    # means the case is gone. None of them is worth a retry.
+    #
+    # Provider timeouts ARE worth one — put `retry_on` for those here. Note
+    # that a retry AFTER a committed action raises StaleTurn and is
+    # discarded, which is exactly right: the work was done.
+    discard_on SupportDesk::StaleTurn, SupportDesk::Locked, ActiveRecord::RecordNotFound
+
+    def perform(ticket_id, assistant_key, turn)
+      ticket = SupportDesk::Ticket.find(ticket_id)
+      return unless ticket.assistant_turn == turn          # the case moved on while we waited
+
+      <%= key %> = SupportDesk.assistant(assistant_key)
+      return unless ticket.assistant_policy(<%= key %>).may_observe?
+
+      answer = <%= service_class %>.answer(ticket.brief, ticket.transcript)
+
+      case answer.kind
+      when :answer
+        # `respond!` lets POLICY decide what this becomes: sent, proposed as
+        # a draft for a person to send, or withheld with a reason on the
+        # record. Never encode the level in here — it changes per case.
+        ticket.respond!(answer.text, by: <%= key %>, turn: turn, confidence: answer.confidence,
+                                     sources: answer.sources, metadata: answer.metadata)
+      when :hand_off
+        ticket.escalate!(by: <%= key %>, turn: turn, reason: answer.reason, summary: answer.summary)
+      when :note
+        # Staff only. Never reaches the conversation.
+        ticket.note!(answer.text, by: <%= key %>, turn: turn)
+      when :nothing
+        # She decided not to act. The turn is NOT consumed and the case
+        # stays in the humans' queue — which is why `SupportDesk.doctor`
+        # counts idle turns: a harness that always answers :nothing looks
+        # exactly like one that is down.
+        nil
+      else
+        raise ArgumentError, "unsupported answer kind #{answer.kind.inspect}"
+      end
+    end
+  end
+end

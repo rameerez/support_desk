@@ -152,4 +152,64 @@ class TestHelpersApiTest < ActiveSupport::TestCase
     assert_predicate ticket, :unassigned?
     assert_awaiting_reply ticket
   end
+
+  # --- The assistant helpers ----------------------------------------------------
+
+  test "the assistant helpers drive her the way a harness does" do
+    rose = configure_assistant!(autonomy: :draft)
+    ticket = open_support_ticket(for: @alice, message: "No me llega")
+
+    assert_equal rose, support_assistant
+    assert_equal rose, support_assistant(:rose)
+
+    draft = draft_as(rose, ticket, "Una propuesta")
+
+    assert_pending_draft ticket, body: "propuesta"
+    assert_pending_draft ticket, body: /propuesta/
+
+    draft.reject!(by: @lucia)
+
+    refute_pending_draft ticket
+
+    outcome = respond_as(rose, ticket, "Otra propuesta")
+
+    assert_predicate outcome, :drafted?
+  end
+
+  test "the assistant assertions describe the states a person cares about" do
+    rose = configure_assistant!(autonomy: :reply)
+    ticket = open_support_ticket(for: @alice, message: "No me llega")
+
+    refute_needs_human ticket
+    refute_assistant_spoke ticket
+    assert_assistant_policy ticket, :reply, because: /autonomy/
+
+    respond_as rose, ticket, "Lo miramos"
+
+    assert_held_by_assistant ticket
+    assert_held_by_assistant ticket, rose
+
+    ticket.escalate!(by: @lucia, reason: "para una persona")
+
+    assert_needs_human ticket
+    assert_needs_human ticket, reason: "para una persona"
+  end
+
+  test "with_assistant_config and with_topic_assistant_cap put everything back" do
+    configure_assistant!(autonomy: :reply)
+    ticket = open_support_ticket(for: @alice, message: "No me llega")
+
+    with_assistant_config(autonomy: :observe) do
+      assert_assistant_policy ticket, :observe
+    end
+
+    assert_assistant_policy ticket, :reply
+
+    with_topic_assistant_cap("other", :draft) do
+      assert_assistant_policy ticket, :draft, because: "topic other"
+    end
+
+    assert_assistant_policy ticket, :reply
+    assert_nil SupportDesk.config.default_desk.topics.find("other").assistant_cap
+  end
 end

@@ -16,7 +16,8 @@ class ConsoleReadmeTest < ActiveSupport::TestCase
   end
 
   test "the concern answers every verb the README lists" do
-    verbs = %i[reply take assign hand_off release close reopen note change_topic next]
+    verbs = %i[reply take assign hand_off release close reopen note change_topic
+               send_draft reject_draft pause_assistant resume_assistant next]
 
     verbs.each do |verb|
       assert SupportDesk::Console.public_method_defined?(verb),

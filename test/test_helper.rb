@@ -65,6 +65,34 @@ module ActiveSupport
       end
     end
 
+    # An assistant on the default desk, configured the way a host would.
+    #
+    # The dummy's own initializer declares NONE on purpose: "no assistant
+    # configured" is the state every existing host is in, so it is the state
+    # this suite is in unless an example asks for one.
+    def configure_assistant!(key = :rose, **overrides)
+      SupportDesk.configure do |config|
+        config.assistant(key) do |assistant|
+          assistant.name = overrides.fetch(:name, "Rose")
+          assistant.disclosure = overrides.fetch(:disclosure, :signature)
+          assistant.autonomy = overrides.fetch(:autonomy, :draft)
+          overrides.except(:name, :disclosure, :autonomy).each do |setting, value|
+            assistant.public_send(:"#{setting}=", value)
+          end
+        end
+        config.default_assistant = key
+      end
+      SupportDesk.assistant(key)
+    end
+
+    # Whether this adapter is one where the concurrency tests can say
+    # anything: SQLite takes one writer at a time and has no row locks to
+    # race over, so the threaded examples are defined only on PostgreSQL and
+    # run sequentially everywhere.
+    def postgresql?
+      ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
+    end
+
     # Whether this adapter enforces the partial unique indexes — everything
     # but MySQL — so a test can tell "the database refused it" from "only
     # the model would have".

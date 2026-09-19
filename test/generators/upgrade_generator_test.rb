@@ -161,6 +161,135 @@ class UpgradeGeneratorTest < Rails::Generators::TestCase
     end
   end
 
+  # --- The assistants migration (0.3.0) ------------------------------------------
+
+  test "writes the assistants migration once, and it is the same file a fresh install runs" do
+    run_generator
+    run_generator
+
+    assert_equal 1, Dir[File.join(destination_root, "db/migrate/*_add_assistants_to_support_desk.rb")].size
+
+    assert_migration "db/migrate/add_assistants_to_support_desk.rb" do |migration|
+      assert_match(/class AddAssistantsToSupportDesk < ActiveRecord::Migration\[\d+\.\d+\]/, migration)
+      assert_match(/create_table :support_desk_assistants, id: primary_key_type/, migration)
+      assert_match(/create_table :support_desk_drafts, id: primary_key_type/, migration)
+      # Types derived from the columns they point AT, never from today's
+      # generator setting.
+      assert_match(/t\.column :ticket_id, sql_type_of\(:support_desk_tickets, "id"\)/, migration)
+      assert_match(/t\.column :sent_message_id, sql_type_of\(:chats_messages, "id"\)/, migration)
+      assert_match(/t\.column :author_id, sql_type_of\(:support_desk_assignments, "agent_id"\)/, migration)
+      assert_match(/last_requester_message_id: \{ type: sql_type_of\(:chats_messages, "id"\) \}/, migration)
+      # Every statement preflighted, so a half-run migration can be re-run.
+      assert_match(/unless table_exists\?\(:support_desk_assistants\)/, migration)
+      assert_match(/next if column_exists\?\(:support_desk_tickets, name\)/, migration)
+      assert_match(/return unless partial_indexes\?/, migration)
+      assert_match(/unique: true, where: "status = 'pending'"/, migration)
+      assert_match(/UPDATE support_desk_tickets SET last_requester_message_id/, migration)
+      assert_match(/ORDER BY m\.created_at DESC, m\.id DESC LIMIT 1/, migration)
+      assert_match(/def down/, migration)
+      assert_match(/drop_table :support_desk_drafts/, migration)
+    end
+  end
+
+  test "the dummy app migrates a copy of the assistants template, so they can't drift" do
+    template = File.read(File.expand_path(
+      "../../lib/generators/support_desk/templates/add_assistants_to_support_desk.rb.erb", __dir__
+    ))
+    copy = File.read(File.expand_path(
+      "../dummy/db/migrate/20260101000006_add_assistants_to_support_desk.rb", __dir__
+    ))
+    body = ->(source) { source.split(/^class .*\n/, 2).last }
+
+    assert_equal body.call(template), body.call(copy),
+                 "test/dummy's assistants migration has drifted from the upgrade template"
+  end
+
+  test "the assistants migration adds two tables and nine columns to a 0.2 schema" do
+    with_scratch_database do |connection|
+      run_migration("CreateChatsTables", connection)
+      run_migration("CreateSupportDeskTables", connection)
+      run_migration("AddOpenedByToSupportDeskTickets", connection)
+
+      run_migration("AddAssistantsToSupportDesk", connection)
+
+      assert connection.table_exists?(:support_desk_assistants)
+      assert connection.table_exists?(:support_desk_drafts)
+      %w[assistant_revision last_requester_message_id assistant_turns_count assistant_acted_at
+         assistant_paused_at assistant_paused_reason assistant_cap human_required_at
+         human_required_reason].each do |column|
+        assert connection.column_exists?(:support_desk_tickets, column), "no #{column} column"
+      end
+      assert connection.index_exists?(:support_desk_tickets, [ :desk_id, :human_required_at ],
+                                      name: "index_support_desk_tickets_on_needs_human")
+      # The types follow the schema in front of it.
+      assert_equal sql_type(connection, "id"), draft_type(connection, "ticket_id")
+      assert_equal message_id_type(connection), draft_type(connection, "sent_message_id")
+      assert_equal message_id_type(connection), sql_type(connection, "last_requester_message_id")
+    end
+  end
+
+  test "the assistants migration follows the schema in front of it, not today's setting" do
+    with_scratch_database do |connection|
+      run_migration("CreateChatsTables", connection)
+      run_migration("CreateSupportDeskTables", connection)
+      ticket_type = sql_type(connection, "id")
+
+      with_generator_primary_key(:uuid) do
+        run_migration("AddAssistantsToSupportDesk", connection)
+      end
+
+      assert_equal ticket_type, draft_type(connection, "ticket_id")
+      assert_no_match(/uuid/i, draft_type(connection, "ticket_id"))
+    end
+  end
+
+  test "the assistants migration backfills the requester pointer, newest message first" do
+    with_scratch_database do |connection|
+      run_migration("CreateChatsTables", connection)
+      run_migration("CreateSupportDeskTables", connection)
+      desk_id = insert_desk(connection)
+      conversation_id = insert_conversation(connection)
+      insert_legacy_ticket(connection, desk_id: desk_id, requester_type: "User", requester_id: 7,
+                                       conversation_id: conversation_id)
+      insert_message(connection, conversation_id: conversation_id, sender_type: "User", sender_id: 7,
+                                 body: "primera", at: 2.hours.ago)
+      newest = insert_message(connection, conversation_id: conversation_id, sender_type: "User", sender_id: 7,
+                                          body: "segunda", at: 1.hour.ago)
+      # Neither of these is the requester's last word.
+      insert_message(connection, conversation_id: conversation_id, sender_type: "SupportDesk::Desk",
+                                 sender_id: desk_id, body: "respuesta", at: 30.minutes.ago)
+      insert_message(connection, conversation_id: conversation_id, sender_type: "User", sender_id: 9,
+                                 body: "de otra persona", at: 10.minutes.ago)
+
+      run_migration("AddAssistantsToSupportDesk", connection)
+
+      pointer = connection.select_value("SELECT last_requester_message_id FROM support_desk_tickets")
+
+      assert_equal newest.to_s, pointer.to_s
+      assert_equal 0, connection.select_value("SELECT assistant_revision FROM support_desk_tickets").to_i
+    end
+  end
+
+  test "the assistants migration can be run twice, and rolls back exactly what it added" do
+    with_scratch_database do |connection|
+      run_migration("CreateChatsTables", connection)
+      run_migration("CreateSupportDeskTables", connection)
+      run_migration("AddAssistantsToSupportDesk", connection)
+
+      assert_nothing_raised { run_migration("AddAssistantsToSupportDesk", connection) }
+
+      run_migration("AddAssistantsToSupportDesk", connection, :down)
+
+      assert_not connection.table_exists?(:support_desk_drafts)
+      assert_not connection.table_exists?(:support_desk_assistants)
+      assert_not connection.column_exists?(:support_desk_tickets, :human_required_at)
+      # The 0.2 schema is untouched.
+      assert connection.table_exists?(:support_desk_tickets)
+      assert connection.index_exists?(:support_desk_tickets, :reference,
+                                      name: "index_support_desk_tickets_on_reference")
+    end
+  end
+
   test "columns this migration didn't add are a refusal, not a silent skip" do
     with_scratch_database do |connection|
       run_migration("CreateSupportDeskTables", connection)
@@ -248,6 +377,33 @@ class UpgradeGeneratorTest < Rails::Generators::TestCase
     connection.columns(:support_desk_tickets).find { |column| column.name == column_name }.sql_type
   end
 
+  def draft_type(connection, column_name)
+    connection.columns(:support_desk_drafts).find { |column| column.name == column_name }.sql_type
+  end
+
+  def message_id_type(connection)
+    connection.columns(:chats_messages).find { |column| column.name == "id" }.sql_type
+  end
+
+  def insert_conversation(connection)
+    now = connection.quote(Time.current)
+    connection.insert(<<~SQL.squish)
+      INSERT INTO chats_conversations (kind, messages_count, created_at, updated_at)
+      VALUES ('direct', 0, #{now}, #{now})
+    SQL
+    connection.select_value("SELECT id FROM chats_conversations ORDER BY id DESC LIMIT 1")
+  end
+
+  def insert_message(connection, conversation_id:, sender_type:, sender_id:, body:, at:)
+    at = connection.quote(at)
+    connection.insert(<<~SQL.squish)
+      INSERT INTO chats_messages (conversation_id, sender_type, sender_id, kind, body, created_at, updated_at)
+      VALUES (#{connection.quote(conversation_id)}, #{connection.quote(sender_type)},
+              #{connection.quote(sender_id)}, 'text', #{connection.quote(body)}, #{at}, #{at})
+    SQL
+    connection.select_value("SELECT id FROM chats_messages ORDER BY created_at DESC, id DESC LIMIT 1")
+  end
+
   # Every case as [who asked, who opened it], so a backfill that pointed a row
   # at the wrong record could not read as a pass.
   def provenance(connection)
@@ -271,17 +427,17 @@ class UpgradeGeneratorTest < Rails::Generators::TestCase
 
   # A 0.1 row: everything the old schema demanded, and no provenance, because
   # there was nowhere to put it.
-  def insert_legacy_ticket(connection, desk_id:, requester_type:, requester_id:)
+  def insert_legacy_ticket(connection, desk_id:, requester_type:, requester_id:, conversation_id: nil)
     now = connection.quote(Time.current)
     reference = connection.quote("T-#{SecureRandom.hex(3).upcase}")
     connection.insert(<<~SQL.squish)
       INSERT INTO support_desk_tickets
         (desk_id, requester_type, requester_id, topic, reference, status, awaiting, priority, opened_via,
-         opened_at, reopen_count, cardinality_key, created_at, updated_at)
+         opened_at, reopen_count, cardinality_key, conversation_id, created_at, updated_at)
       VALUES
         (#{connection.quote(desk_id)}, #{connection.quote(requester_type)}, #{connection.quote(requester_id)},
          'other', #{reference}, 'open', 'agent', 0, 'in_app', #{now}, 0,
-         #{connection.quote("topic:other:#{requester_id}")}, #{now}, #{now})
+         #{connection.quote("topic:other:#{requester_id}")}, #{connection.quote(conversation_id)}, #{now}, #{now})
     SQL
   end
 end

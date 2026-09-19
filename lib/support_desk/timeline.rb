@@ -7,41 +7,60 @@ module SupportDesk
   #   ticket.timeline.each { |entry| … }
   #   ticket.timeline.print          # in `rails c`
   #
-  # Entries wrap either a Chats::Message or a SupportDesk::Event, and answer
-  # the same three questions — when, who, what.
+  # Entries wrap a Chats::Message, a SupportDesk::Event or a decided
+  # SupportDesk::Draft, and answer the same three questions — when, who,
+  # what.
+  #
+  # A draft is here because it is the only part of the story with no message
+  # and no event of its own to carry it: the event says a proposal was sent
+  # or discarded, and the row is what the proposal actually SAID. A pending
+  # one is not history yet, so it stays out — it is on the screen above,
+  # waiting for somebody.
   class Timeline
     include Enumerable
 
     # One moment in a case.
     class Entry
-      attr_reader :at, :message, :event
+      attr_reader :at, :message, :event, :draft
 
-      # One moment: a message, or an event, and when it happened.
-      def initialize(at:, message: nil, event: nil)
+      # One moment: a message, an event or a decided proposal, and when it
+      # happened.
+      def initialize(at:, message: nil, event: nil, draft: nil)
         @at = at
         @message = message
         @event = event
+        @draft = draft
       end
 
-      # Which of the two this moment is.
+      # Which of the three this moment is.
       def message? = !message.nil?
       def event? = !event.nil?
+      def draft? = !draft.nil?
 
-      # :message, or the event's kind (:assigned, :closed, :note…).
+      # :message, :draft, or the event's kind (:assigned, :closed, :note…).
       def kind
-        message? ? :message : event.kind.to_sym
+        return :message if message?
+        return :draft if draft?
+
+        event.kind.to_sym
       end
 
       # Who is responsible for this moment: a message's author (the agent
-      # who signed it) or sender, or an event's actor.
+      # who signed it) or sender, an event's actor, or — for a proposal —
+      # the person who decided about it, falling back to the machine that
+      # wrote it when nobody did.
       def actor
+        return draft.reviewed_by || draft.author if draft?
         return event.actor_or_system if event?
 
         message.try(:author) || message.sender
       end
 
-      # What was said, or what a note said. Nil for the rest.
+      # What was said, what a note said, or what a proposal proposed. Nil
+      # for the rest.
       def body
+        return draft.final_body if draft?
+
         message? ? message.try(:visible_body) : event.note
       end
 
@@ -71,7 +90,8 @@ module SupportDesk
 
     # Every moment, oldest first.
     def entries
-      @entries ||= (message_entries + event_entries).sort_by { |entry| [ entry.at || Time.at(0), entry.kind.to_s ] }
+      @entries ||= (message_entries + event_entries + draft_entries)
+                   .sort_by { |entry| [ entry.at || Time.at(0), entry.kind.to_s ] }
     end
 
     # How many moments the case has had, and the latest one.
@@ -99,6 +119,15 @@ module SupportDesk
 
     def event_entries
       ticket.events.chronological.map { |event| Entry.new(at: event.created_at, event: event) }
+    end
+
+    # Proposals somebody decided about — sent, discarded, or overtaken.
+    # One query, and on the overwhelming majority of desks it returns
+    # nothing at all, because nothing has ever proposed anything.
+    def draft_entries
+      ticket.drafts.where.not(status: "pending").chronological.includes(:author, :reviewed_by).map do |draft|
+        Entry.new(at: draft.created_at, draft: draft)
+      end
     end
   end
 end
