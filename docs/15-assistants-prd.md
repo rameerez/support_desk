@@ -40,7 +40,7 @@ Appendix A — configuration example · B — sequences · C — file map
 
 ## 0. Status, scope, decisions
 
-**Target:** `support_desk` 0.3.0. **No chats change required** (§4.21).
+**Status: IMPLEMENTED** — merged as rameerez/support_desk#6 (`3943760`, 2026-09-19), released as v0.3.0. Deviations taken during implementation: `Draft#proposed_turn` stores the successor turn (a proposal is itself a change); a hand-back needs a human actor; the `max_turns nil` / `responds_within nil` warnings come from `doctor`, not `Configuration#warnings`; a reconciliation fold rolls back with a refused operation (I15 over I5); `assistant_in_play?` = configured or `assistant_turns_count > 0`; `Desk#agents` is an Array; `ensure_opener!` takes the desk. **No chats change was required** (§4.21).
 
 **Decisions taken (12 #19–22), not to be reopened:**
 

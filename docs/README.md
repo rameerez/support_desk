@@ -30,7 +30,7 @@ tickets that are conversations — built as a *product gem* on the `chats`
 | 11 | [roadmap.md](11-roadmap.md) | Releases 0.1 → 1.0, CarHey acceptance criteria, migration of #309. |
 | 12 | [open-questions.md](12-open-questions.md) | What only the owner can decide. |
 | 14 | [assistants.md](14-assistants.md) | AI agents as first-class citizens: `SupportDesk::Assistant`, autonomy levels, drafts + human review, the turn token, `escalate!` / `request_human!`, brief + transcript. Design only, not implemented (2026-09-18). |
-| 15 | [assistants-prd.md](15-assistants-prd.md) | **The implementation contract for 14 (v3)**: full API, algorithms under lock, migration, surfaces, locales, harness contract + generator, test plan, CHANGELOG, delivery, CarHey "Rose" rollout, edge-case register. Not implemented (2026-09-18). |
+| 15 | [assistants-prd.md](15-assistants-prd.md) | **The implementation contract for 14 (v3)**: full API, algorithms under lock, migration, surfaces, locales, harness contract + generator, test plan, CHANGELOG, delivery, CarHey "Rose" rollout, edge-case register. **Implemented**: rameerez/support_desk#6 → v0.3.0 (2026-09-19). |
 | 15r | [assistants-review-1.md](15-assistants-review-1.md) · [assistants-review-2.md](15-assistants-review-2.md) | The adversarial review of v1 (46 findings) and the disposition of each in v3. |
 
 ## Ecosystem context (facts, verified 2026-09-15)
