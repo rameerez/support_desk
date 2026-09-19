@@ -50,6 +50,8 @@ class InstallGeneratorTest < Rails::Generators::TestCase
       assert_no_match(/create_table :support_desk_events.*t\.timestamps/m, migration)
     end
 
+    assert_migration "db/migrate/create_support_desk_message_registrations.rb"
+
     assert_file "config/initializers/support_desk.rb" do |initializer|
       assert_match(/SupportDesk\.configure do \|config\|/, initializer)
       assert_match(/config\.requester_class = "User"/, initializer)

@@ -29,14 +29,10 @@ module SupportDesk
   #
   # == Names survive renames
   #
-  # An assistant's name is read from the message's own provenance stamp
-  # first (`metadata["support_desk"]["assistant"]`, the KEY), resolved
-  # through the configuration when she is still declared, and only then
-  # falls back to the `display_name` the message was written with. So a
-  # transcript reads "Rose" while Rose is configured, keeps saying what the
-  # customer was actually shown for an assistant nobody declares any more,
-  # and never invents a name for a message written under a nameless
-  # disclosure mode.
+  # The assistant's original name is stored on new messages. Older assistant
+  # messages fall back to their stored display name, then to configuration or
+  # the author record only when there is no message snapshot. Exported turns
+  # retain AI provenance even when their requester-facing mode is nameless.
   #
   # == Deleted messages are turns too
   #
@@ -204,12 +200,13 @@ module SupportDesk
       end
     end
 
-    # The key the message was stamped with, resolved to the name that key
-    # has NOW — and the stored display name when nothing declares her any
-    # more. A message written by the record rather than by `speak!` (an
-    # import, a host that posts its own) has neither, so the record answers.
+    # Message snapshots survive configuration changes. Imports without a
+    # snapshot use the configured key or author as a legacy fallback.
     def assistant_name(message)
       stamp = provenance(message)
+      return stamp["name"] if stamp["name"].is_a?(String) && stamp["name"].present?
+      return stamp["display_name"] if stamp["display_name"].is_a?(String) && stamp["display_name"].present?
+
       key = stamp["assistant"]
       if key.present? && SupportDesk.config.assistant?(key)
         return SupportDesk.config.assistant(key).name

@@ -216,8 +216,6 @@ module SupportDesk
 
       config.desks.each_key do |key|
         agent = desk(key)&.assistant
-        next if agent.nil?
-
         # Repair before deciding. A requester message whose registration was
         # lost after commit leaves the clocks describing a case that no longer
         # exists — and `assistant_idle_since` reads those clocks, so the case
@@ -225,11 +223,13 @@ module SupportDesk
         # in COMMITS on its own and emits the turn it produces, so a dead
         # process followed by nothing but this task still ends in an
         # actionable turn (R3).
-        Ticket.open.for_desk(key).with_unregistered_requester_messages.find_each do |ticket|
+        Ticket.for_desk(key).with_unregistered_requester_messages.find_each do |ticket|
           emitted += 1 if ticket.reconcile_and_commit!.positive?
         rescue StandardError => e
           report_error(e, context: { hook: :redispatch_assistant_turns, ticket: ticket.id })
         end
+
+        next if agent.nil?
 
         Ticket.open.for_desk(key).assistant_idle_since(older_than.ago).find_each do |ticket|
           next unless ticket.assistant_policy(agent).may_observe?

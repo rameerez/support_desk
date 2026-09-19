@@ -253,6 +253,12 @@ module SupportDesk
         tables?
 
       checks = [
+        check("message registrations") do
+          next fail_with("run rails g support_desk:upgrade and rails db:migrate before serving support writes") unless
+            MessageRegistration.table_exists?
+
+          ok_with("message registration receipts available")
+        end,
         check("conversations") do
           orphans = Ticket.where(conversation_id: nil).count
           next fail_with("#{orphans} ticket(s) without a conversation") if orphans.positive?

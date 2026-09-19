@@ -105,7 +105,7 @@ module SupportDesk
           awaiting_reply.where(last_requester_message_at: ..time)
                         .where("assistant_acted_at IS NULL OR assistant_acted_at < last_requester_message_at")
         }
-        # Open cases whose conversation holds a requester message the gem never
+        # Cases whose conversation holds a requester message the gem never
         # folded in. The registration runs after the message's commit, so it can
         # be LOST — a killed worker, a dropped subscriber — and the clocks then
         # describe a case that no longer exists: `awaiting_requester` on a case
@@ -118,19 +118,15 @@ module SupportDesk
         scope :with_unregistered_requester_messages, lambda {
           tickets = arel_table
           messages = Chats::Message.arel_table
-          watermark = tickets[:last_requester_message_at]
-          ahead = watermark.eq(nil)
-                           .or(messages[:created_at].gt(watermark))
-                           .or(messages[:created_at].eq(watermark)
-                                 .and(tickets[:last_requester_message_id].not_eq(nil))
-                                 .and(messages[:id].gt(tickets[:last_requester_message_id])))
-
+          receipts = MessageRegistration.arel_table
+          registered = MessageRegistration.select(Arel.sql("1"))
+                                          .where(receipts[:message_id].eq(messages[:id]))
           unregistered = Chats::Message.select(Arel.sql("1"))
                                        .where(kind: "text")
                                        .where(messages[:conversation_id].eq(tickets[:conversation_id]))
                                        .where(messages[:sender_type].eq(tickets[:requester_type]))
                                        .where(messages[:sender_id].eq(tickets[:requester_id]))
-                                       .where(ahead)
+                                       .where(registered.arel.exists.not)
           where(unregistered.arel.exists)
         }
       end
@@ -590,28 +586,11 @@ module SupportDesk
         folded.size
       end
 
-      # The requester messages chats has committed that are AHEAD of this
-      # case's watermark — the query half of the rule `registered?` answers in
-      # Ruby, written once so the two can never disagree (R4).
+      # Every committed requester message without a receipt, regardless of
+      # timestamp or UUID order. The clocks are not evidence of registration.
       def unregistered_requester_messages
-        scope = conversation.messages.where(kind: "text", sender_type: requester_type, sender_id: requester_id)
-        return scope if last_requester_message_at.blank?
-        # No pointer to compare against (a 0.2 row whose backfill found
-        # nothing): the clock alone, rather than a comparison against an empty
-        # string that some adapters refuse outright.
-        return scope.where("chats_messages.created_at > ?", last_requester_message_at) if
-          last_requester_message_id.blank?
-
-        # Everything AHEAD of the watermark in chats' transcript order
-        # (created_at, id) — two messages can land on one timestamp, and the one
-        # after the pointer is the real new one. `<> :id` was wrong here: it
-        # also matched the messages that tied with the watermark and were
-        # registered BEFORE it, so folding them in again bumped the revision and
-        # made the current answer stale for ever (R4).
-        scope.where(
-          "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id > :id)",
-          at: last_requester_message_at, id: last_requester_message_id
-        )
+        conversation.messages.where(kind: "text", sender_type: requester_type, sender_id: requester_id)
+                    .where.not(id: message_registrations.select(:message_id))
       end
 
       # A SELECT … FOR UPDATE on the conversation row, taken AFTER the ticket's
@@ -688,6 +667,7 @@ module SupportDesk
         stamped = { "support_desk" => {
           "assistant" => assistant.key,
           "kind" => "ai",
+          "name" => assistant.name,
           "display_name" => assistant.disclosed_name,
           "disclosure" => assistant.disclosure.to_s,
           "signed" => assistant.signs?,
@@ -862,6 +842,8 @@ module SupportDesk
       # turn` before spending money. A hook that raises is reported: a
       # broken subscriber must not roll back the message that triggered it.
       def emit_assistant_turn(message = nil)
+        return unless open? && awaiting_reply?
+
         assistant = self.assistant
         return if assistant.nil?
         return unless assistant_policy(assistant).may_observe?
