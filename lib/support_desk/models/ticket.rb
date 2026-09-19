@@ -1626,30 +1626,68 @@ module SupportDesk
     # the clock counts as folded in: idempotency is the documented promise,
     # and the cost of the rare tie is one clock that doesn't advance until
     # the next message.
+    #
+    # For the REQUESTER the clock is not a timestamp but a WATERMARK — the
+    # pair (last_requester_message_at, last_requester_message_id) — and a
+    # message counts as folded in when its own pair is at or behind it, in
+    # chats' transcript order. See #after_requester_watermark?.
     def registered?(message)
       return true if last_registered_message_id.present? && last_registered_message_id.to_s == message.id.to_s
 
       role = role_of(message)
-      clock = case role
-      when :requester then last_requester_message_at
-      when :agent then last_agent_message_at
-      end
+      return !after_requester_watermark?(message) if role == :requester
+
+      clock = (last_agent_message_at if role == :agent)
       return false if clock.blank?
       return true if message.created_at < clock
-      return false unless message.created_at == clock
 
       # Equal timestamps are NOT the same message. A coarse column, a frozen
       # clock in a test, or two very fast inserts can put two different
       # messages on one instant, and a `<=` here folded the second one in
       # without moving anything — so the assistant answered a question the
-      # case had never registered. The only equal-timestamp message that
-      # counts as folded in is the one the clock was set FROM.
-      case role
-      when :requester then last_requester_message_id.present? &&
-                           last_requester_message_id.to_s == message.id.to_s
-      else false
+      # case had never registered. On the agent side the id pointer the
+      # requester side compares against does not exist, so a tie is new.
+      false
+    end
+
+    # Whether +message+ is AHEAD of the requester watermark — the one
+    # definition of "she hasn't seen this yet", shared by `registered?` and
+    # by the reconciliation query, so the two can never disagree about a
+    # message and loop refusing it (R4).
+    #
+    # The watermark is the PAIR (last_requester_message_at,
+    # last_requester_message_id) and the comparison is chats' own transcript
+    # order — `created_at ASC, id ASC` — never chronology alone. For a uuid
+    # primary key that order is arbitrary, but it is the order the thread is
+    # DISPLAYED in, which is the only order "the last word" can mean.
+    def after_requester_watermark?(message)
+      watermark = last_requester_message_at
+      return true if watermark.blank?
+      return true if message.created_at > watermark
+      return false if message.created_at < watermark
+      # A tie with no pointer to break it (a 0.2 row whose backfill found
+      # nothing) is new: the alternative silently drops it.
+      return true if last_requester_message_id.blank?
+
+      compare_message_ids(message.id, last_requester_message_id).positive?
+    end
+
+    # Order two chats message ids the way the DATABASE orders that column,
+    # because the reconciliation query compares them in SQL and this one
+    # compares them in Ruby. Integers compare numerically (10 is after 9);
+    # anything else — a uuid, a ULID — compares as a string, which is how
+    # every adapter orders those columns too.
+    def compare_message_ids(one, other)
+      if one.is_a?(Integer) && other.is_a?(Integer)
+        one <=> other
+      elsif integerish?(one) && integerish?(other)
+        one.to_i <=> other.to_i
+      else
+        one.to_s <=> other.to_s
       end
     end
+
+    def integerish?(value) = value.to_s.match?(/\A-?\d+\z/)
 
     def opening_message?
       last_registered_message_id.blank? && last_requester_message_at.nil? && last_agent_message_at.nil?

@@ -386,11 +386,15 @@ module SupportDesk
         scope = conversation.messages.where(kind: "text", sender_type: requester_type, sender_id: requester_id)
         if last_requester_message_at.present?
           scope = if last_requester_message_id.present?
-            # Everything after the clock, plus anything sharing its instant
-            # that ISN'T the message the clock was set from — two messages
-            # can land on one timestamp, and the second one is real.
+            # Everything AHEAD of the watermark in chats' transcript order
+            # (created_at, id) — two messages can land on one timestamp, and
+            # the one after the pointer is the real new one. `<> :id` was
+            # wrong here: it also matched the messages that tied with the
+            # watermark and were registered BEFORE it, so folding them in
+            # again bumped the revision and made the current answer stale
+            # for ever (R4).
             scope.where(
-              "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id <> :id)",
+              "chats_messages.created_at > :at OR (chats_messages.created_at = :at AND chats_messages.id > :id)",
               at: last_requester_message_at, id: last_requester_message_id
             )
           else
