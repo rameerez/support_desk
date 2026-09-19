@@ -101,25 +101,27 @@ module SupportDesk
         # describe a case that no longer exists: `awaiting_requester` on a case
         # that is waiting for an answer, which no idle query can see. This one
         # asks the messages instead of the clocks (R3).
+        #
+        # Built in Arel rather than as a string, because it compares two tables'
+        # columns to each other and there is no value to bind: it has to be
+        # readable as "no user input reaches this SQL" at a glance.
         scope :with_unregistered_requester_messages, lambda {
-          tickets = quoted_table_name
-          messages = connection.quote_table_name(Chats::Message.table_name)
-          where(<<~SQL.squish)
-            EXISTS (
-              SELECT 1 FROM #{messages} unregistered
-              WHERE unregistered.conversation_id = #{tickets}.conversation_id
-                AND unregistered.kind = 'text'
-                AND unregistered.sender_type = #{tickets}.requester_type
-                AND unregistered.sender_id = #{tickets}.requester_id
-                AND (
-                  #{tickets}.last_requester_message_at IS NULL
-                  OR unregistered.created_at > #{tickets}.last_requester_message_at
-                  OR (unregistered.created_at = #{tickets}.last_requester_message_at
-                      AND #{tickets}.last_requester_message_id IS NOT NULL
-                      AND unregistered.id > #{tickets}.last_requester_message_id)
-                )
-            )
-          SQL
+          tickets = arel_table
+          messages = Chats::Message.arel_table
+          watermark = tickets[:last_requester_message_at]
+          ahead = watermark.eq(nil)
+                           .or(messages[:created_at].gt(watermark))
+                           .or(messages[:created_at].eq(watermark)
+                                 .and(tickets[:last_requester_message_id].not_eq(nil))
+                                 .and(messages[:id].gt(tickets[:last_requester_message_id])))
+
+          unregistered = Chats::Message.select(Arel.sql("1"))
+                                       .where(kind: "text")
+                                       .where(messages[:conversation_id].eq(tickets[:conversation_id]))
+                                       .where(messages[:sender_type].eq(tickets[:requester_type]))
+                                       .where(messages[:sender_id].eq(tickets[:requester_id]))
+                                       .where(ahead)
+          where(unregistered.arel.exists)
         }
       end
 
