@@ -1,0 +1,69 @@
+# frozen_string_literal: true
+
+require "test_helper"
+
+# The three things about a harness that are worth a test, and the only three
+# that are the same in every app: the level decides what her answer BECOMES,
+# raising the level changes that and nothing else, and a turn that is no
+# longer the case's writes nothing at all.
+#
+# <%= service_class %>.answer is stubbed throughout — this is a test of the
+# wiring, not of a model. Point `requester` and `agent` at your own fixtures
+# and it runs.
+class <%= key.camelize %>TurnJobTest < ActiveSupport::TestCase
+  include SupportDesk::TestHelpers
+
+  setup do
+    @<%= key %> = SupportDesk.assistant(:<%= key %>)
+    @ticket = open_support_ticket(for: requester, message: "No me han pagado")
+  end
+
+  test "at :draft her answer waits for a person" do
+    answering("Lo estamos revisando") do
+      <%= job_class %>.perform_now(@ticket.id, "<%= key %>", @ticket.assistant_turn)
+    end
+
+    draft = assert_pending_draft @ticket, body: "revisando"
+    assert_equal @<%= key %>, draft.author
+    # Nothing reached the customer: a proposal is not a message.
+    refute_assistant_spoke @ticket
+  end
+
+  test "at :reply she answers the customer herself" do
+    with_assistant_config(:<%= key %>, autonomy: :reply) do
+      answering("Lo estamos revisando") do
+        <%= job_class %>.perform_now(@ticket.id, "<%= key %>", @ticket.assistant_turn)
+      end
+    end
+
+    assert_awaiting_requester @ticket
+    refute_pending_draft @ticket
+  end
+
+  test "a stale turn writes nothing and costs nothing" do
+    stale = @ticket.assistant_turn
+    ask_again(@ticket, "¿hola?")   # the customer wrote again: the turn moved
+
+    called = false
+    <%= service_class %>.stub(:answer, ->(*) { called = true; answer_for("…") }) do
+      <%= job_class %>.perform_now(@ticket.id, "<%= key %>", stale)
+    end
+
+    assert_not called, "the job called the model on a turn that was no longer the case's"
+    refute_pending_draft @ticket
+    refute_assistant_spoke @ticket
+  end
+
+  private
+
+  # The person asking. Point this at your own fixture or factory.
+  def requester = users(:one)
+
+  def answer_for(text)
+    <%= service_class %>::Answer.new(kind: :answer, text: text, confidence: 0.9)
+  end
+
+  def answering(text, &block)
+    <%= service_class %>.stub(:answer, ->(*) { answer_for(text) }, &block)
+  end
+end

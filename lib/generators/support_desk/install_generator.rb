@@ -94,6 +94,10 @@ module SupportDesk
         say "  nothing you own. Follow the CHANGELOG's drained cutover: migrate, pause"
         say "  support traffic, drain old web/workers, backfill, then serve only 0.2."
 
+        say "\n  Assistants (0.3): when a machine should answer first, 'rails g support_desk:assistant"
+        say "  Rose --disclosure signature' writes the harness and prints the stanza. Read the"
+        say "  README's Assistants section before you flip it on — disclosure is a required choice."
+
         say "\nCheck your work any time with SupportDesk.doctor.print"
         say "You now have support tickets that are real conversations. 🚀\n", :green
       end
