@@ -219,6 +219,55 @@ module SupportDesk
       end
     end
 
+    # --- Stranded seats (R6) -----------------------------------------------------
+
+    test "switching her off gives back the seats she holds, promise or no promise" do
+      # `deactivate!` promises the sweep releases her cases. The sweep only
+      # ever visited assistants with a `responds_within`, and only cases that
+      # were overdue — so an assistant with no promise kept her seat for ever.
+      with_assistant_config(responds_within: nil) do
+        @ticket.assign!(to: @rose, by: @rose, turn: turn)
+        @rose.deactivate!(by: @lucia)
+
+        moved = SupportDesk.release_silent_assistants!
+
+        assert_equal 1, moved
+        assert_unassigned @ticket.reload
+        assert_needs_human @ticket, reason: "assistant_unavailable"
+      end
+    end
+
+    test "removing her configuration gives back the seats she holds" do
+      # The documented kill switch: the host stops declaring her at all. The
+      # sweep iterated CONFIGURED assistants, so it never visited these seats.
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      SupportDesk.reset!
+      configure_support_desk!
+      SupportDesk.subscribe_to_chats!
+
+      assert_equal 1, SupportDesk.reclaim_assistant_seats!
+      assert_unassigned @ticket.reload
+      assert_needs_human @ticket, reason: "assistant_unavailable"
+    end
+
+    test "a case where a person was already asked for still gets its seat back" do
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      @ticket.update_columns(human_required_at: Time.current, human_required_reason: "phrase")
+      @rose.deactivate!(by: @lucia)
+
+      assert_equal 1, SupportDesk.reclaim_assistant_seats!
+      assert_unassigned @ticket.reload
+      assert_equal "phrase", @ticket.human_required_reason, "the reason a person was asked for is not rewritten"
+    end
+
+    test "a seat she may still hold is left exactly where it is" do
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+
+      assert_equal 0, SupportDesk.reclaim_assistant_seats!
+      assert_held_by_assistant @ticket.reload, @rose
+      refute_needs_human @ticket
+    end
+
     # --- Redispatch --------------------------------------------------------------
 
     test "a turn nobody acted on is re-emitted" do

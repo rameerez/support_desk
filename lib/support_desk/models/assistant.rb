@@ -99,10 +99,16 @@ module SupportDesk
     # policy, not a number of cases.
     def support_capacity = nil
 
-    # Stop her everywhere, now. Cases she holds are released by the silent
-    # sweep (`SupportDesk.release_silent_assistants!`), which also asks for a
-    # person on each of them — run it, or wait for its schedule, before
+    # Stop her everywhere, now. The cases she is SITTING on are given back by
+    # `SupportDesk.reclaim_assistant_seats!` (which
+    # `release_silent_assistants!` runs first, and
+    # `rake support_desk:reclaim_assistant_seats` runs alone), and it asks
+    # for a person on each of them. Run it, or wait for its schedule, before
     # calling the desk quiet.
+    #
+    # It needs no `responds_within` and no overdue clock: a seat nobody can
+    # sit in any more is not a silence problem. In 0.3.0 it was treated as
+    # one, so an assistant with no promise kept her seats for ever (R6).
     def deactivate!(by:, reason: nil)
       update!(active: false)
       SupportDesk.logger&.warn(

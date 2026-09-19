@@ -3,8 +3,8 @@
 require "test_helper"
 require "rake"
 
-# §12.11 — the three maintenance tasks. Two of them are the nets under a
-# dead harness and have to be scheduled; the third is the read-only "what is
+# §12.11 — the four maintenance tasks. Three of them are the nets under a
+# dead harness and have to be scheduled; the fourth is the read-only "what is
 # she doing right now".
 class AssistantTasksTest < ActiveSupport::TestCase
   setup do
@@ -38,6 +38,18 @@ class AssistantTasksTest < ActiveSupport::TestCase
     ticket_for(@alice)
 
     assert_match(/0 case\(s\)/, run_task("release_silent_assistants"))
+  end
+
+  test "reclaim_assistant_seats gives back a switched-off assistant's cases" do
+    ticket = ticket_for(@alice)
+    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
+    @rose.deactivate!(by: @lucia)
+
+    output = run_task("reclaim_assistant_seats")
+
+    assert_match(/1 stranded seat/, output)
+    assert_unassigned ticket.reload
+    assert_needs_human ticket, reason: "assistant_unavailable"
   end
 
   test "redispatch_assistant_turns re-emits what nobody picked up" do

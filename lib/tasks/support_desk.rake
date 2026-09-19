@@ -38,6 +38,17 @@ namespace :support_desk do
     puts "[support_desk] #{moved} case(s) handed to a person."
   end
 
+  desc "Give back every seat an assistant can no longer sit in (run every minute)"
+  task reclaim_assistant_seats: :environment do
+    # Invalid-assignee recovery: she was switched off, her configuration was
+    # taken away, or her policy no longer lets her hold a case. It needs no
+    # `responds_within` and no overdue clock — `release_silent_assistants`
+    # runs it first, and this is the same work on its own.
+    reclaimed = SupportDesk.reclaim_assistant_seats!
+
+    puts "[support_desk] #{reclaimed} stranded seat(s) given back to people."
+  end
+
   desc "Re-emit the turn for cases nobody answered (OLDER_THAN=60 seconds; run every 5 minutes)"
   task redispatch_assistant_turns: :environment do
     # At-least-once, and that is safe: the turn is consumed by the first

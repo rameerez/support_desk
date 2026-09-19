@@ -118,6 +118,20 @@ class AssistantDoctorTest < ActiveSupport::TestCase
     assert_match(/#{ticket.reference}/, check("assistant seats").message)
   end
 
+  test "the seats check survives the configuration being taken away" do
+    rose = configure_assistant!(autonomy: :reply)
+    ticket = ticket_for(@alice)
+    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
+    # The documented kill switch: she is not declared any more. The seat she
+    # is holding is still a seat, and the check that finds it is the one that
+    # used to return early here (R6).
+    SupportDesk.reset!
+    configure_support_desk!
+
+    assert_not_predicate SupportDesk.doctor, :ok?
+    assert_match(/held by an assistant who may not hold them/, check("assistant seats").message)
+  end
+
   test "a harness that never picks anything up is a warning that names the task" do
     configure_assistant!(responds_within: 60)
     ticket_for(@alice)

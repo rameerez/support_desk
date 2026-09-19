@@ -146,6 +146,31 @@ module SupportDesk
       record.respond_to?(:support_agent_kind) && record.support_agent_kind == :ai
     end
 
+    # Give back every seat an assistant can no longer sit in — she was
+    # switched off, her configuration was removed, or her policy no longer
+    # lets her hold a case — and ask for a person on each of them.
+    #
+    # Invalid-assignee recovery, NOT silence detection: it reads the seats
+    # that exist rather than the assistants a running process happens to
+    # have configured, so a `deactivate!`, a flag flipped off and a topic
+    # cap tightened are all covered, with no `responds_within` and no
+    # overdue clock anywhere in it (R6). `release_silent_assistants!` runs
+    # it first; `rake support_desk:reclaim_assistant_seats` runs it alone.
+    #
+    # Returns how many seats it reclaimed.
+    def reclaim_assistant_seats!
+      return 0 unless Assistant.table_exists?
+
+      reclaimed = 0
+      Ticket.open.held_by_assistants.find_each do |ticket|
+        reclaimed += 1 if ticket.reclaim_assistant_seat!
+      rescue StandardError => e
+        report_error(e, context: { hook: :reclaim_assistant_seats, ticket: ticket.id })
+      end
+      logger&.info("[support_desk] reclaimed #{reclaimed} stranded assistant seat(s)") if reclaimed.positive?
+      reclaimed
+    end
+
     # Release every assistant who has sat on a case longer than her
     # `responds_within` without answering — and ask for a person on it.
     #
@@ -154,7 +179,9 @@ module SupportDesk
     # Run it every minute (`rake support_desk:release_silent_assistants`).
     # Returns how many cases it moved.
     def release_silent_assistants!
-      moved = 0
+      # A seat nobody can sit in any more is not a silence problem, and it
+      # must not need a `responds_within` to be noticed (R6).
+      moved = reclaim_assistant_seats!
       config.assistants.each_key do |key|
         agent = assistant(key)
         window = agent&.responds_within

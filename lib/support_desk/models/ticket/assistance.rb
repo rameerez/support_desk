@@ -429,6 +429,49 @@ module SupportDesk
         true
       end
 
+      # Give a stranded seat back to people: the assistant holding this case is
+      # switched off, no longer declared, or no longer allowed to hold it.
+      # Returns true when it moved. See SupportDesk.reclaim_assistant_seats!.
+      #
+      # This is INVALID-ASSIGNEE recovery, and it is deliberately not silence
+      # detection: it needs no `responds_within`, no overdue clock and no
+      # waiting side. `deactivate!` promises the seats come back, and in 0.3.0
+      # that promise was kept only for an assistant who had a promise of her
+      # own and a case that was already late (R6).
+      def reclaim_assistant_seat! # :nodoc:
+        event = nil
+        from = nil
+        escalated = false
+        with_lock(requires_new: true) do
+          next unless open?
+          next unless held_by_assistant?
+
+          from = assignee
+          next if assistant_may_keep_seat?(from)
+
+          if human_required?
+            # Somebody has already been asked for, and why is their business —
+            # the only thing left to give back is the seat.
+            event = write_transition!(:released, actor: :system) do
+              release_assistant_seat!(reason: :released)
+              { "from" => SupportDesk.actor_key(from), "reason" => "assistant_unavailable" }
+            end
+          else
+            escalated = true
+            event, = flag_human_required!(actor: :system, kind: :escalated, reason: "assistant_unavailable",
+                                          summary: nil, line: :hand_off_line, request: nil)
+          end
+        end
+        return false unless event
+
+        if escalated
+          publish_escalation!(from: from, reason: "assistant_unavailable", by: :system)
+        else
+          SupportDesk.emit_after_commit(:ticket_released, self, from: from, reason: :assistant_unavailable)
+        end
+        true
+      end
+
       # The ONE place `:ticket_escalated` is published. Every hand-off that
       # takes her off a case goes through it — her own `escalate!`, the budget
       # branch of `respond!`, the silent sweep — so no path can write the
@@ -562,6 +605,23 @@ module SupportDesk
         return if conversation_id.blank?
 
         Chats::Conversation.lock.find_by(id: conversation_id)
+      end
+
+      # Whether the assistant sitting on this case may go on sitting on it: she
+      # is on duty, she is still declared, and her policy still lets her hold
+      # it. Read under the lock, from the reloaded assignee.
+      #
+      # A policy that RAISES — a desk pointing at an assistant nobody declares
+      # any more — is an answer too, and it is "no": a seat nothing can reason
+      # about belongs to a person.
+      def assistant_may_keep_seat?(holder)
+        return false unless holder.is_a?(SupportDesk::Assistant)
+        return false unless holder.active?
+        return false unless holder.configured?
+
+        assistant_policy(holder).may_hold?
+      rescue StandardError
+        false
       end
 
       # Nothing was written, and the reason is on the record: a policy that

@@ -317,10 +317,13 @@ module SupportDesk
     # and never of the policy's own verdict. A policy cannot page anybody
     # about its own bug.
     def assistant_invariant_checks
-      # Nothing about a feature nobody turned on: a host with no assistant
-      # configured runs not one extra query (I1).
-      return [] if SupportDesk.config.assistants.empty?
       return [] unless assistants_migrated?
+      # Nothing about a feature nobody turned on (I1) — but "turned on" is
+      # not "configured right now". A host that removed her configuration
+      # still has the seats she is sitting on and the proposals she wrote,
+      # and the checks about THOSE are the ones that matter most on the way
+      # down (R6).
+      return [] if SupportDesk.config.assistants.empty? && !SupportDesk::Assistant.exists?
 
       checks = []
 
