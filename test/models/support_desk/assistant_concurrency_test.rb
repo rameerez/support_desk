@@ -131,7 +131,7 @@ module SupportDesk
 
       test "the sweep racing a takeover never moves a person's seat" do
         SupportDesk.config.assistant(:rose).responds_within = 1
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
         Ticket.where(id: @ticket.id).update_all(waiting_since: 1.hour.ago)
 
         results = run_together(2) do |index|

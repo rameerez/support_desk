@@ -93,7 +93,7 @@ class AssistantDoctorTest < ActiveSupport::TestCase
   test "a case that has waited longer than her promise turns the doctor red" do
     rose = configure_assistant!(autonomy: :reply, responds_within: 60)
     ticket = ticket_for(@alice)
-    ticket.assign!(to: rose, by: rose)
+    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
 
     assert_predicate SupportDesk.doctor, :ok?
 
@@ -108,7 +108,7 @@ class AssistantDoctorTest < ActiveSupport::TestCase
   test "an assistant sitting on a case she may not work turns the doctor red" do
     rose = configure_assistant!(autonomy: :reply)
     ticket = ticket_for(@alice)
-    ticket.assign!(to: rose, by: rose)
+    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
     # Straight to the column: this is exactly the state a bug would leave,
     # and the check has to see it however it got there.
     ticket.update_columns(assistant_paused_at: Time.current)

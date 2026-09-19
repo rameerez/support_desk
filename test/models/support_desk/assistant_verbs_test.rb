@@ -95,12 +95,12 @@ module SupportDesk
     test "release! is her own seat and nobody else's" do
       @ticket.assign!(to: @lucia, by: @lucia)
 
-      assert_raises(AssistantNotAllowed) { @ticket.release!(by: @rose) }
+      assert_raises(AssistantNotAllowed) { @ticket.release!(by: @rose, turn: turn) }
       assert_assigned_to @ticket, @lucia
 
       @ticket.release!(by: @lucia)
       @ticket.assign!(to: @rose, by: @lucia)
-      @ticket.release!(by: @rose)
+      @ticket.release!(by: @rose, turn: turn)
 
       assert_unassigned @ticket
     end
@@ -133,23 +133,23 @@ module SupportDesk
     end
 
     test "she may not assign anybody, including herself onto somebody else's case" do
-      error = assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @lucia, by: @rose) }
+      error = assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @lucia, by: @rose, turn: turn) }
 
       assert_match(/can only take a case herself/, error.message)
 
       @ticket.assign!(to: @lucia, by: @lucia)
 
-      assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @rose) }
+      assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn) }
       assert_assigned_to @ticket, @lucia
     end
 
     test "she may take an unheld case at :reply and not below" do
       with_assistant_config(autonomy: :draft) do
-        assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @rose) }
+        assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn) }
       end
 
       with_assistant_config(autonomy: :reply) do
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
 
         assert_held_by_assistant @ticket, @rose
       end
@@ -168,6 +168,60 @@ module SupportDesk
 
       assert_raises(NotAllowed) { @ticket.resume_assistant!(by: @rose) }
       assert_raises(NotAllowed) { @ticket.pause_assistant!(by: @rose) }
+    end
+
+    # --- The seat is decided under the lock (R2) ---------------------------------
+
+    test "a stale instance can't take a case a person took while she was thinking" do
+      # Her harness read the case when it was unassigned; by the time it
+      # calls, Lucía has taken it. Nothing here is threaded: the pre-lock
+      # checks in 0.3.0 were enough on their own to hand her the seat.
+      stale = Ticket.find(@ticket.id)
+      held = stale.assistant_turn
+      @ticket.assign!(to: @lucia, by: @lucia)
+
+      assert_raises(AssistantNotAllowed, StaleTurn) { stale.assign!(to: @rose, by: @rose, turn: held) }
+      assert_assigned_to @ticket, @lucia
+    end
+
+    test "a cap that lands while she waits for the lock refuses the take" do
+      # The policy that decides a seat is read under the lock, so a topic
+      # cap committed while the take was queued is the one that applies.
+      held = turn
+      capped = false
+      @ticket.define_singleton_method(:with_lock) do |*args, **options, &block|
+        unless capped
+          capped = true
+          SupportDesk.config.assistant(:rose).autonomy = :draft
+        end
+        super(*args, **options, &block)
+      end
+
+      assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @rose, turn: held) }
+      assert_unassigned @ticket
+    end
+
+    test "a late run can't release the seat a newer one took" do
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      held = turn
+      ask_again(@ticket, "y otra cosa")
+
+      assert_raises(StaleTurn) { @ticket.release!(by: @rose, turn: held) }
+      assert_held_by_assistant @ticket, @rose
+    end
+
+    test "taking and releasing without a turn is refused, like every other verb of hers" do
+      assert_raises(ArgumentError) { @ticket.assign!(to: @rose, by: @rose) }
+      assert_unassigned @ticket
+
+      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+
+      assert_raises(ArgumentError) { @ticket.release!(by: @rose) }
+      assert_held_by_assistant @ticket, @rose
+      # A PERSON'S calls are unchanged: the turn is hers alone.
+      @ticket.release!(by: @lucia)
+
+      assert_unassigned @ticket
     end
 
     # --- Who she has to be -------------------------------------------------------
@@ -219,7 +273,7 @@ module SupportDesk
       assert_equal %i[note escalate release draft reply take close].sort - %i[release close],
                    @ticket.actions_for(@rose).sort
 
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
 
       assert_includes @ticket.actions_for(@rose), :release
       assert_not_includes @ticket.actions_for(@rose), :take, "she already has it"
@@ -231,7 +285,7 @@ module SupportDesk
     end
 
     test "actions_for drops everything that speaks when there is nobody to speak to" do
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
       @alice.update!(support_blocked: true)
 
       assert_equal %i[note escalate release], @ticket.reload.actions_for(@rose)

@@ -19,7 +19,7 @@ module SupportDesk
     # --- Pause -------------------------------------------------------------------
 
     test "pausing takes her seat, her proposal and her turn" do
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
       draft = @ticket.draft!("propuesta", by: @rose, turn: turn)
       seen = []
       SupportDesk.on(:assistant_paused) { |ticket, by:| seen << [ ticket.id, by ] }
@@ -151,7 +151,7 @@ module SupportDesk
 
     test "a case she sat on past her promise goes to a person" do
       with_assistant_config(responds_within: 60) do
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
         escalated = []
         SupportDesk.on(:ticket_escalated) { |ticket, from:, reason:, by:| escalated << [ ticket.id, reason ] }
 
@@ -170,7 +170,7 @@ module SupportDesk
 
     test "the sweep leaves a person's seat alone and still asks for a person" do
       with_assistant_config(responds_within: 60) do
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
         travel 2.minutes
         # Somebody took it over between the scope and the lock.
         @ticket.assign!(to: @lucia, by: @lucia)
@@ -182,7 +182,7 @@ module SupportDesk
 
     test "an assistant with no promise is not swept" do
       with_assistant_config(responds_within: nil) do
-        @ticket.assign!(to: @rose, by: @rose)
+        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
         travel 1.hour
 
         assert_equal 0, SupportDesk.release_silent_assistants!
@@ -318,7 +318,7 @@ module SupportDesk
     # --- The record --------------------------------------------------------------
 
     test "deactivating her stops everything, everywhere, without a deploy" do
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
 
       @rose.deactivate!(by: @lucia, reason: "el modelo está caído")
 
@@ -334,7 +334,7 @@ module SupportDesk
     end
 
     test "she knows which desks are hers and what she is holding" do
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
 
       assert_equal [ SupportDesk.desk ], @rose.desks
       assert_equal [ @ticket ], @rose.held_tickets.to_a

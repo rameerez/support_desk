@@ -891,10 +891,9 @@ module SupportDesk
     # Give the ticket to an agent. `assign!(to: lucia, by: lucia)` is
     # somebody taking it; `assign!(to: pedro, by: admin)` is somebody being
     # handed it. Repeating an assignment to the current holder does nothing.
-    def assign!(to:, by: nil, reason: nil, note: nil, request: nil)
+    def assign!(to:, by: nil, reason: nil, note: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      ensure_assistant_may_assign!(actor, to)
       ensure_assignable!(to)
 
       reason ||= to == actor ? :taken : :assigned
@@ -906,6 +905,13 @@ module SupportDesk
 
       event = write_transition!(:assigned, actor: actor, request: request) do
         raise InvalidTransition, "can't assign a closed ticket — reopen it first" if closed?
+        # Every mutable question about a seat is asked HERE, under the row
+        # lock, from the reloaded row: who holds the case, what her policy
+        # says, which turn she is on. Asked before the lock (0.3.0) they
+        # were answers about a case that has since moved, and a stale
+        # instance could take a seat a person had already been given (R2).
+        ensure_assistant_may_assign!(actor, to, turn: turn)
+        ensure_assistant_may_hold!(to)
         next false if assigned_to?(to)
 
         assignment = Assignment.open!(ticket: self, agent: to, by: actor, reason: reason, note: note)
@@ -946,6 +952,7 @@ module SupportDesk
                                 "(#{assignee ? describe_actor(assignee) : "nobody"} does) — use assign! to override"
         end
         raise InvalidTransition, "can't hand off a closed ticket" if closed?
+        ensure_assistant_may_hold!(to)
         next false if assigned_to?(to)
 
         from = assignee
@@ -969,14 +976,18 @@ module SupportDesk
     end
 
     # Put the ticket back in the unassigned pile.
-    def release!(by: nil, reason: :released, request: nil)
+    def release!(by: nil, reason: :released, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
-      assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
       from = nil
       event = write_transition!(:released, actor: actor, request: request) do
         raise InvalidTransition, "can't release a closed ticket" if closed?
+        assistant = (resolve_assistant!(actor) if SupportDesk.ai_actor?(actor))
         if assistant
+          # Giving a seat back is an action like any other, so it holds the
+          # turn it read: a run that finished after the case moved on must
+          # not release the seat a newer one took (R2).
+          ensure_current_turn!(internal_turn(turn))
           policy = assistant_policy(assistant)
           raise AssistantNotAllowed.new(policy, verb: :release) unless policy.may_observe?
           # Her own seat, and only hers: putting a PERSON's case back in the
@@ -1327,22 +1338,30 @@ module SupportDesk
       end
 
       ensure_agent!(agent)
+    end
+
+    # "Could she hold this case once the human-side flags were lifted?" —
+    # the hand-back question, so the very flags a hand-back exists to clear
+    # are not what refuses it. Her autonomy, the topic and the host's cap
+    # block still decide.
+    #
+    # Asked UNDER THE LOCK (R2): a cap that lands while a take waits for the
+    # row is the cap that applies to it.
+    def ensure_assistant_may_hold!(agent)
       return unless SupportDesk.ai_actor?(agent)
 
-      # "Could she hold this case once the human-side flags were lifted?" —
-      # the hand-back question, so the very flags a hand-back exists to
-      # clear are not what refuses it. Her autonomy, the topic and the host's
-      # cap block still decide.
       policy = assistant_policy(agent, hand_back: true)
       raise AssistantNotAllowed.new(policy, verb: :take) unless policy.may_hold?
     end
 
     # An assistant may take a case, and that is all: only herself, only when
-    # nobody holds it, and only at a level that may answer.
-    def ensure_assistant_may_assign!(actor, to)
+    # nobody holds it, only at a level that may answer, and only holding the
+    # turn she read. Called under the row lock, from the reloaded row.
+    def ensure_assistant_may_assign!(actor, to, turn:)
       return unless SupportDesk.ai_actor?(actor)
 
       assistant = resolve_assistant!(actor)
+      ensure_current_turn!(internal_turn(turn))
       policy = assistant_policy(assistant)
       unless self.class.same_actor?(actor, to)
         raise AssistantNotAllowed.new(policy, verb: :assign,
@@ -1352,6 +1371,12 @@ module SupportDesk
       raise AssistantNotAllowed.new(policy, verb: :take) unless unassigned?
       raise AssistantNotAllowed.new(policy, verb: :take) unless policy.may_hold?
     end
+
+    # `:current` means "the turn as this lock sees it" — the one turn the
+    # gem supplies itself, for the self-take inside a reply that has ALREADY
+    # verified the turn under this very lock. It is reachable from nowhere
+    # else: a caller passing a real turn is checked against the row.
+    def internal_turn(turn) = turn == :current ? assistant_turn : turn
 
     def ensure_agent!(actor)
       return if actor.is_a?(Symbol)
@@ -1428,7 +1453,7 @@ module SupportDesk
       # `:current` means "the turn as this lock sees it" — the one place the
       # gem supplies a turn itself, because an outreach reply into an
       # existing case has no earlier turn for anybody to have held.
-      turn = assistant_turn if turn == :current
+      turn = internal_turn(turn)
       reconcile_unregistered_messages!
       ensure_current_turn!(turn)
       ensure_writable!
@@ -1458,14 +1483,16 @@ module SupportDesk
                             "take it first"
         end
 
-        assign!(to: actor, by: actor, request: request)
+        # `turn: :current` is consumed only when the actor is the assistant
+        # taking her own seat inside a reply this lock already authorized.
+        assign!(to: actor, by: actor, request: request, turn: :current)
       elsif !assigned_to?(actor)
         # Humans outrank assistants, under EVERY reply policy (I8). A person
         # answering a case a machine is holding takes it over: there is
         # nothing to ask about "who owns this" when one of the two can't
         # want it, and leaving her seated would keep her answering next.
         if held_by_assistant? && !SupportDesk.ai_actor?(actor)
-          return assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request)
+          return assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request, turn: :current)
         end
         # Belt: the `held_by_human` floor already turned this into a draft,
         # so an assistant reaching here is a bug, not a policy question.
@@ -1476,7 +1503,7 @@ module SupportDesk
           raise NotAllowed, "ticket #{reference} is held by #{describe_actor(assignee)} and this desk only " \
                             "lets the assignee reply"
         when :take_over
-          assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request)
+          assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request, turn: :current)
         else
           write_transition!(:drop_in, actor: actor, request: request) do
             { "assignee" => SupportDesk.actor_key(assignee) }

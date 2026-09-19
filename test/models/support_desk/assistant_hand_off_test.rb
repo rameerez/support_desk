@@ -22,7 +22,7 @@ module SupportDesk
     # --- She hands it over -------------------------------------------------------
 
     test "escalating releases her seat, flags the case and tells the customer" do
-      @ticket.assign!(to: @rose, by: @rose)
+      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
       seen = []
       SupportDesk.on(:ticket_escalated) { |ticket, from:, reason:, by:| seen << [ ticket.id, from, reason, by ] }
 

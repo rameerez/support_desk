@@ -24,7 +24,7 @@ class AssistantTasksTest < ActiveSupport::TestCase
 
   test "release_silent_assistants hands over the cases she sat on, and says how many" do
     ticket = ticket_for(@alice)
-    ticket.assign!(to: @rose, by: @rose)
+    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
     travel 2.minutes
 
     output = run_task("release_silent_assistants")
@@ -64,7 +64,7 @@ class AssistantTasksTest < ActiveSupport::TestCase
 
   test "assistant_status reads the numbers and writes nothing" do
     ticket = ticket_for(@alice)
-    ticket.assign!(to: @rose, by: @rose)
+    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
     other = ticket_for(@alice, topic: :order, message: "Otra")
     other.escalate!(by: @lucia, reason: "para una persona")
     with_assistant_config(autonomy: :draft) do
