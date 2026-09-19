@@ -15,14 +15,24 @@ require "test_helper"
 # actually accepts over HTTP. A change to either has to be a deliberate
 # change to the table.
 class ConsoleOfferedActionsTest < ActionDispatch::IntegrationTest
-  # The four things the console says when it refuses a verb it would not
-  # have offered. Anything else means the guard let the request through.
+  # The things the console says when it refuses a verb it would not have
+  # offered. Anything else means the guard let the request through.
   NOT_OFFERED = [
     "This case is closed. Reopen it first.",
     "Take this case first — this desk only lets the assignee reply.",
     "Lucía is handling this case.",
     "Pedro is handling this case.",
-    "You can't do that on this case right now."
+    # A machine holds it, by the name the customer is reading.
+    "Rose · virtual assistant is handling this case.",
+    "You can't do that on this case right now.",
+    "There is no proposal waiting on this case.",
+    # One per status a decided proposal can be in: pressing Enviar on a
+    # proposal somebody already dealt with has to say WHICH, or the second
+    # reviewer learns nothing from the refusal.
+    "That proposal was already sent.",
+    "That proposal was already discarded.",
+    "That proposal was already replaced.",
+    "That proposal was already expired."
   ].freeze
 
   setup do
@@ -84,6 +94,84 @@ class ConsoleOfferedActionsTest < ActionDispatch::IntegrationTest
     User.send(:remove_method, :on_duty?)
   end
 
+  # --- With an assistant on the desk ----------------------------------------------
+  #
+  # Everything above is a desk with nothing configured, which is the state
+  # every existing host is in. These are the states the assistants added,
+  # and they are the ones easiest to get wrong: the two draft verbs come and
+  # go with a ROW, and the switch comes and goes with the configuration.
+
+  test "an assistant on the desk and nothing proposed: the switch, and no draft verbs" do
+    configure_assistant!
+
+    assert_console_offers %i[note reply assign change_topic close pause_assistant] do
+      fresh_ticket
+    end
+  end
+
+  test "a proposal waiting: send it, discard it, or write your own" do
+    configure_assistant!
+
+    assert_console_offers %i[note reply assign change_topic close pause_assistant
+                             send_draft reject_draft] do
+      ticket = fresh_ticket
+      draft_as(support_assistant, ticket, "¿Te refieres al pedido de ayer?")
+      ticket
+    end
+  end
+
+  test "paused: the switch turns the other way, and the proposal it threw away is gone" do
+    configure_assistant!
+
+    assert_console_offers %i[note reply assign change_topic close resume_assistant] do
+      ticket = fresh_ticket
+      draft_as(support_assistant, ticket, "una propuesta")
+      # Pausing supersedes it, which is the point: a switched-off assistant
+      # must not leave behind a button that sends her words.
+      ticket.pause_assistant!(by: @lucia)
+      ticket
+    end
+  end
+
+  test "closed with a proposal on it: a note and a way back, nothing else" do
+    configure_assistant!
+
+    assert_console_offers %i[note reopen] do
+      ticket = fresh_ticket
+      draft_as(support_assistant, ticket, "una propuesta")
+      ticket.close!(by: @lucia)
+      ticket
+    end
+  end
+
+  test "nobody to write to: the proposal can be discarded but never sent" do
+    configure_assistant!
+
+    assert_console_offers %i[note assign change_topic close pause_assistant reject_draft] do
+      ticket = fresh_ticket
+      draft_as(support_assistant, ticket, "una propuesta")
+      # The account went away between the proposal and the review. Sending
+      # it would be speaking to nobody; deciding about it is still the
+      # desk's to do.
+      ticket.requester.update!(support_blocked: true)
+      ticket
+    end
+  end
+
+  test "assignee_only with the assistant holding it: a person may answer, and may send her words" do
+    configure_assistant!(autonomy: :reply)
+
+    with_support_config(reply_policy: :assignee_only) do
+      assert_console_offers %i[note reply assign release change_topic close pause_assistant
+                               send_draft reject_draft] do
+        ticket = fresh_ticket
+        ticket.assign!(to: support_assistant, by: @lucia)
+        draft_as(support_assistant, ticket, "una propuesta")
+        ticket
+      end
+    end
+  end
+
   test "OFFERED_AS names exactly the member verbs" do
     # The console accepts a verb only when `actions_for` offers what
     # OFFERED_AS maps it to — so a verb missing from this table would be a
@@ -116,7 +204,7 @@ class ConsoleOfferedActionsTest < ActionDispatch::IntegrationTest
 
     SupportDesk::Console::OFFERED_AS.each do |verb, offered_as|
       ticket = build.call
-      post "/madmin/support_tickets/#{ticket.id}/#{verb}", params: params_for(verb)
+      post "/madmin/support_tickets/#{ticket.id}/#{verb}", params: params_for(verb, ticket)
       alert = flash[:alert]
       # Follow the redirect so the flash is consumed. Without this, one
       # verb's refusal is still sitting in the session when the next verb
@@ -132,12 +220,17 @@ class ConsoleOfferedActionsTest < ActionDispatch::IntegrationTest
   end
 
   # Enough for each verb to get past its own argument checks, so the only
-  # thing that can refuse it is the guard under test.
-  def params_for(verb)
+  # thing that can refuse it is the guard under test. The draft verbs need a
+  # REAL id: a made-up one is refused by the action rather than by the
+  # guard, which would read as a pass in every state.
+  def params_for(verb, ticket)
     case verb
     when :reply, :note then { body: "algo" }
     when :change_topic then { topic: "billing/invoice" }
-    when :assign, :hand_off then { agent_id: @pedro.id }
+    when :assign, :hand_off then { agent_id: SupportDesk.actor_key(@pedro) }
+    when :send_draft
+      { draft_id: ticket.drafts.first&.id.to_s, seen_turn: ticket.assistant_turn }
+    when :reject_draft then { draft_id: ticket.drafts.first&.id.to_s }
     else {}
     end
   end

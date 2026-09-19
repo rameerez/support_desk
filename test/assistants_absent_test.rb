@@ -122,3 +122,62 @@ class AssistantsAbsentTest < ActiveSupport::TestCase
     assert_operator ticket.reload.assistant_revision, :>, before
   end
 end
+
+# I1 on the SCREENS: a host with no assistant configured gets the 0.2
+# console and the 0.2 thread, to the pixel.
+#
+# The model half is above. This half exists because a tab, a badge or a
+# switch is not something a host can turn off after the fact — it is on the
+# page the morning they upgrade, and a column of zeros is how a console
+# starts teaching people not to read it.
+class AssistantsAbsentSurfacesTest < ActionDispatch::IntegrationTest
+  setup do
+    @alice = create_user(name: "Alice", onboarded: true)
+    @lucia = create_agent(name: "Lucía")
+    @ticket = ticket_for(@alice, message: "No me llega el pedido")
+  end
+
+  test "the queue has no tab for a machine that isn't there" do
+    login_as @lucia
+    get "/admin/support"
+
+    assert_response :success
+    assert_no_missing_translations
+    assert_select "a[href*=?]", "tab=needs_human", count: 0
+    assert_no_match(/Needs a person/, response.body)
+  end
+
+  test "the case screen has no card, no switch and no draft verbs" do
+    login_as @lucia
+    get "/admin/support/#{@ticket.id}"
+
+    assert_response :success
+    assert_no_missing_translations
+    assert_select "input[name=draft_id]", count: 0
+    assert_select "input[name=seen_turn]", count: 0
+    assert_no_match(/Pause the assistant|Resume the assistant/, response.body)
+    assert_no_match(/proposal/i, response.body)
+  end
+
+  test "the picker still resolves the ids a 0.2 host's own form would post" do
+    # The values became actor keys, which is a change to the MARKUP. A host
+    # who copied the partial into their own app in 0.2 posts bare ids, and
+    # with no machine in the pool there is nothing for one to be confused
+    # with — so it still resolves.
+    pedro = create_agent(name: "Pedro")
+    login_as @lucia
+
+    post "/admin/support/#{@ticket.id}/assign", params: { agent_id: pedro.id.to_s }
+
+    assert_assigned_to @ticket, pedro
+  end
+
+  test "the requester's thread has no door out of a machine" do
+    login_as @alice
+    get "/messages/support"
+
+    assert_response :success
+    assert_no_match(/I’d rather talk to a person/, response.body)
+    assert_no_match(/Handled by/, response.body)
+  end
+end

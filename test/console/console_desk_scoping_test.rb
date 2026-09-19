@@ -157,9 +157,11 @@ class ConsoleDeskScopingTest < ActionDispatch::IntegrationTest
 
     offered = css_select("select[name=agent_id] option").map { |option| option["value"] }.reject(&:blank?)
 
-    assert_equal [ pedro.id.to_s ], offered
+    # Actor KEYS, not ids: the pool can hold people and a machine from two
+    # different tables, and "3" would name either of them.
+    assert_equal [ SupportDesk.actor_key(pedro) ], offered
 
-    post "/madmin/support_tickets/#{@ticket.id}/assign", params: { agent_id: pedro.id }
+    post "/madmin/support_tickets/#{@ticket.id}/assign", params: { agent_id: offered.first }
 
     assert_assigned_to @ticket, pedro
   end

@@ -13,6 +13,33 @@ class ConsoleRoutingTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "the four assistant verbs are drawn by name, not only by the table" do
+    # Everything above loops over MEMBER_VERBS, which is true whatever the
+    # table happens to say. These are the four 0.3 added, written out, so a
+    # verb dropped from the table is a failing test rather than a console
+    # button that posts into a 404.
+    %w[send_draft reject_draft pause_assistant resume_assistant].each do |verb|
+      assert_routing({ method: "post", path: "/madmin/support_tickets/7/#{verb}" },
+                     { controller: "madmin/support_tickets", action: verb, id: "7" })
+
+      assert_equal verb, SupportDesk::ConsoleEngine.routes.recognize_path("/7/#{verb}", method: :post)[:action]
+    end
+  end
+
+  test "the requester engine draws the door out of a machine" do
+    recognized = SupportDesk::Engine.routes.recognize_path("/tickets/7/request_human", method: :post)
+
+    assert_equal "request_human", recognized[:action]
+    assert_equal "support_desk/tickets", recognized[:controller]
+    # The name the partial calls it by, through `support_desk_routes`.
+    assert_respond_to SupportDesk::Engine.routes.url_helpers, :request_human_ticket_path
+    # And nothing else was opened on the way: the engine still answers for
+    # exactly the two verbs 0.2 drew, plus this one.
+    assert_raises(ActionController::RoutingError) do
+      SupportDesk::Engine.routes.recognize_path("/tickets/7/request_human", method: :get)
+    end
+  end
+
   test "the concern draws next as a collection GET" do
     assert_routing({ method: "get", path: "/madmin/support_tickets/next" },
                    { controller: "madmin/support_tickets", action: "next" })
