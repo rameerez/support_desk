@@ -88,10 +88,9 @@ module SupportDesk
     # reading an old transcript could no longer tell that a machine had
     # written it (R8).
     #
-    # A RENAME still renames history, deliberately: one assistant, one name,
-    # and the metadata on every message keeps what it was called at the time.
-    # A host that wants per-message immutability points
-    # `Chats.config.message_signature` at that metadata — see the README.
+    # Signed messages render their own immutable provenance through the default
+    # Chats signature hook. This row snapshot is only a fallback for legacy
+    # messages with no provenance and other author displays.
     def snapshot_disclosure! # :nodoc:
       return self unless configured?
 

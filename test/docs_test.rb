@@ -247,6 +247,26 @@ class DocsTest < ActiveSupport::TestCase
     assert_not called, "the generated job called the model on a stale turn"
   end
 
+  test "the README signature override preserves assistant snapshots and human signatures" do
+    rose = configure_assistant!(:rose, autonomy: :reply)
+    ticket = ticket_for(@alice)
+    assistant_message = ticket.respond!("Answer", by: rose, turn: ticket.assistant_turn).message
+    assistant_signature = Chats.message_signature_for(assistant_message)
+    human_message = ticket.reply!("Human answer", by: @lucia)
+    human_signature = Chats.message_signature_for(human_message)
+    ask_again(ticket, "Another question")
+    draft = ticket.draft!("Proposal", by: rose, turn: ticket.reload.assistant_turn)
+    approved = draft.send!(by: @lucia, seen_turn: ticket.reload.assistant_turn)
+
+    eval(snippet("config.message_signature = lambda"), binding, README) # rubocop:disable Security/Eval
+    SupportDesk.config.assistant(:rose).name = "Renamed"
+    SupportDesk.config.assistant(:rose).disclosure = :none
+
+    assert_equal assistant_signature, Chats.message_signature_for(assistant_message.reload)
+    assert_equal human_signature, Chats.message_signature_for(human_message)
+    assert_equal human_signature, Chats.message_signature_for(approved)
+  end
+
   private
 
   def generator_root = Rails.root.join("tmp/docs_generator").to_s

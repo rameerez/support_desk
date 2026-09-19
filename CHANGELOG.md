@@ -4,6 +4,38 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - Unreleased
+
+### Fixed
+
+- Persist message-registration receipts atomically with clocks and turn revisions.
+  A new message with an earlier timestamp or smaller UUID is no longer dropped
+  as a replay. It invalidates the turn and triggers requester notifications and
+  handoff detection once, without rewinding clocks. This also fixes human-only
+  desks; no assistant configuration is needed to encounter the old defect.
+- Recovery discovers unregistered replies on closed cases and honors the desk's
+  reopen/locked policy. Repair also runs when the assistant is disabled; only
+  actual assistant dispatch requires one to be configured.
+- Public assistant assignment, release and reply refuse `turn: :current`.
+  Internal outreach and seat-taking use private paths and actual tokens.
+- Default Chats signatures render assistant messages using per-message
+  disclosure snapshots, including old 0.3.0 messages with provenance but no
+  assistant-row snapshot. Rename, mode change and flag-off do not erase old
+  disclosure. Human replies and approved drafts keep human signatures, and host
+  signature overrides remain authoritative. Transcript names are snapshotted
+  for new messages; older ones use their stored display name.
+- Correct the README signature override to preserve the human fallback.
+
+### Upgrade
+
+Run `rails generate support_desk:upgrade` and migrate **with support writes paused
+and all old web/jobs drained**. The new receipt table follows the existing ticket
+and message ID types and seeds historical messages up to the old role clocks.
+Old clocks cannot reveal lost callbacks behind that baseline: review suspect
+historical cases before resuming. Only 0.3.2 processes may write after cutover.
+See README for recovery, rollback limitations and the unchanged SQLite caveat.
+No gem publication or deployment is performed by this change.
+
 ## [0.3.1] - 2026-09-19
 
 **Hardening the assistant, after an adversarial review of 0.3.0.** Nine

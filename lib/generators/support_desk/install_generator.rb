@@ -44,6 +44,12 @@ module SupportDesk
                            File.join(db_migrate_path, "add_assistants_to_support_desk.rb")
       end
 
+      def create_message_registrations_migration
+        migration_template "create_support_desk_message_registrations.rb.erb",
+                           File.join(db_migrate_path, "create_support_desk_message_registrations.rb")
+      end
+
+
       # The annotated initializer — every setting the gem has, with what it
       # means and what it defaults to.
       def create_initializer
@@ -90,9 +96,9 @@ module SupportDesk
         say "  #   routing(/^support@/i => :support_desk)"
 
         say "\n  Already installed and bumping the version? 'rails g support_desk:upgrade' copies"
-        say "  only the migrations the new version needs (0.2.0: who opened the case), and"
-        say "  nothing you own. Follow the CHANGELOG's drained cutover: migrate, pause"
-        say "  support traffic, drain old web/workers, backfill, then serve only 0.2."
+        say "  only the migrations the new version needs (including 0.3.2 receipts), and"
+        say "  nothing you own. Follow the README drained cutover: pause support writes,"
+        say "  drain old web/workers, migrate, then start only the new version."
 
         say "\n  Assistants (0.3): when a machine should answer first, 'rails g support_desk:assistant"
         say "  Rose --disclosure signature' writes the harness and prints the stanza. Read the"

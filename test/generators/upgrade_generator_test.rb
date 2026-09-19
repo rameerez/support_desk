@@ -305,6 +305,58 @@ class UpgradeGeneratorTest < Rails::Generators::TestCase
     end
   end
 
+  test "upgrade copies the receipt migration once and keeps its dummy copy identical" do
+    run_generator
+    run_generator
+    assert_equal 1, Dir[File.join(destination_root, "db/migrate/*_create_support_desk_message_registrations.rb")].size
+    template = File.read(File.expand_path("../../lib/generators/support_desk/templates/create_support_desk_message_registrations.rb.erb", __dir__))
+    copy = File.read(File.expand_path("../dummy/db/migrate/20260101000007_create_support_desk_message_registrations.rb", __dir__))
+    assert_equal template.split(/^class .*\n/, 2).last, copy.split(/^class .*\n/, 2).last
+  end
+
+  test "receipt migration seeds historical messages but leaves lost newer callbacks repairable" do
+    with_scratch_database do |connection|
+      run_migration("CreateChatsTables", connection)
+      run_migration("CreateSupportDeskTables", connection)
+      conversation = insert_conversation(connection)
+      desk = insert_desk(connection)
+      insert_legacy_ticket(connection, desk_id: desk, requester_type: "User", requester_id: 7,
+                            conversation_id: conversation)
+      now = Time.current
+      older = insert_message(connection, conversation_id: conversation, sender_type: "User", sender_id: 7,
+                             body: "registered", at: now)
+      newer = insert_message(connection, conversation_id: conversation, sender_type: "User", sender_id: 7,
+                             body: "lost callback", at: now + 1.second)
+      connection.execute("UPDATE support_desk_tickets SET last_requester_message_at = #{connection.quote(now)}")
+      2.times { run_migration("CreateSupportDeskMessageRegistrations", connection) }
+      receipts = connection.select_values("SELECT message_id FROM support_desk_message_registrations")
+      assert_equal [ older.to_s ], receipts.map(&:to_s)
+      refute_includes receipts.map(&:to_s), newer.to_s
+      connection.execute("DELETE FROM chats_messages WHERE id = #{connection.quote(older)}")
+      assert_equal 0, connection.select_value("SELECT COUNT(*) FROM support_desk_message_registrations").to_i
+      run_migration("CreateSupportDeskMessageRegistrations", connection, :down)
+      refute connection.table_exists?(:support_desk_message_registrations)
+      assert connection.table_exists?(:chats_messages)
+    end
+  end
+
+  if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
+    test "receipt migration preserves UUID references and enforces unique message identity" do
+      with_scratch_database do |connection|
+        with_generator_primary_key(:uuid) do
+          run_migration("CreateChatsTables", connection)
+          run_migration("CreateSupportDeskTables", connection)
+        end
+        run_migration("CreateSupportDeskMessageRegistrations", connection)
+        columns = connection.columns(:support_desk_message_registrations).index_by(&:name)
+        assert_equal "uuid", columns.fetch("message_id").sql_type
+        assert_equal "uuid", columns.fetch("ticket_id").sql_type
+        assert connection.index_exists?(:support_desk_message_registrations, :message_id, unique: true)
+        run_migration("CreateSupportDeskMessageRegistrations", connection, :down)
+      end
+    end
+  end
+
   private
 
   def postgresql? = ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)

@@ -138,8 +138,7 @@ module SupportDesk
     end
 
     test "two messages on the same instant are both registered" do
-      # Forward, not just coarse: a message BEHIND the clock is a replay,
-      # and replay protection is the other half of this rule.
+      # Distinct messages at the same instant each receive a receipt.
       frozen = 1.minute.from_now.change(usec: 0)
       travel_to(frozen) do
         ask_again(@ticket, "primera")
@@ -164,9 +163,8 @@ module SupportDesk
     # --- The watermark, tie by tie (R4) ------------------------------------------
     #
     # Two messages can share an instant — a coarse column, an import, a
-    # frozen clock, two fast inserts. "Seen" is therefore the PAIR
-    # (created_at, id) compared in chats' own transcript order, never
-    # "the one id the clock was set from".
+    # frozen clock, two fast inserts. Each ID has its own registration
+    # receipt; only the clock pointer follows transcript order.
 
     test "an answer is current once every message sharing one instant has registered" do
       travel_to(1.minute.from_now.change(usec: 0)) do
@@ -208,7 +206,7 @@ module SupportDesk
       after_second = revision
       @ticket.reload.register!(first)
 
-      assert_equal after_second, revision, "the earlier message is behind the watermark, not new"
+      assert_equal after_second + 1, revision, "the earlier message has no receipt yet, so it is new"
       assert_equal second.id.to_s, @ticket.reload.last_requester_message_id.to_s
     end
 
