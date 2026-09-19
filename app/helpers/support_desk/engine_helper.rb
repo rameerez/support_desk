@@ -54,6 +54,22 @@ module SupportDesk
       tag.span(count > 99 ? "99+" : count, class: css_class)
     end
 
+    # The door out of a machine, for a thread: "Prefiero hablar con una
+    # persona", the promise once somebody has asked, or nothing.
+    #
+    #   <%= support_human_door(ticket) %>
+    #
+    # It is a helper rather than a partial hosts render by path because the
+    # thread is CHATS' screen, not this engine's: a host that has ejected
+    # chats' views drops this one line into their own and the door works,
+    # wherever their copy lives and whatever they renamed around it.
+    # Renders nothing when there is no case, so it is safe unconditionally.
+    def support_human_door(ticket)
+      return if ticket.nil?
+
+      render partial: "support_desk/tickets/human_door", locals: { ticket: ticket }
+    end
+
     # --- What the bundled views render with -----------------------------------
 
     # The gem's bundled stylesheet, into the host layout's <head> — where a

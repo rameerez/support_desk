@@ -206,6 +206,16 @@
   cursor: pointer;
 }
 
+/* The way out of a machine. Quiet on purpose: it sits inside a live
+   conversation, where the loud button is the one that sends a message. */
+.support-desk-button--quiet {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--support-desk-border);
+  background: transparent;
+  color: var(--support-desk-text);
+  font-weight: 600;
+}
+
 /* --- Notices ---------------------------------------------------------------- */
 
 .support-desk-notice {
