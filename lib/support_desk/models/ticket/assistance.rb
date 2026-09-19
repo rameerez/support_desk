@@ -59,11 +59,21 @@ module SupportDesk
     # conversation. Nothing takes them the other way round, and nothing new
     # may.
     #
-    # What it does NOT cover: a message whose INSERT was already stamped when
-    # we win the row is still stamped earlier than our answer, so a transcript
-    # can show a question above an answer that did not address it. That is a
-    # genuinely simultaneous send, and its registration raises a turn of its
-    # own.
+    # What it does NOT cover:
+    #
+    # * A message whose INSERT was already stamped when we win the row is
+    #   still stamped earlier than our answer, so a transcript can show a
+    #   question above an answer that did not address it. That is a genuinely
+    #   simultaneous send, and its registration raises a turn of its own.
+    #
+    # * SQLITE. All of the above is a `SELECT … FOR UPDATE` blocking a
+    #   concurrent writer, which is PostgreSQL and MySQL. SQLite has no row
+    #   locks: it serializes WRITES, and in WAL mode our reconciliation reads
+    #   the last committed snapshot straight through a requester's open write
+    #   transaction. So a message committing behind the SELECT is still
+    #   missed there, exactly as it was in 0.3.0 — the conversation row buys
+    #   nothing, because nothing waits on it. Run PostgreSQL or MySQL for a
+    #   production desk with an assistant; `doctor` warns about this.
     module Assistance
       extend ActiveSupport::Concern
 

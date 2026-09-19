@@ -976,6 +976,14 @@ we won the row is still stamped earlier than the answer, so a transcript can
 show a question above an answer that did not address it. That is a
 genuinely simultaneous send, and its own turn follows.
 
+> [!IMPORTANT]
+> **This is a row lock, so it is PostgreSQL and MySQL.** SQLite has none:
+> it serializes writes, and in WAL mode a reconciliation `SELECT` reads the
+> last committed snapshot straight through a requester's open write
+> transaction, so a question committing behind an answer is still missed
+> there. Run PostgreSQL or MySQL for a production desk with an assistant —
+> `SupportDesk.doctor` warns when you haven't.
+
 ### Proposals in the console
 
 A pending proposal renders above the composer with its confidence, its
@@ -1533,10 +1541,13 @@ supportable), `find_requester` (callable, one argument), `engine mount`,
 (no half-NULL `opened_by`; warns on legacy NULL rows and names the backfill
 task), `awaiting` (agrees with the transcript), `references` (unique).
 Assistants (only where one is configured): `assistants (config)`,
-`assistant turn subscriber`, `assistant authorship`, `assistant silence`,
-`assistant seats`, `assistant idle turns`, `drafts`, and `ai agents without
-policy` — which warns about any host class declared `kind: :ai`, since every
-support write by it is refused.
+`assistant turn subscriber`, `assistant serialization` — which warns when
+the adapter takes no row locks, because the turn rests on them —
+`assistant authorship`, `assistant silence`, `assistant seats`, `assistant
+idle turns`, `drafts`, and `ai agents without policy`, which warns about any
+host class declared `kind: :ai`, since every support write by it is refused.
+The seat and draft checks also run once she is no longer configured, since
+that is exactly when a seat gets stranded.
 
 ## Compatibility
 

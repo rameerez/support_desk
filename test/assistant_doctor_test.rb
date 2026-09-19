@@ -90,6 +90,31 @@ class AssistantDoctorTest < ActiveSupport::TestCase
     Object.send(:remove_const, :DoctorBot)
   end
 
+  test "the adapter that cannot take a row lock is a warning, and the one that can is not" do
+    # The whole turn rests on `SELECT … FOR UPDATE` blocking a concurrent
+    # writer. SQLite has no row locks, so a requester message committing
+    # behind an answer is still missed there — a host has to be told which
+    # of the two it is running.
+    configure_assistant!(autonomy: :reply)
+    serialization = check("assistant serialization")
+
+    if ActiveRecord::Base.connection.adapter_name.match?(/sqlite/i)
+      assert_equal :warn, serialization.status
+      assert_match(/committing behind an answer/, serialization.message)
+      assert_match(/PostgreSQL or MySQL/, serialization.message,
+                   "a warning that doesn't name the way out is a warning nobody can act on")
+    else
+      assert_equal :ok, serialization.status
+      assert_match(/row locks/, serialization.message)
+    end
+  end
+
+  test "a desk with no assistant is not asked which adapter it runs" do
+    ticket_for(@alice)
+
+    assert_nil check("assistant serialization")
+  end
+
   test "a case that has waited longer than her promise turns the doctor red" do
     rose = configure_assistant!(autonomy: :reply, responds_within: 60)
     ticket = ticket_for(@alice)

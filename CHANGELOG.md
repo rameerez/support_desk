@@ -25,7 +25,11 @@ with no assistant is untouched.
   Every speaking path now takes the ticket's row lock and then the
   conversation row chats updates inside every message insert, before
   reconciling. The lock order is ticket → conversation everywhere, and it
-  is written down.
+  is written down. **The guarantee is a row lock, so it holds on PostgreSQL
+  and MySQL and not on SQLite**, which has no row locks and whose WAL
+  snapshot reads straight through an open write transaction: a desk with an
+  assistant belongs on PostgreSQL or MySQL, and `doctor` now warns when it
+  is not.
 - **A seat is decided under the lock (R2).** `assign!` asked whether
   anybody held the case, and whether she could hold it, *before* the
   transition acquired the row. No threads were needed to break it: load an
