@@ -8,6 +8,14 @@
     composer that still works on the day the bundle fails to build. %>
 <% composing_note = params[:compose].to_s == "note" %>
 <% may_reply = actions.include?(:reply) %>
+<%# "Editar" on a proposal opens THIS box with the proposal in it, at
+    `?compose=reply&draft=ID`. The concern decides whether that is a real
+    edit (the draft is still the pending one, and this agent is offered the
+    send) — a view never does. It is also where a stale send lands, with
+    whatever the reviewer had typed still in the box and the case's CURRENT
+    turn in the hidden field, because a redirect would have thrown their
+    words away. %>
+<% editing = composing_note ? nil : support_editing_draft(ticket) %>
 
 <section class="rounded-lg border border-slate-200 bg-white">
   <nav class="flex gap-1 border-b border-slate-200 px-2 pt-2">
@@ -30,6 +38,25 @@
           <p class="text-xs text-slate-500"><%= t("support_desk.console.composer.note_hint") %></p>
           <%= submit_tag t("support_desk.console.actions.note"),
                 class: "rounded-md bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600" %>
+        </div>
+      <% end %>
+
+    <% elsif editing %>
+      <% assistant_name = editing.author.try(:support_agent_name) || editing.author.to_s %>
+      <p class="mb-2 text-xs font-medium text-indigo-800">
+        <%= t("support_desk.console.draft.editing", name: assistant_name) %>
+      </p>
+
+      <%= form_with url: console_ticket_path(ticket, :send_draft), method: :post do %>
+        <%= hidden_field_tag :draft_id, editing.id %>
+        <%= hidden_field_tag :seen_turn, support_seen_turn(ticket) %>
+        <%= text_area_tag :body, (params[:body].is_a?(String) && params[:body].present? ? params[:body] : editing.body),
+              rows: 5, class: "w-full rounded-md border border-indigo-300 p-2 text-sm" %>
+        <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <%= link_to t("support_desk.console.draft.cancel_edit"), console_ticket_path(ticket),
+                class: "text-xs text-slate-500 underline underline-offset-2 hover:text-slate-900" %>
+          <%= submit_tag t("support_desk.console.actions.send_edited_draft"),
+                class: "rounded-md bg-indigo-700 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-800" %>
         </div>
       <% end %>
 

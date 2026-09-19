@@ -52,7 +52,12 @@ module SupportDesk
     # routing concern reads it at draw time and `OFFERED_AS` is checked
     # against it, because a verb added in two places is a console that
     # accepts a POST its own Drawer never routed (or the other way round).
-    MEMBER_VERBS = %i[reply take assign hand_off release close reopen note change_topic].freeze
+    # The four the assistants added sit at the end, in the order a case
+    # meets them: decide her proposal, then switch her off or back on.
+    MEMBER_VERBS = %i[
+      reply take assign hand_off release close reopen note change_topic
+      send_draft reject_draft pause_assistant resume_assistant
+    ].freeze
 
     # The verbs that work on the QUEUE rather than on a case, and the HTTP
     # method each one is drawn with. `open_conversation` is the only write
@@ -79,9 +84,16 @@ module SupportDesk
     #
     # `take` and `assign` are both :assign — taking a case is assigning it
     # to yourself, which is the model's vocabulary, not two permissions.
+    #
+    # `send_draft` is its OWN entry rather than :reply, because
+    # `actions_for` offers it only while there is a proposal to send: mapped
+    # to :reply it would have accepted a POST naming a draft somebody had
+    # already decided about.
     OFFERED_AS = {
       reply: :reply, take: :assign, assign: :assign, hand_off: :hand_off, release: :release,
-      close: :close, reopen: :reopen, note: :note, change_topic: :change_topic
+      close: :close, reopen: :reopen, note: :note, change_topic: :change_topic,
+      send_draft: :send_draft, reject_draft: :reject_draft,
+      pause_assistant: :pause_assistant, resume_assistant: :resume_assistant
     }.freeze
 
     # Everything a transition raises because of WHO asked, WHEN, or from WHAT
@@ -137,7 +149,9 @@ module SupportDesk
       helper_method :current_agent, :support_desk_record, :support_queue, :support_transcript,
                     :console_ticket_path, :console_tickets_path, :console_file_path,
                     :support_conversation_available?, :support_conversation_offered?,
-                    :support_conversation_topics, :support_conversation_sendable?
+                    :support_conversation_topics, :support_conversation_sendable?,
+                    :support_pending_draft, :support_assistant, :support_seen_turn,
+                    :support_editing_draft, :support_console_timeline_sentence
     end
 
     # --- The verbs --------------------------------------------------------------
@@ -208,6 +222,66 @@ module SupportDesk
       return refuse(:blank_topic) if topic.strip.empty?
 
       attempt(:topic_changed) { @ticket.change_topic!(to: topic, by: current_agent, request: request) }
+    end
+
+    # --- Her proposal, and the switch ------------------------------------------
+    #
+    # Four verbs, and only one of them is interesting. A draft is written by
+    # a machine and SENT BY A PERSON: they read it, they may rewrite it, and
+    # the requester sees their signature on it. Everything here exists to
+    # make that reading real — which is why a send carries the turn the page
+    # was rendered with, and why a mismatch comes back as the same screen
+    # rather than as a redirect that throws the reviewer's edit away.
+
+    # Send the proposal, verbatim or edited.
+    def send_draft
+      draft = support_reviewable_draft
+      return if draft.nil?
+
+      seen = params[:seen_turn]
+      return refuse(:invalid_input) unless seen.is_a?(String) && seen.present?
+
+      body = params[:body].is_a?(String) ? params[:body] : nil
+      # The model refuses an edit that is blank with no attachment, and it
+      # refuses it with an ArgumentError — a bug in the caller, not a flash.
+      # So the console asks the same question first, in the words an agent
+      # needs: an empty box is "write something", never "descártala".
+      return refuse(:blank_message) if body && body.strip.empty? && !draft.files_attached?
+
+      draft.send!(by: current_agent, seen_turn: seen, body: body, request: request)
+      flash[:notice] = support_console_t("flashes.draft_sent")
+      respond_to_transition
+    rescue SupportDesk::StaleTurn
+      refuse_stale_draft
+    rescue StandardError => error
+      raise unless support_console_rescuable?(error)
+
+      flash[:alert] = support_console_error_message(error)
+      respond_to_transition
+    end
+
+    # Throw it away, with a reason worth reading later: the rejections are
+    # what tell a host whether the assistant is ready for a higher level.
+    def reject_draft
+      draft = support_reviewable_draft
+      return if draft.nil?
+
+      attempt(:draft_rejected) do
+        draft.reject!(by: current_agent, reason: support_console_text(:reason), request: request)
+      end
+    end
+
+    # Switch her off on THIS case: a delicate conversation, a customer who
+    # has had enough, a thread somebody wants to handle themselves.
+    def pause_assistant
+      attempt(:assistant_paused) do
+        @ticket.pause_assistant!(by: current_agent, reason: support_console_text(:reason), request: request)
+      end
+    end
+
+    # Let her back in on this case.
+    def resume_assistant
+      attempt(:assistant_resumed) { @ticket.resume_assistant!(by: current_agent, request: request) }
     end
 
     # The form for writing to somebody who hasn't written to us — "Escribir
@@ -290,6 +364,70 @@ module SupportDesk
       scope
     end
 
+    # The proposal waiting on this case, or nil. What `show` renders the
+    # draft card from, and what the composer's edit mode is about.
+    def support_pending_draft(ticket = @ticket)
+      ticket&.pending_draft
+    end
+
+    # This desk's assistant, or nil. A view asks it to decide whether there
+    # is a switch to draw at all — never to decide what may be pressed.
+    def support_assistant(ticket = @ticket)
+      ticket&.assistant
+    end
+
+    # The turn the page is being rendered with, which every send carries
+    # back. A case that has never been touched still has one, so this is
+    # never nil and the form never has an empty hidden field.
+    def support_seen_turn(ticket = @ticket)
+      ticket&.assistant_turn
+    end
+
+    # The draft the composer is EDITING: the reviewer pressed "Editar"
+    # (`?compose=reply&draft=ID`), or a stale send came back as this screen
+    # with their text still in it. Nil unless it names the pending proposal
+    # AND this agent is offered the send — a composer in edit mode with no
+    # way to submit is worse than no edit mode at all.
+    def support_editing_draft(ticket = @ticket)
+      draft = support_pending_draft(ticket)
+      return nil if draft.nil?
+      return nil unless support_offered_actions(ticket).include?(:send_draft)
+
+      named = [ params[:draft], params[:draft_id] ].detect { |value| value.is_a?(String) && value.present? }
+      named == draft.id.to_s ? draft : nil
+    end
+
+    # One line for the timeline kinds the assistants added — "Lucía envió la
+    # propuesta de Rose" — from the event's own payload. Nil for everything
+    # else, so the partial falls back to the label-and-actor shape 0.2 had.
+    #
+    # It lives here rather than in the partial because the sentence is COPY:
+    # an ejected view must not have to carry a `case` over event kinds to
+    # keep saying the right thing in Spanish.
+    def support_console_timeline_sentence(entry, actor_name = nil)
+      return nil unless entry.event?
+
+      payload = entry.event.payload.is_a?(Hash) ? entry.event.payload : {}
+      assistant = support_console_assistant_name(payload["assistant"])
+
+      case entry.kind
+      when :escalated
+        support_console_t("timeline.escalated", actor: actor_name,
+                                                reason: support_console_reason_word(payload["reason"]))
+      when :human_requested then support_console_t("timeline.human_requested")
+      when :assistant_paused then support_console_t("timeline.assistant_paused", actor: actor_name)
+      when :assistant_resumed then support_console_t("timeline.assistant_resumed", actor: actor_name)
+      when :draft_sent
+        support_console_t("timeline.draft_sent#{"_edited" if payload["edited"]}",
+                          actor: actor_name, assistant: assistant)
+      when :draft_rejected
+        support_console_t("timeline.draft_rejected", actor: actor_name, assistant: assistant)
+      when :assistant_withheld
+        support_console_t("timeline.assistant_withheld", assistant: assistant,
+                                                         reason: support_console_withheld_word(payload["reason"]))
+      end
+    end
+
     # The default queue tab and the tickets behind it, for hosts that want
     # the obvious index. Entirely optional — everything it does is three
     # lines of Layer 1.
@@ -333,7 +471,7 @@ module SupportDesk
       # that no test notices until somebody counts.
       def support_queue_tickets
         support_queue.scope(@scope)
-                     .includes(:requester, :assignee, :desk, :subject, :opened_by,
+                     .includes(:requester, :assignee, :desk, :subject, :opened_by, :pending_draft,
                                conversation: { last_message: %i[sender author] })
                      .limit(support_tickets_per_page)
       end
@@ -638,7 +776,9 @@ module SupportDesk
       offered = @ticket.actions_for(current_agent)
       return if offered.include?(OFFERED_AS.fetch(action_name.to_sym))
 
-      flash[:alert] = support_console_t("errors.#{unavailable_reason}", holder: support_console_holder)
+      flash[:alert] = support_console_t("errors.#{unavailable_reason}",
+                                        holder: support_console_holder,
+                                        status: support_draft_status_word(support_named_draft))
       respond_to_transition
     end
 
@@ -647,10 +787,23 @@ module SupportDesk
     # taken first.
     def unavailable_reason
       return "closed_case" if @ticket.closed?
+      return draft_unavailable_reason if %i[send_draft reject_draft].include?(action_name.to_sym)
       return "unavailable_action" unless %i[reply hand_off].include?(action_name.to_sym)
       return "take_it_first" if @ticket.unassigned?
 
       "held_by_somebody_else"
+    end
+
+    # Pressing the same button twice is the common way to get here, and
+    # "there is no proposal" is the wrong thing to read after sending one.
+    # The row the request names is the whole answer: still there and already
+    # decided, or gone.
+    def draft_unavailable_reason
+      named = support_named_draft
+      return "draft_already_reviewed" if named && !named.pending?
+      return "no_pending_draft" if @ticket.pending_draft.nil?
+
+      "unavailable_action"
     end
 
     # Who has the case, for a refusal that names them.
@@ -730,10 +883,113 @@ module SupportDesk
     # desk — never the one `?desk=` names. Those are different desks the
     # moment a host has two, and reading the parameter let a billing agent
     # be assigned to a case on another desk entirely.
+    # Values are `SupportDesk.actor_key(agent)` — a GlobalID, which says
+    # WHICH CLASS as well as which row. The pool is people and the desk's
+    # assistant, and their ids are drawn from different tables: a picker
+    # posting a bare "1" could mean either of them, and "assign the case to
+    # the machine" is not a mistake to make on a coin flip.
+    #
+    # A bare id still resolves, because a host may have written one into
+    # their own form — but only while exactly one member of the pool answers
+    # to it. Two matches is a refusal, not a guess.
     def support_console_agent(id = params[:agent_id])
       return nil if id.blank?
 
-      @ticket.desk.agents.detect { |agent| agent.id.to_s == id.to_s }
+      key = id.to_s
+      pool = @ticket.desk.agents
+      exact = pool.detect { |agent| SupportDesk.actor_key(agent) == key }
+      return exact if exact
+
+      matches = pool.select { |agent| agent.id.to_s == key }
+      matches.one? ? matches.first : nil
+    end
+
+    # --- The proposal a request names -------------------------------------------
+
+    # The draft this request names, in ANY status. Deliberately not
+    # `drafts.pending`: a second submit of the same button has to be able to
+    # read "ya se envió" instead of "no hay ninguna propuesta", and only the
+    # row itself knows which.
+    def support_console_draft
+      raise InvalidInput, :invalid_input unless params[:draft_id].is_a?(String)
+
+      support_named_draft
+    end
+
+    # The same lookup for the REFUSALS, which run before the action and must
+    # never raise: a crafted `draft_id` on a case with nothing pending is a
+    # flash, not a 500.
+    def support_named_draft
+      return @support_named_draft if defined?(@support_named_draft)
+
+      id = params[:draft_id]
+      @support_named_draft = (@ticket.drafts.find_by(id: id) if id.is_a?(String) && id.present?)
+    rescue ActiveRecord::StatementInvalid
+      # A uuid-keyed host: an id that isn't one is an id nothing has.
+      @support_named_draft = nil
+    end
+
+    # The draft a decision may be made about, or nil with the refusal
+    # already rendered.
+    def support_reviewable_draft
+      draft = support_console_draft
+      if draft.nil?
+        refuse(:unknown_draft)
+      elsif !draft.pending?
+        refuse(:draft_already_reviewed, status: support_draft_status_word(draft))
+      else
+        return draft
+      end
+      nil
+    rescue InvalidInput => error
+      refuse(error.key)
+      nil
+    end
+
+    # What happened to a draft, as the word the flash reads: "ya se envió",
+    # "ya se descartó". Never the English status — a Spanish desk reading
+    # "ya se sent" is the bug this map exists to stop.
+    def support_draft_status_word(draft)
+      return nil if draft.nil?
+
+      support_console_t("draft.statuses.#{draft.status}", default: draft.status)
+    end
+
+    # The case moved between the render and the submit. A redirect here
+    # would throw away whatever the reviewer typed, so this is the SAME
+    # screen again with a 422: their text still in the composer, the CURRENT
+    # turn in the form, and the reason on top. There is no "send anyway" —
+    # reading the case again is the whole point.
+    def refuse_stale_draft
+      @ticket.reload
+      flash.now[:alert] = support_console_t("errors.stale_turn")
+      rerender_support_case
+    end
+
+    # The case screen again, as the host renders it: their own `show` runs,
+    # so whatever it sets up is set up, and the two things every bundled
+    # view needs are filled in when it didn't.
+    def rerender_support_case(status: :unprocessable_entity)
+      show if respond_to?(:show)
+      @actions ||= @ticket.actions_for(current_agent)
+      @context_card ||= @ticket.context_card
+      render :show, formats: [ :html ], status: status unless performed?
+    end
+
+    # The buttons this agent is offered on +ticket+, asked once per render.
+    # `show` usually set them already; a 422 re-render may not have.
+    def support_offered_actions(ticket = @ticket)
+      return @actions if ticket == @ticket && @actions
+
+      ticket.actions_for(current_agent)
+    end
+
+    # A free-text field a verb takes: text, or nothing. A Hash where a
+    # reason belongs is a crafted request, and `.to_s` on it would be
+    # written into an event payload forever.
+    def support_console_text(name)
+      value = params[name]
+      value.is_a?(String) ? value.presence : nil
     end
 
     def support_agent_name(agent)
@@ -757,8 +1013,8 @@ module SupportDesk
 
     # A refusal the console spotted before the model was asked (an empty
     # message, an agent who isn't in the pool).
-    def refuse(reason)
-      flash[:alert] = support_console_t("errors.#{reason}")
+    def refuse(reason, **interpolations)
+      flash[:alert] = support_console_t("errors.#{reason}", **interpolations)
       respond_to_transition
     end
 
@@ -810,6 +1066,32 @@ module SupportDesk
       key = error.class.name.demodulize.underscore
       support_console_t("errors.#{key}", detail: error.message, holder: support_console_holder,
                                          default: :"support_desk.console.errors.generic")
+    end
+
+    # Who proposed it, in a word. The payloads carry a key on one kind and
+    # an actor key on another, and this desk's own assistant answers to
+    # both; anything else is history (a host swapped assistants), so the
+    # readable half of the token stands in rather than a GlobalID nobody
+    # can read.
+    def support_console_assistant_name(token)
+      token = token.to_s
+      assistant = @ticket&.assistant
+      return assistant.name if assistant && [ assistant.key.to_s, SupportDesk.actor_key(assistant) ].include?(token)
+      return token.humanize if token.match?(/\A[a-z0-9_]+\z/i)
+
+      @ticket&.desk&.name.to_s
+    end
+
+    # Why a case was handed to a person, as a sentence rather than as the
+    # token the model writes. A reason a host's own harness invented falls
+    # back to itself — a strange word in the timeline beats no word at all.
+    def support_console_reason_word(reason)
+      support_console_t("escalation_reasons.#{reason}", default: reason.to_s.humanize)
+    end
+
+    # Why she said nothing.
+    def support_console_withheld_word(reason)
+      support_console_t("withheld_reasons.#{reason}", default: reason.to_s.humanize)
     end
 
     def support_console_t(key, **interpolations)

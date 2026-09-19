@@ -22,6 +22,8 @@ es:
         topic: "Tema"
         subject_status: "Estado"
         open_subject: "Abrir en el admin"
+        assistant: "Asistente"
+        requester_context: "Sobre la persona"
       transcript:
         title: "Conversación"
         empty: "Todavía no se ha dicho nada."
@@ -44,6 +46,43 @@ es:
         note_hint: "Las notas nunca salen del equipo."
         closed: "Este caso está cerrado. Vuelve a abrirlo para responder."
         assignee_only: "%{agent} lleva este caso y en esta mesa solo responde quien lo tiene."
+      draft:
+        title: "Propuesta de %{name}"
+        from: "propuesta de %{name}"
+        confidence: "confianza declarada %{percent} %"
+        sources: "Fuentes"
+        attachments: "Adjuntos"
+        stale: "La conversación ha cambiado desde esta propuesta. Léela antes de enviar."
+        editing: "Editando la propuesta de %{name}"
+        cancel_edit: "cancelar"
+        reason_placeholder: "¿Por qué la descartas? (opcional)"
+        sent_by: "Propuesta enviada por %{name}"
+        rejected_by: "Propuesta descartada por %{name}"
+        # The verb the "ya se %{status}" refusal reads. Never the English
+        # status: a Spanish desk reading "ya se sent" is the whole reason
+        # this map exists.
+        statuses:
+          pending: "propuso"
+          sent: "envió"
+          rejected: "descartó"
+          superseded: "sustituyó"
+          expired: "caducó"
+      badges:
+        needs_human: "Necesita persona"
+        pending_draft: "Propuesta lista"
+        assistant_holds: "%{name} se ocupa · %{used}/%{max} turnos"
+        assistant_holds_unlimited: "%{name} se ocupa"
+      withheld_reasons:
+        policy: "la política de este caso no se lo permite"
+        not_your_turn: "no era su turno"
+      # Por qué un caso acabó en manos de una persona. Los tokens los
+      # escribe el gem o el harness del host; aquí se leen en castellano.
+      escalation_reasons:
+        max_turns: "se quedó sin turnos"
+        assistant_silent: "el asistente no contestó a tiempo"
+        requester_request: "lo pidió el cliente"
+        phrase: "el cliente lo pidió en la conversación"
+        hand_off_when_error: "el asistente falló"
       assignment:
         title: "Quién lo lleva"
         held_by: "Lo lleva %{agent}"
@@ -54,6 +93,16 @@ es:
       timeline:
         title: "Historial"
         system: "Sistema"
+        escalated: "%{actor} pasó el caso a una persona: %{reason}"
+        human_requested: "El cliente pidió hablar con una persona"
+        assistant_paused: "%{actor} pausó el asistente"
+        assistant_resumed: "%{actor} reanudó el asistente"
+        draft_sent: "%{actor} envió la propuesta de %{assistant}"
+        draft_sent_edited: "%{actor} envió la propuesta de %{assistant} (editada)"
+        draft_rejected: "%{actor} descartó la propuesta de %{assistant}"
+        assistant_withheld: "%{assistant} no respondió: %{reason}"
+        draft_superseded: "Propuesta sustituida"
+        draft_expired: "Propuesta caducada al cerrar"
         kinds:
           message: "Mensaje"
           opened: "Abierto"
@@ -79,6 +128,12 @@ es:
         close: "Cerrar"
         reopen: "Reabrir"
         change_topic: "Cambiar tema"
+        send_draft: "Enviar"
+        send_edited_draft: "Enviar propuesta editada"
+        edit_draft: "Editar"
+        reject_draft: "Descartar"
+        pause_assistant: "Pausar asistente"
+        resume_assistant: "Reanudar asistente"
       flashes:
         message_sent: "Mensaje enviado a %{requester}."
         replied: "Respuesta enviada."
@@ -91,6 +146,10 @@ es:
         noted: "Nota guardada."
         topic_changed: "Tema cambiado."
         queue_empty: "No te espera nada."
+        draft_sent: "Propuesta enviada."
+        draft_rejected: "Propuesta descartada."
+        assistant_paused: "Asistente pausado en este caso."
+        assistant_resumed: "Asistente reanudado en este caso."
       errors:
         forbidden: "No tienes acceso a la consola de soporte."
         not_allowed: "No puedes hacer eso en este caso."

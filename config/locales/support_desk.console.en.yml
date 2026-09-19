@@ -22,6 +22,8 @@ en:
         topic: "Topic"
         subject_status: "Status"
         open_subject: "Open in admin"
+        assistant: "Assistant"
+        requester_context: "About this person"
       transcript:
         title: "Conversation"
         empty: "Nothing has been said yet."
@@ -44,6 +46,41 @@ en:
         note_hint: "Notes never leave the desk."
         closed: "This case is closed. Reopen it to answer."
         assignee_only: "%{agent} is handling this case, and this desk only lets the assignee reply."
+      draft:
+        title: "%{name}'s proposal"
+        from: "%{name}'s proposal"
+        confidence: "declared confidence %{percent} %"
+        sources: "Sources"
+        attachments: "Attachments"
+        stale: "The conversation has changed since this was proposed. Read it before you send."
+        editing: "Editing %{name}'s proposal"
+        cancel_edit: "cancel"
+        reason_placeholder: "Why are you discarding it? (optional)"
+        sent_by: "Proposal sent by %{name}"
+        rejected_by: "Proposal discarded by %{name}"
+        # The verb the "already %{status}" refusal reads.
+        statuses:
+          pending: "proposed"
+          sent: "sent"
+          rejected: "discarded"
+          superseded: "replaced"
+          expired: "expired"
+      badges:
+        needs_human: "Needs a person"
+        pending_draft: "Proposal ready"
+        assistant_holds: "%{name} has it · %{used}/%{max} turns"
+        assistant_holds_unlimited: "%{name} has it"
+      withheld_reasons:
+        policy: "this case's policy doesn't allow it"
+        not_your_turn: "it wasn't her turn"
+      # Why a case ended up with a person. The tokens are written by the gem
+      # or by the host's own harness; these are how they read.
+      escalation_reasons:
+        max_turns: "she ran out of turns"
+        assistant_silent: "the assistant didn't answer in time"
+        requester_request: "the customer asked for one"
+        phrase: "the customer asked in the conversation"
+        hand_off_when_error: "the assistant failed"
       assignment:
         title: "Who has it"
         held_by: "Held by %{agent}"
@@ -54,6 +91,16 @@ en:
       timeline:
         title: "Timeline"
         system: "System"
+        escalated: "%{actor} handed the case to a person: %{reason}"
+        human_requested: "The customer asked for a person"
+        assistant_paused: "%{actor} paused the assistant"
+        assistant_resumed: "%{actor} resumed the assistant"
+        draft_sent: "%{actor} sent %{assistant}'s proposal"
+        draft_sent_edited: "%{actor} sent %{assistant}'s proposal (edited)"
+        draft_rejected: "%{actor} discarded %{assistant}'s proposal"
+        assistant_withheld: "%{assistant} didn't answer: %{reason}"
+        draft_superseded: "Proposal replaced"
+        draft_expired: "Proposal expired when the case closed"
         kinds:
           message: "Message"
           opened: "Opened"
@@ -79,6 +126,12 @@ en:
         close: "Close"
         reopen: "Reopen"
         change_topic: "Refile"
+        send_draft: "Send"
+        send_edited_draft: "Send the edited proposal"
+        edit_draft: "Edit"
+        reject_draft: "Discard"
+        pause_assistant: "Pause the assistant"
+        resume_assistant: "Resume the assistant"
       flashes:
         message_sent: "Message sent to %{requester}."
         replied: "Answer sent."
@@ -91,6 +144,10 @@ en:
         noted: "Note saved."
         topic_changed: "Refiled."
         queue_empty: "Nothing is waiting for you."
+        draft_sent: "Proposal sent."
+        draft_rejected: "Proposal discarded."
+        assistant_paused: "The assistant is paused on this case."
+        assistant_resumed: "The assistant is back on this case."
       errors:
         forbidden: "You don't have access to the support console."
         not_allowed: "You can't do that on this case."

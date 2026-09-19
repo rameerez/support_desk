@@ -33,6 +33,11 @@
   <div class="grid gap-6 lg:grid-cols-3">
     <div class="space-y-4 lg:col-span-2">
       <%= render "transcript", ticket: @ticket %>
+      <%# The proposal, when there is one waiting: above the composer,
+          because it is the thing on this screen that wants an answer. %>
+      <% if (draft = support_pending_draft) %>
+        <%= render "draft", ticket: @ticket, draft: draft, actions: @actions %>
+      <% end %>
       <%= render "composer", ticket: @ticket, actions: @actions %>
     </div>
 

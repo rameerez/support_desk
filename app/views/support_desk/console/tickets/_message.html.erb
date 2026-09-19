@@ -8,6 +8,21 @@
     from an agent who isn't the assignee is a drop-in: the timeline records
     it, and the signature is what makes it visible here. %>
 <% from_requester = message.sender_type == ticket.requester_type && message.sender_id.to_s == ticket.requester_id.to_s %>
+<%# Two marks, and they mean opposite things. The robot says a MACHINE
+    wrote this and it went out as it stood — what the requester saw depends
+    on the disclosure mode, but the desk always knows. The "propuesta de"
+    line says a machine wrote it and a PERSON read it and sent it: that
+    message is theirs, and the mark is provenance, not authorship.
+
+    Both are staff-only: this partial renders the console, never the thread.
+    The provenance stamp is read from the message's own metadata so a host
+    that changes disclosure mode tomorrow doesn't rewrite yesterday's
+    bubbles. %>
+<% stamp = message.try(:metadata) %>
+<% stamp = stamp.is_a?(Hash) ? stamp["support_desk"] : nil %>
+<% stamp = stamp.is_a?(Hash) ? stamp : {} %>
+<% from_assistant = ticket.assistant_message?(message) %>
+<% drafted_by = stamp["drafted_by"] %>
 
 <% if message.system? %>
   <p class="text-center text-xs text-slate-400"><%= message.visible_body %></p>
@@ -37,7 +52,25 @@
         <% end %>
       <% end %>
 
-      <div class="mt-1 flex items-center gap-2 text-[11px] <%= from_requester ? "text-slate-500" : "text-white/60" %>">
+      <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] <%= from_requester ? "text-slate-500" : "text-white/60" %>">
+        <% if from_assistant %>
+          <%# The declared confidence rides in the tooltip rather than on
+              the bubble: it is a number a model made up about itself, and
+              it belongs where somebody looking for it can find it. %>
+          <% confidence = stamp["confidence"] %>
+          <%= tag.span("🤖", "aria-hidden": true,
+                title: (t("support_desk.console.draft.confidence", percent: (confidence.to_f * 100).round) if confidence)) %>
+        <% end %>
+
+        <% if drafted_by.present? %>
+          <%# The name of whoever proposed it. The desk's own assistant
+              answers without a query; an assistant a host has since
+              replaced falls back to the desk, because a lookup per bubble
+              is a page that gets slower the more the machine helped. %>
+          <% proposer = ticket.assistant if ticket.assistant && SupportDesk.actor_key(ticket.assistant) == drafted_by %>
+          <span><%= t("support_desk.console.draft.from", name: proposer&.support_agent_name || ticket.desk.name) %></span>
+        <% end %>
+
         <% if (signature = chats_message_signature(message)) %>
           <span><%= signature %></span>
         <% end %>

@@ -21,6 +21,23 @@
 
         <span class="font-mono text-xs text-slate-400"><%= ticket.reference %></span>
 
+        <%# The two rows an agent must not scroll past. "Necesita persona"
+            is a case a machine could not finish; "Propuesta lista" is one
+            where the work is already written and needs reading. Both are
+            free here — the index preloads `pending_draft`, and the flag is
+            a column. %>
+        <% if ticket.human_required? %>
+          <span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+            <%= t("support_desk.console.badges.needs_human") %>
+          </span>
+        <% end %>
+
+        <% if ticket.pending_draft %>
+          <span class="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
+            <%= t("support_desk.console.badges.pending_draft") %>
+          </span>
+        <% end %>
+
         <%# A case we started reads differently from one somebody asked for:
             nobody is waiting on us in it until they answer. %>
         <% if ticket.opened_by_support? %>
@@ -54,6 +71,9 @@
         </span>
       <% end %>
 
+      <%# The holder, by the name the REQUESTER is reading: an assistant
+          answers `support_agent_name` with her disclosed name, so a desk
+          never has to look up what the customer thinks they are talking to. %>
       <span class="text-slate-500">
         <%= ticket.assignee&.support_agent_name || t("support_desk.console.row.unassigned") %>
       </span>
