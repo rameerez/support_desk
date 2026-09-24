@@ -1055,22 +1055,29 @@ the turn and the whole policy that allowed it, `ticket.export` labels it
 marks it for staff. What a customer is told is a product decision; what your
 records say a machine wrote is not.
 
-**Taking her configuration away does not rewrite what she already signed.**
-Her name and mode are snapshotted onto her own row whenever configuration
-resolves her, so an assistant nobody declares any more still reads back as
-"Rose · asistente virtual" on the messages she signed — the kill switch
-stops her, it does not edit history.
+**Historical disclosure is captured per message.** The default Chats signature
+renderer uses the assistant name and disclosure stored when the message was
+sent. Renaming, changing mode or removing configuration does not rewrite old
+signed bubbles. Human replies and human-approved drafts retain their normal
+human signatures. The assistant row snapshot is a fallback for legacy messages
+without provenance; their original disclosure cannot be reconstructed if it
+was never stored.
 
-A **rename** is different, and deliberately so: chats asks the author for a
-signature every time a message is rendered, so renaming her renames her
-everywhere, past included. One assistant, one name. Every message already
-carries what she was called at the time, and a host that wants each bubble
-frozen points chats at that instead:
+A host's `Chats.config.message_signature` override remains authoritative. If
+you customize it, preserve the human fallback as well as the assistant snapshot:
 
 ```ruby
-# config/initializers/chats.rb — signatures that never move
 Chats.configure do |config|
-  config.message_signature = ->(message) { message.metadata.dig("support_desk", "display_name") }
+  config.message_signature = lambda do |message|
+    stamp = message.metadata["support_desk"]
+    name = if stamp.is_a?(Hash) && stamp["kind"] == "ai" && stamp["signed"] == true &&
+              stamp["display_name"].is_a?(String) && stamp["display_name"].present?
+      stamp["display_name"]
+    else
+      Chats.display_name_for(message.author)
+    end
+    I18n.t("chats.message.signature", name: name)
+  end
 end
 ```
 
@@ -1143,8 +1150,9 @@ describing a case that no longer exists, so the task looks for unregistered
 which is what makes a dead process followed by nothing but this task end in
 an actionable turn.
 
-`rake support_desk:assistant_status` reads and writes nothing, and is the
-line to put in a deploy check. `SupportDesk.doctor` covers the same ground
+`rake support_desk:assistant_status` reports current counts without changing
+tickets. Resolving configured assistants may create their identity rows or
+refresh their name/disclosure snapshots. `SupportDesk.doctor` covers the same ground
 with verdicts.
 
 ### What the model sees
@@ -1370,7 +1378,7 @@ the count is non-zero.
 
 **Doctor** — `assistants (config)` · `assistant turn subscriber` ·
 `assistant authorship` · `assistant silence` · `assistant seats` ·
-`assistant idle turns` · `drafts` · `ai agents without policy`.
+`assistant idle turns` · `drafts` · `ai agents without policy` · `message registrations`.
 
 **Test helpers**
 
@@ -1387,10 +1395,54 @@ the count is non-zero.
 | `with_assistant_config(key = nil, **overrides) { … }` | |
 | `with_topic_assistant_cap(path, level) { … }` | rebuilds the frozen tree with one cap |
 
-### Upgrading to 0.3
+### Upgrading to 0.3.2 (including hosts without assistants)
+
+0.3.2 adds `support_desk_message_registrations`, an internal receipt per text
+message. A receipt, written with the ticket clocks and revision in one
+transaction, distinguishes a replay from an unseen message. Timestamp and UUID
+order are not evidence of delivery. Every unseen requester message invalidates
+the turn, notifies the host and runs handoff detection once, even if its timestamp
+is older; the SLA timestamps themselves never move backwards.
+
+**This upgrade requires a drained cutover; it is not rolling-safe.** The table
+is additive, but old processes cannot write receipts.
+
+1. Pause support writes and drain old web requests and jobs. Keep the assistant
+   disabled throughout the cutover.
+2. Run `rails generate support_desk:upgrade`, inspect the new migration, then
+   `rails db:migrate` while writes remain paused. Fresh installs get the same
+   migration from `support_desk:install`.
+3. The migration seeds existing text messages at or before each role's old
+   clock as the historical baseline. Messages beyond those clocks remain
+   discoverable by recovery. **Old data cannot prove whether a message behind
+   the clock lost its callback.** Review suspect historical cases explicitly;
+   the migration does not replay old notifications or reopen history en masse.
+4. Start only 0.3.2 processes. Run `SupportDesk.doctor` and
+   `SupportDesk.redispatch_assistant_turns!` before resuming support traffic.
+   Recovery checks closed cases as well: `:reopen_on_reply` reopens them, while
+   `:locked` preserves closure and dispatches no model work. Registration repair
+   also runs on desks with no assistant configured.
+5. Resume writes. An assistant rollout still requires its own staging checks
+   and disclosure decision. The serialization guarantee still requires
+   PostgreSQL/MySQL; SQLite does not acquire row locks.
+
+Do not roll back to an old writer while serving traffic: it would leave missing
+receipts. If a rollback is necessary, pause and drain first, keep the receipt
+table, and re-establish the historical baseline before a later upgrade. Removing
+a receipt deliberately permits processing that message again; it is an internal
+recovery action, not a normal host API.
+
+Public assistant `turn:` arguments must be the observed opaque token. Symbols
+such as `:current` are refused; private outreach and automatic seat-taking do
+not expose a public bypass. No new host-facing registration API is required.
+
+### Historical upgrade from 0.2 to 0.3.0
+
+The following describes the original assistants migration. When installing the
+current release, also follow the 0.3.2 cutover above.
 
 ```bash
-rails generate support_desk:upgrade   # copies the additive assistants migration
+rails generate support_desk:upgrade   # current releases also copy the receipt migration
 rails db:migrate
 ```
 

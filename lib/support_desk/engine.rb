@@ -33,7 +33,7 @@ module SupportDesk
     SUPPORT_DESK_LIB = File.expand_path("support_desk", LIB_ROOT)
 
     ZEITWERK_IGNORED = %w[
-      version.rb errors.rb events.rb topic.rb topic_tree.rb configuration.rb current.rb macros.rb engine.rb
+      message_signatures.rb version.rb errors.rb events.rb topic.rb topic_tree.rb configuration.rb current.rb macros.rb engine.rb
       console.rb console_routes.rb console_engine.rb
     ].freeze
 
@@ -109,6 +109,11 @@ module SupportDesk
     # can arrive through.
     initializer "support_desk.chats_subscribers" do
       SupportDesk.subscribe_to_chats!
+    end
+
+    initializer "support_desk.message_signatures" do
+      require_relative "message_signatures"
+      Chats.singleton_class.prepend(SupportDesk::MessageSignatures)
     end
 
     # The checks that need the host's own classes loaded — the requester

@@ -70,13 +70,13 @@ class TranscriptTest < ActiveSupport::TestCase
 
   # --- Names ---------------------------------------------------------------------
 
-  test "her name follows the configuration, and falls back to what was shown" do
+  test "her name stays the name stored when she spoke" do
     rose = configure_assistant!(:rose, autonomy: :reply, name: "Rose")
     ticket = ticket_for(@alice, about: @order)
     ticket.respond!("Hola", by: rose, turn: ticket.assistant_turn)
 
     with_assistant_config(:rose, name: "Rosa") do
-      assert_equal "Rosa", ticket.transcript.to_a.last.name
+      assert_equal "Rose", ticket.transcript.to_a.last.name
     end
 
     # Nobody declares her any more, so there is no configured name left to
@@ -85,8 +85,7 @@ class TranscriptTest < ActiveSupport::TestCase
     # thing still true about a message nobody's initializer explains.
     SupportDesk.reset!
     configure_support_desk!
-    assert_equal I18n.t("support_desk.assistant.disclosed_name", name: "Rose"),
-                 ticket.reload.transcript.to_a.last.name
+    assert_equal "Rose", ticket.reload.transcript.to_a.last.name
   end
 
   test "a human with no support_agent_name falls back to the desk" do

@@ -59,6 +59,7 @@ module SupportDesk
     # readonly record refuses to be destroyed. Deleting a ticket is the one
     # thing that takes its timeline with it, and it needs no callbacks.
     has_many :events, class_name: "SupportDesk::Event", inverse_of: :ticket, dependent: :delete_all
+    has_many :message_registrations, class_name: "SupportDesk::MessageRegistration", dependent: :delete_all
     has_many :messages, through: :conversation, source: :messages
 
     # The assistant surface — the turn, the policy gates, her two verbs and
@@ -674,12 +675,10 @@ module SupportDesk
       # running before any of it.
       def reply_into!(ticket, message, files:, by:, by_support:, request:, authorize_reuse:)
         if by_support
-          # `turn: :current` is for the assistant: reuse turns outreach into
-          # an ordinary reply, with her full rules — and the turn she has to
-          # hold is the one this lock reads, because there was never an
-          # earlier one to give her.
+          # Only this private outreach path supplies the current turn internally.
+          # Public replies must present the token their harness observed.
           ticket.send(:reply_under_lock!, message, by: by, files: files, request: request,
-                                                   authorize: authorize_reuse, turn: :current)
+                                                   authorize: authorize_reuse, outreach: true)
         else
           ticket.with_lock(requires_new: true) do
             authorize_reuse&.call(ticket)
@@ -996,7 +995,7 @@ module SupportDesk
           # Giving a seat back is an action like any other, so it holds the
           # turn it read: a run that finished after the case moved on must
           # not release the seat a newer one took (R2).
-          ensure_current_turn!(internal_turn(turn))
+          ensure_current_turn!(turn)
           policy = assistant_policy(assistant)
           raise AssistantNotAllowed.new(policy, verb: :release) unless policy.may_observe?
           # Her own seat, and only hers: putting a PERSON's case back in the
@@ -1375,7 +1374,7 @@ module SupportDesk
       return unless SupportDesk.ai_actor?(actor)
 
       assistant = resolve_assistant!(actor)
-      ensure_current_turn!(internal_turn(turn))
+      ensure_current_turn!(turn)
       policy = assistant_policy(assistant)
       unless self.class.same_actor?(actor, to)
         raise AssistantNotAllowed.new(policy, verb: :assign,
@@ -1385,12 +1384,6 @@ module SupportDesk
       raise AssistantNotAllowed.new(policy, verb: :take) unless unassigned?
       raise AssistantNotAllowed.new(policy, verb: :take) unless policy.may_hold?
     end
-
-    # `:current` means "the turn as this lock sees it" — the one turn the
-    # gem supplies itself, for the self-take inside a reply that has ALREADY
-    # verified the turn under this very lock. It is reachable from nowhere
-    # else: a caller passing a real turn is checked against the row.
-    def internal_turn(turn) = turn == :current ? assistant_turn : turn
 
     def ensure_agent!(actor)
       return if actor.is_a?(Symbol)
@@ -1441,12 +1434,16 @@ module SupportDesk
     # `authorize:` is the console's hook (see Ticket.open_or_reply!): it runs
     # under this lock, before any policy side effect, and a raise there rolls
     # the whole thing back.
-    def reply_under_lock!(body, by:, files:, request:, authorize: nil, metadata: {}, turn: nil)
+    def reply_under_lock!(body, by:, files:, request:, authorize: nil, metadata: {}, turn: nil, outreach: false)
       with_lock(requires_new: true) do
         authorize&.call(self)
         next assistant_reply_under_lock!(body, assistant: by, files: files, request: request,
-                                               metadata: metadata, turn: turn) if SupportDesk.ai_actor?(by)
+                                               metadata: metadata, turn: turn, outreach: outreach) if SupportDesk.ai_actor?(by)
 
+        # Fold committed inputs before a human answer too. A delayed callback
+        # must not later turn an already-answered question back into work.
+        lock_conversation!
+        reconcile_unregistered_messages!
         ensure_writable!
         apply_reply_policy!(by, request: request)
         posted = post_agent_message!(body, files: files, by: by, metadata: metadata)
@@ -1462,14 +1459,13 @@ module SupportDesk
     # `reply!` by the assistant: her full rules, under the lock the caller
     # already holds. Everything here is also what `respond!` runs — this is
     # the path for a host that decided to answer rather than ask policy.
-    def assistant_reply_under_lock!(body, assistant:, files:, request:, metadata:, turn:)
+    def assistant_reply_under_lock!(body, assistant:, files:, request:, metadata:, turn:, outreach: false)
       assistant = resolve_assistant!(assistant)
-      # `:current` means "the turn as this lock sees it" — the one place the
-      # gem supplies a turn itself, because an outreach reply into an
-      # existing case has no earlier turn for anybody to have held.
-      turn = internal_turn(turn)
+      # Private outreach supplies a token only after acquiring both locks;
+      # public replies compare the caller's actual observed token.
       lock_conversation!
       reconcile_unregistered_messages!
+      turn = assistant_turn if outreach
       ensure_current_turn!(turn)
       ensure_writable!
 
@@ -1498,16 +1494,16 @@ module SupportDesk
                             "take it first"
         end
 
-        # `turn: :current` is consumed only when the actor is the assistant
-        # taking her own seat inside a reply this lock already authorized.
-        assign!(to: actor, by: actor, request: request, turn: :current)
+        # This private path already validated the reply while holding the lock.
+        # Seat-taking consumes the real current token, not a public sentinel.
+        assign!(to: actor, by: actor, request: request, turn: assistant_turn)
       elsif !assigned_to?(actor)
         # Humans outrank assistants, under EVERY reply policy (I8). A person
         # answering a case a machine is holding takes it over: there is
         # nothing to ask about "who owns this" when one of the two can't
         # want it, and leaving her seated would keep her answering next.
         if held_by_assistant? && !SupportDesk.ai_actor?(actor)
-          return assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request, turn: :current)
+          return assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request, turn: assistant_turn)
         end
         # Belt: the `held_by_human` floor already turned this into a draft,
         # so an assistant reaching here is a bug, not a policy question.
@@ -1518,7 +1514,7 @@ module SupportDesk
           raise NotAllowed, "ticket #{reference} is held by #{describe_actor(assignee)} and this desk only " \
                             "lets the assignee reply"
         when :take_over
-          assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request, turn: :current)
+          assign!(to: actor, by: actor, reason: :drop_in_takeover, request: request, turn: assistant_turn)
         else
           write_transition!(:drop_in, actor: actor, request: request) do
             { "assignee" => SupportDesk.actor_key(assignee) }
@@ -1593,11 +1589,15 @@ module SupportDesk
     # caller is not always the lock holder it thinks it is.
     def record_registration!(message) # :nodoc:
       return self if role_of(message) == :system
+      unless message.persisted? && message.conversation_id == conversation_id
+        raise ArgumentError, "message must belong to this ticket's conversation"
+      end
       # Re-check under the lock: the same message can reach us twice (a
       # redelivered event, a hand-written replay), and an SLA clock that
       # moves twice for one message is a lie.
       return self if registered?(message)
 
+      message_registrations.create!(message_id: message.id)
       role = role_of(message)
       opening = opening_message?
       reopened = false
@@ -1607,10 +1607,10 @@ module SupportDesk
       closed_by_assistant = false
       case role
       when :requester
-        attributes[:last_requester_message_at] = message.created_at
+        attributes[:last_requester_message_at] = [ last_requester_message_at, message.created_at ].compact.max
         # The pointer the turn's reconciliation reads: which requester
         # message the clocks are standing on, by id and not only by time.
-        attributes[:last_requester_message_id] = message.id
+        attributes[:last_requester_message_id] = message.id if after_requester_watermark?(message)
         if closed? && message.created_at > closed_at && desk_config.closed_tickets == :reopen_on_reply
           # Read before the merge below clears it — see #reopen!.
           closed_by_assistant = closed_by_type == SupportDesk::Assistant.polymorphic_name
@@ -1619,7 +1619,7 @@ module SupportDesk
           reopened = true
         end
       when :agent
-        attributes[:last_agent_message_at] = message.created_at
+        attributes[:last_agent_message_at] = [ last_agent_message_at, message.created_at ].compact.max
         # A first REPLY answers something. An agent message with no earlier
         # requester message is the desk opening the conversation, or a word
         # into an empty case — neither is a reply, and a requester clock that
@@ -1634,7 +1634,13 @@ module SupportDesk
       end
 
       assign_attributes(attributes)
-      self.awaiting = closed? ? "none" : awaiting_from_clocks
+      self.awaiting = if closed?
+        "none"
+      elsif role == :requester
+        "agent"
+      else
+        awaiting_from_clocks
+      end
       self.waiting_since = waiting_since_from_clocks
       save!
       # Every registered message moves the case on, so every one of them
@@ -1651,57 +1657,22 @@ module SupportDesk
 
       # After the bump, and after any reopen: the hook decides about a case
       # in the state this message left it in.
-      evaluate_hand_off_phrase!(message) if role == :requester
+      evaluate_hand_off_phrase!(message) if role == :requester && !closed?
 
       publish_transition(reopen_event, :reopened, requester, nil) if reopen_event
       announce_registration(message, role: role, opening: opening, reopened: reopened)
       self
     end
 
-    # Whether this message is already folded in. The last-id check catches
-    # the common redelivery; the clock check catches the rest, because a
-    # REPLAY can arrive in any order and an older message must never rewind
-    # `awaiting`, restart an SLA clock, or reopen a case that was closed
-    # after it.
-    #
-    # The comparison is `<=`, so a message whose timestamp already sits on
-    # the clock counts as folded in: idempotency is the documented promise,
-    # and the cost of the rare tie is one clock that doesn't advance until
-    # the next message.
-    #
-    # For the REQUESTER the clock is not a timestamp but a WATERMARK — the
-    # pair (last_requester_message_at, last_requester_message_id) — and a
-    # message counts as folded in when its own pair is at or behind it, in
-    # chats' transcript order. See #after_requester_watermark?.
+    # Receipt identity, not transcript order, decides whether a callback is a
+    # replay. A later commit may have an earlier timestamp or a smaller UUID.
     def registered?(message)
-      return true if last_registered_message_id.present? && last_registered_message_id.to_s == message.id.to_s
-
-      role = role_of(message)
-      return !after_requester_watermark?(message) if role == :requester
-
-      clock = (last_agent_message_at if role == :agent)
-      return false if clock.blank?
-      return true if message.created_at < clock
-
-      # Equal timestamps are NOT the same message. A coarse column, a frozen
-      # clock in a test, or two very fast inserts can put two different
-      # messages on one instant, and a `<=` here folded the second one in
-      # without moving anything — so the assistant answered a question the
-      # case had never registered. On the agent side the id pointer the
-      # requester side compares against does not exist, so a tie is new.
-      false
+      message_registrations.exists?(message_id: message.id)
     end
 
-    # Whether +message+ is AHEAD of the requester watermark — the one
-    # definition of "she hasn't seen this yet", shared by `registered?` and
-    # by the reconciliation query, so the two can never disagree about a
-    # message and loop refusing it (R4).
-    #
-    # The watermark is the PAIR (last_requester_message_at,
-    # last_requester_message_id) and the comparison is chats' own transcript
-    # order — `created_at ASC, id ASC` — never chronology alone. For a uuid
-    # primary key that order is arbitrary, but it is the order the thread is
-    # DISPLAYED in, which is the only order "the last word" can mean.
+    # Advance the requester clock pointer only in transcript order. Receipt
+    # identity decides registration separately, so late arrivals cannot rewind
+    # clocks or be discarded as replays.
     def after_requester_watermark?(message)
       watermark = last_requester_message_at
       return true if watermark.blank?

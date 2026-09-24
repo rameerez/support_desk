@@ -9,16 +9,14 @@ module SupportDesk
     # bump needs into an EXISTING install. Nothing else: the initializer, the
     # views, the console and the routes you already own stay untouched.
     #
-    # Currently writes the 0.2.0 migration (who opened the case), which is the
-    # SAME template a fresh install runs — one file owns those columns, so a
-    # fresh install and an upgraded one end up with the same schema and the
-    # same rollback. Running this twice writes nothing the second time: the
-    # migration already sitting in db/migrate is identical, and Rails skips it.
+    # Install and upgrade use the same templates for opened_by, assistants,
+    # and message receipts. See the README for the drained receipt cutover;
+    # old writers do not know how to record message identities.
     class UpgradeGenerator < Rails::Generators::Base
       include ActiveRecord::Generators::Migration
 
       source_root File.expand_path("templates", __dir__)
-      desc "Add the migrations a support_desk version bump needs (0.2.0: opened_by, 0.3.0: assistants)"
+      desc "Add the migrations a support_desk version bump needs (opened_by, assistants, message registration receipts)"
 
       # Rails' migration numbering, borrowed from ActiveRecord's generators.
       def self.next_migration_number(dir)
@@ -34,6 +32,12 @@ module SupportDesk
         migration_template "add_assistants_to_support_desk.rb.erb",
                            File.join(db_migrate_path, "add_assistants_to_support_desk.rb")
       end
+
+      def create_message_registrations_migration
+        migration_template "create_support_desk_message_registrations.rb.erb",
+                           File.join(db_migrate_path, "create_support_desk_message_registrations.rb")
+      end
+
 
       def display_post_upgrade_message
         say "\n🎫 support_desk upgrade migrations copied.", :green
@@ -53,7 +57,11 @@ module SupportDesk
         say "       rails g support_desk:assistant Rose --disclosure signature"
         say "     writes the harness and prints the stanza, the subscription and the two"
         say "     scheduled tasks. It never edits your initializer."
-        say "  5. See the CHANGELOG for the full list.\n", :green
+        say "  5. 0.3.2 receipts require a drained cutover: pause support writes and stop"
+        say "     old web/jobs, migrate, then start only the new version. Review historical"
+        say "     suspect callbacks before resuming; old clocks cannot prove delivery."
+        say "     Do not roll code back to a writer that cannot record receipts."
+        say "  6. See the CHANGELOG for the full list.\n", :green
       end
 
       private

@@ -59,7 +59,7 @@ namespace :support_desk do
     puts "[support_desk] #{emitted} turn(s) re-emitted (idle for more than #{older_than.inspect})."
   end
 
-  desc "What the assistants are doing right now (read-only)"
+  desc "Report assistant status without changing tickets"
   task assistant_status: :environment do
     if SupportDesk.config.assistants.empty?
       puts "[support_desk] no assistant is configured."
