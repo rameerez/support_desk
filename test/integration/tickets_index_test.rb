@@ -122,6 +122,8 @@ class TicketsIndexTest < ActionDispatch::IntegrationTest
     assert_select "details.support-desk-closed .chats-row",
                   count: SupportDesk::TicketsController::CLOSED_TICKETS_SHOWN
     assert_select ".support-desk-closed__capped"
+    # The line had no copy in either language until a host with 21 closed cases read it.
+    assert_no_missing_translations
   end
 
   test "the stylesheet goes in the head, where a stylesheet belongs" do

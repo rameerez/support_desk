@@ -79,6 +79,9 @@ en:
       closed_section:
         one: "1 closed conversation"
         other: "%{count} closed conversations"
+      closed_capped:
+        one: "Showing the most recent one."
+        other: "Showing the %{count} most recent."
       state:
         awaiting_reply: "We're on it"
         answered: "We replied"

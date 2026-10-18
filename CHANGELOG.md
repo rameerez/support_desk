@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than one unit, or a fractional one, reads as before. Waits in the console
   are unchanged.
 
+### Fixed
+
+- The support list's "showing the N most recent" line under a long closed
+  section (`support_desk.tickets.closed_capped`) had no copy in English or
+  Spanish, so a requester with more than 20 closed cases read "translation
+  missing".
+
 ### Compatibility
 
 - Verified against chats 0.4.2 as well as the locked 0.3.2: the whole suite

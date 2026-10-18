@@ -94,6 +94,9 @@ es:
       closed_section:
         one: "1 conversación cerrada"
         other: "%{count} conversaciones cerradas"
+      closed_capped:
+        one: "Se muestra la más reciente."
+        other: "Se muestran las %{count} más recientes."
       state:
         awaiting_reply: "Estamos con ello"
         answered: "Te hemos contestado"
