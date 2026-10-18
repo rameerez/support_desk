@@ -109,7 +109,7 @@ module SupportDesk
       {
         key: desk&.key,
         name: desk&.name,
-        reply_within: (SupportDesk.humanize_duration(reply_within) if reply_within)
+        reply_within: (SupportDesk.humanize_promise(reply_within) if reply_within)
       }
     end
 

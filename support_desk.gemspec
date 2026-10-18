@@ -42,10 +42,12 @@ Gem::Specification.new do |spec|
   # never a forced dependency.
   spec.add_dependency "activerecord", ">= 7.2.0", "< 9.0"
   spec.add_dependency "activesupport", ">= 7.2.0", "< 9.0"
-  # ~> 0.3, not ~> 0.2: Desk declares `acts_as_messager verified: true`, a
-  # keyword chats 0.2.x does not accept, so a host resolving 0.2 would fail at
-  # class definition with ArgumentError long before `doctor` could explain it.
-  spec.add_dependency "chats", "~> 0.3", ">= 0.3.2"
+  # 0.5.1: `Chats::ApplicationController#conversation_lookup_scopes`, the
+  # lookup seam a requester's own case is added to (SupportDesk::
+  # ConversationAccess), on top of what 0.4.x and 0.5.0 brought (inbox_scope
+  # applied to Messager#chats, can_message on every send, the thread as a
+  # partial, the messaging dock). The whole suite runs on it.
+  spec.add_dependency "chats", ">= 0.5.1", "< 1.0"
   spec.add_dependency "globalid", "~> 1.0"
   spec.add_dependency "railties", ">= 7.2.0", "< 9.0"
 end

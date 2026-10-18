@@ -4,6 +4,83 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-18
+
+### Added
+
+- **Support apart from the inbox.** `config.thread_page = :support` reads a
+  case on the engine's own page, `/support/tickets/T-AB12CD`, which renders
+  chats' thread template (same bubbles, composer and realtime) with its way
+  back leading to the support list. `support_thread_path`, the list rows and
+  the redirect after opening a case follow the setting. The default,
+  `:chats`, is unchanged. A third Hotwire Native rule pushes the ticket page
+  under `:support`.
+- **A requester's own case always opens through chats.** chats finds every
+  thread and composer request through `viewer.chats`, which applies the
+  host's `inbox_scope`; a host keeping support out of its inbox would 404 its
+  requesters inside their own cases. The engine adds the viewer's own cases
+  to chats' `conversation_lookup_scopes` (`SupportDesk::ConversationAccess`,
+  `SupportDesk::Ticket.conversations_of`): by participation and blocks,
+  without the listing scope, each a direct conversation whose subject is that
+  very case. Nothing else the scope hides becomes reachable.
+- **`acknowledgement`**, a desk setting: the system line posted right under a
+  requester's first message, in the same transaction, and read for them as
+  it is posted (a receipt for their own words is never news). Same values and
+  interpolations as `opening_line`; nil by default, and the gem ships
+  `support_desk.thread.acknowledgement` to opt into.
+- An I18n key given as a line reads its `<key>_with_promise` variant when the
+  desk promises a time and the variant exists (the assistant lines already
+  did): the shipped acknowledgement is "Thanks, we got it." on a desk with
+  `reply_within = nil`, and adds the promise otherwise.
+- `SupportDesk.humanize_promise` and `DeskConfiguration#reply_promise`: the
+  promise in the unit the desk wrote it in, from the new
+  `support_desk.durations.*` keys.
+- `support_desk.thread.closed_notice` can interpolate `%{reply_within}`,
+  `%{desk}` and `%{label}`.
+
+### Changed
+
+- The answer promise (`support_reply_promise`, the wizard's line, and
+  `%{reply_within}` in every line) is now said in the unit `reply_within`
+  was configured in: `24.hours` reads "24 hours" where it read "1 day", and
+  `8.hours` reads "8 hours" where it read "about 8 hours". A duration of more
+  than one unit, or a fractional one, reads as before. Waits in the console
+  are unchanged.
+
+### Fixed
+
+- `SupportDesk::ConversationAccess` adds a requester's own cases as a lookup
+  scope (`conversation_lookup_scopes`, chats 0.5.1) instead of rescuing chats'
+  404: no exception is inspected, and a host's own `find_conversation` that
+  refuses a case is final. It only ever adds a scope beside the host's: a host
+  that returns no scopes for a viewer (a suspended account) opens nothing for
+  them, their cases included.
+- The ticket page resolves its conversation through chats' own
+  `find_conversation` (a chats controller bound to the request), so whatever
+  refuses a case at the chats URL refuses it on the ticket page too.
+- The access fallback and the ticket page require the case and its
+  conversation to point at each other (a direct conversation whose subject is
+  that case): a ticket mislinked to a group or to another conversation opens
+  nothing.
+- The ticket page resolves its conversation through chats' participation and
+  block rules: owning the case is no longer enough once the seat is gone.
+- The support list's "showing the N most recent" line under a long closed
+  section (`support_desk.tickets.closed_capped`) had no copy in English or
+  Spanish, so a requester with more than 20 closed cases read "translation
+  missing".
+
+### Compatibility
+
+- Requires chats >= 0.5.1; take both from GitHub by tag until they are on
+  rubygems. (The old `~> 0.3, >= 0.3.2` already admitted 0.4 and 0.5: `~> 0.3`
+  is `>= 0.3, < 1.0`.) 0.5.1 brings the lookup seam the access to a
+  requester's own case is built on. The whole suite runs on chats 0.5.1, the
+  reviewed package in `vendor/cache` built from tag v0.5.1 (6159ea1). The
+  chats 0.4.2 CI leg is gone: the constraint no longer admits it. Every CI job
+  asserts the chats it resolved (`CHATS_VERSION_UNDER_TEST`), so a later chats
+  release never silently becomes what CI tests. The dummy app's chats
+  migration is chats' current install template.
+
 ## [0.3.2] - Unreleased
 
 ### Fixed

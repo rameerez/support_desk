@@ -179,11 +179,7 @@ module SupportDesk
     # The promise shown next to the composer ("we usually reply in under a
     # day"), built from `config.reply_within` — one setting, one truth: the
     # same number the SLA breaches on.
-    def promise
-      return nil if promise_within.nil?
-
-      I18n.t("support_desk.thread.promise", time: self.class.humanize_duration(promise_within))
-    end
+    def promise = target_desk.config.reply_promise
 
     # The promise as a Duration, for hosts that want to phrase it themselves.
     def promise_within = target_desk.config.reply_within

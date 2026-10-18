@@ -65,6 +65,7 @@ module SupportDesk
         # this one has a default and `opening_line` does not: existing hosts'
         # threads keep opening exactly as they do today.
         opening_line_from_support: :"support_desk.thread.opened_by_support",
+        acknowledgement: nil,
         find_requester: nil,
         reply_policy: :anyone,
         announce_assignments: :first_only,
@@ -166,6 +167,28 @@ module SupportDesk
         @settings[:opening_line_from_support] = ensure_line(value, "opening_line_from_support")
       end
 
+      # The system line posted right UNDER a requester's first message, in the
+      # same transaction: "Thanks, we got it. We usually reply in under 72
+      # hours." The answer to "did that go through?", said where they are
+      # looking, before anybody on the desk has read it. Only for a case the
+      # requester opened; a case the desk opens starts with
+      # `opening_line_from_support` instead.
+      #
+      # Same values as `opening_line`, and the same interpolations. nil (the
+      # default) posts nothing; the gem ships a line to opt into:
+      #
+      #   config.acknowledgement = :"support_desk.thread.acknowledgement"
+      def acknowledgement(&block)
+        return @settings[:acknowledgement] = block if block
+
+        read(:acknowledgement)
+      end
+
+      # Set it, validating on assignment (see the reader above).
+      def acknowledgement=(value)
+        @settings[:acknowledgement] = ensure_line(value, "acknowledgement")
+      end
+
       # How a console finds the person an agent types: email, phone, handle,
       # whatever this host lets staff search by. Given the typed string,
       # returns a requester record or nil.
@@ -192,7 +215,7 @@ module SupportDesk
       # it needs a ticket, and running a host's callback as a diagnostic is
       # not a diagnostic.
       def opening_line_problems # :nodoc:
-        %i[opening_line opening_line_from_support].filter_map do |setting|
+        %i[opening_line opening_line_from_support acknowledgement].filter_map do |setting|
           value = public_send(setting)
           next if value.nil? || value.respond_to?(:call)
 
@@ -214,22 +237,46 @@ module SupportDesk
       # What to post for THIS ticket, resolved and interpolated in the
       # current locale. nil or blank means post nothing.
       def opening_line_for(ticket)
-        setting = ticket.opened_by_support? ? opening_line_from_support : opening_line
-        return nil if setting.nil?
-
-        line = case setting
-        when Symbol then I18n.t(setting, **line_interpolations(ticket), raise: true)
-        when String then interpolate_line(setting, line_interpolations(ticket), "opening_line")
-        else setting.call(ticket)
+        if ticket.opened_by_support?
+          line_for(ticket, opening_line_from_support, "opening_line_from_support")
+        else
+          line_for(ticket, opening_line, "opening_line")
         end
-        return nil if line.nil?
+      end
 
-        unless line.is_a?(String)
-          raise ConfigurationError,
-                "an opening_line block must return a String or nil, got #{line.inspect}"
-        end
+      # The acknowledgement for THIS ticket, the same way: nil for a case the
+      # desk opened, and nil or blank means post nothing.
+      def acknowledgement_for(ticket)
+        return nil if ticket.opened_by_support?
 
-        line
+        line_for(ticket, acknowledgement, "acknowledgement")
+      end
+
+      # "We usually reply in under 72 hours", in the current locale, or nil
+      # when this desk promises nothing. The line the requester reads above
+      # the composer and on the door, from the same `reply_within` the SLA
+      # breaches on.
+      def reply_promise
+        within = reply_within
+        return nil if within.nil?
+
+        I18n.t("support_desk.thread.promise", time: SupportDesk.humanize_promise(within))
+      end
+
+      # What every line and notice of this desk can say about +ticket+:
+      # %{label}, %{desk} and %{reply_within} (the promise, in its own unit).
+      def line_interpolations(ticket)
+        { label: ticket.label, desk: ticket.desk.name,
+          reply_within: (SupportDesk.humanize_promise(reply_within) if reply_within) }
+      end
+
+      # The `_with_promise` variant of an I18n key, when this desk promises a
+      # time and the variant exists; the key as written otherwise.
+      def promised_key(symbol)
+        return symbol if reply_within.nil?
+
+        promised = :"#{symbol}_with_promise"
+        I18n.exists?(promised) ? promised : symbol
       end
 
       # --- Who answers ----------------------------------------------------------
@@ -554,9 +601,24 @@ module SupportDesk
               "#{LINE_INTERPOLATIONS.keys.map { |key| "%{#{key}}" }.join(", ")}."
       end
 
-      def line_interpolations(ticket)
-        { label: ticket.label, desk: ticket.desk.name,
-          reply_within: (SupportDesk.humanize_duration(reply_within) if reply_within) }
+      # One configured line, resolved and interpolated for +ticket+. An I18n
+      # key reads its `<key>_with_promise` variant when this desk promises a
+      # time and the variant exists, so a desk with `reply_within = nil` never
+      # says "we usually reply in under ." (the gem's assistant lines work the
+      # same way).
+      def line_for(ticket, setting, name)
+        return nil if setting.nil?
+
+        line = case setting
+        when Symbol then I18n.t(promised_key(setting), **line_interpolations(ticket), raise: true)
+        when String then interpolate_line(setting, line_interpolations(ticket), name)
+        else setting.call(ticket)
+        end
+        return nil if line.nil?
+
+        raise ConfigurationError, "a #{name} block must return a String or nil, got #{line.inspect}" unless line.is_a?(String)
+
+        line
       end
     end
 
@@ -949,7 +1011,7 @@ module SupportDesk
       def line_interpolations(ticket)
         reply_within = ticket.desk_config.reply_within
         { name: name, desk: ticket.desk.name,
-          reply_within: (SupportDesk.humanize_duration(reply_within) if reply_within) }
+          reply_within: (SupportDesk.humanize_promise(reply_within) if reply_within) }
       end
     end
 
@@ -957,7 +1019,7 @@ module SupportDesk
     # top-level accessors forward to the `:default` desk, which is also what
     # every other desk falls back to.
     DESK_SETTINGS = %i[
-      name avatar email opening_line opening_line_from_support find_requester reply_policy
+      name avatar email opening_line opening_line_from_support acknowledgement find_requester reply_policy
       announce_assignments closed_tickets reply_within at_risk_after open_rate_limit max_open_tickets
       inbox_entry routing mirror_replies_by_email auto_close_after assistant
     ].freeze
@@ -999,6 +1061,12 @@ module SupportDesk
     # own. Read through #console_authorized?.
     attr_reader :authorize_console
 
+    # Where a requester reads a case: :chats (the default) is its
+    # conversation in the chats inbox; :support is this engine's own ticket
+    # page, for a host whose support lives apart from its inbox.
+    THREAD_PAGES = %i[chats support].freeze
+    attr_reader :thread_page
+
     # A fresh configuration: one `:default` desk, every setting at the
     # documented default.
     def initialize
@@ -1010,6 +1078,7 @@ module SupportDesk
       @authenticate_method = :authenticate_user!
       @visible_desks_for = nil
       @authorize_console = nil
+      @thread_page = :chats
 
       @desks = { default: DeskConfiguration.new(:default) }
       @assistants = {}
@@ -1028,6 +1097,18 @@ module SupportDesk
     def console_parent_controller=(value)
       @console_parent_controller = ensure_class_name(value, "console_parent_controller")
     end
+
+    def thread_page=(value)
+      page = value.respond_to?(:to_sym) ? value.to_sym : value
+      unless THREAD_PAGES.include?(page)
+        raise ConfigurationError, "thread_page must be one of #{THREAD_PAGES.map(&:inspect).join(", ")}, got #{value.inspect}"
+      end
+
+      @thread_page = page
+    end
+
+    # Whether a case is read on this engine's own page (`thread_page = :support`).
+    def support_thread_page? = thread_page == :support
 
     # --- The console ------------------------------------------------------------
 

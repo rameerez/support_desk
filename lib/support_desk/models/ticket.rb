@@ -192,6 +192,35 @@ module SupportDesk
         find_by(conversation_id: conversation.id)
       end
 
+      # The conversations behind +requester+'s own cases, while they still
+      # hold its seat: chats' participation and block rules (`inbox_for`),
+      # without the host's `inbox_scope`. Participation is what makes a
+      # conversation theirs to read; the inbox is only where it is listed.
+      # What chats adds to its lookup (SupportDesk::ConversationAccess) and
+      # what the ticket page reads from.
+      #
+      # A case and its conversation have to point at each other: a direct
+      # conversation whose subject IS one of this requester's cases, that very
+      # case's conversation. A ticket mislinked to a group, or to a
+      # conversation about something else, opens nothing.
+      def conversations_of(requester)
+        return Chats::Conversation.none unless requester.respond_to?(:support_tickets)
+
+        tickets = arel_table
+        conversations = Chats::Conversation.arel_table
+        own_cases = requester.support_tickets.where(tickets[:id].eq(conversations[:subject_id])).select(:conversation_id)
+        Chats::Conversation.inbox_for(requester).direct
+                           .where(subject_type: polymorphic_name)
+                           .where(id: own_cases)
+      end
+
+      # One of them, by id, or nil.
+      def requester_conversation(requester, id)
+        return nil if id.blank?
+
+        conversations_of(requester).find_by(id: id)
+      end
+
       # Open a ticket and post its first message. Usually called as
       # `requester.ask_support!(…)` — or, when the desk writes first, as
       # `agent.open_support_conversation_with!(…)`. This is the seam under
@@ -621,6 +650,7 @@ module SupportDesk
         ticket.send(:record_registration!, posted) if posted
         ticket.send(:stamp_assistant_action!) if by_support && SupportDesk.ai_actor?(by)
         pin_opening_lines!(ticket, notices, posted)
+        post_acknowledgement!(ticket, posted) if posted && !by_support
         ticket
       end
 
@@ -629,6 +659,30 @@ module SupportDesk
         return nil if line.blank?
 
         ticket.conversation.post_system_message!(line)
+      end
+
+      # The desk's acknowledgement, right under the requester's first message
+      # and in the same transaction, so "did that go through?" is answered by
+      # the very commit that made it so. Pinned one tick AFTER the message
+      # whenever the clock did not move between the two inserts (the same tie
+      # `pin_opening_lines!` breaks the other way), and it is then the
+      # conversation's last message: what a list row previews.
+      #
+      # It is the desk's receipt for words the requester has just written, so
+      # it is never news to them: their read horizon moves through it. Without
+      # that, a tick dated after the clock (a frozen or coarse one) would stay
+      # unread on a page that already shows it, chats' own thread included,
+      # which reads at "now".
+      def post_acknowledgement!(ticket, posted)
+        line = ticket.desk_config.acknowledgement_for(ticket)
+        return if line.blank?
+
+        notice = ticket.conversation.post_system_message!(line)
+        if notice.created_at <= posted.created_at
+          notice.update_columns(created_at: posted.created_at + ordering_tick)
+          ticket.conversation.recompute_last_message!
+        end
+        ticket.conversation.participant_for(ticket.requester)&.read!(at: notice.created_at)
       end
 
       # chats orders a transcript by (created_at, id), and inserting one row
@@ -724,7 +778,7 @@ module SupportDesk
     def chat_locked_notice
       return I18n.t("support_desk.thread.unavailable_notice") if requester_unavailable?
 
-      I18n.t("support_desk.thread.closed_notice")
+      I18n.t("support_desk.thread.closed_notice", **desk_config.line_interpolations(self))
     end
 
     # Whether the person this case belongs to can be written to at all right

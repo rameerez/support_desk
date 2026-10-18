@@ -84,14 +84,11 @@ module SupportDesk
       content_for(:head) { stylesheet_link_tag "support_desk", "data-turbo-track": "reload" }
     end
 
-    # "Normalmente respondemos en menos de 24 h" for a desk, or nil when the
-    # desk promises nothing. The same `config.reply_within` the SLA breaches
-    # on — one setting, one truth.
+    # "Normalmente respondemos en menos de 24 horas" for a desk, or nil when
+    # the desk promises nothing. The same `config.reply_within` the SLA
+    # breaches on — one setting, one truth.
     def support_reply_promise(desk_key = :default)
-      within = SupportDesk.config.desk(desk_key).reply_within
-      return nil if within.nil?
-
-      t("support_desk.thread.promise", time: SupportDesk.humanize_duration(within))
+      SupportDesk.config.desk(desk_key).reply_promise
     end
 
     # The status line under a case in the requester's list: who owes the next
@@ -178,10 +175,13 @@ module SupportDesk
       chats_verified_badge(support_desk_record(desk_key))
     end
 
-    # Where a case is read and answered: its chats conversation. Falls back
-    # to the engine's own ticket URL (which redirects to the same place) for
-    # the one case that has no conversation yet, so a link is never dead.
+    # Where a case is read and answered: its chats conversation, or the
+    # engine's own ticket page under `thread_page = :support` (by reference:
+    # the URL people read back from a screen). Falls back to the ticket URL
+    # (which redirects to the same place) for the one case that has no
+    # conversation yet, so a link is never dead.
     def support_thread_path(ticket)
+      return support_desk_routes.ticket_path(ticket.reference) if SupportDesk.config.support_thread_page?
       return support_desk_routes.ticket_path(ticket) if ticket.conversation.nil? || !respond_to?(:chats_routes)
 
       chats_routes.conversation_path(ticket.conversation)

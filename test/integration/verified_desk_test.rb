@@ -38,7 +38,8 @@ class VerifiedDeskTest < ActionDispatch::IntegrationTest
 
   test "an ordinary person is never badged" do
     bob = create_user(name: "Bob")
-    conversation = @alice.chat_with(bob)
+    # A conversation somebody wrote in: chats 0.5 never lists an empty one.
+    conversation = @alice.message!(bob, "hi").conversation
 
     get "/messages"
     assert_response :success

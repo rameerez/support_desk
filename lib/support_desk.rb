@@ -402,8 +402,10 @@ module SupportDesk
     #
     # Both surfaces are ordinary PUSHED screens (`context: "default"`), never
     # modals: the wizard is three real URLs and a modal would break the back
-    # gesture between them. The thread itself is deliberately absent — it is
-    # a chats conversation, and it stays under the host's chats rule.
+    # gesture between them. The thread itself is absent under the default
+    # `thread_page = :chats` — it is a chats conversation, and it stays under
+    # the host's chats rule. Under `:support` it is this engine's ticket page,
+    # and a third rule pushes it like the list.
     #
     # +mount+ defaults to wherever the engine is mounted and +title+ to the
     # desk's name.
@@ -429,8 +431,16 @@ module SupportDesk
           properties: { context: "default", title: title, pull_to_refresh_enabled: false },
           comment: "The wizard: every step is a real URL, so it pushes and the back gesture works. " \
                    "Pull to refresh is off — it would throw away what the requester has typed."
-        }
-      ]
+        },
+        (if config.support_thread_page?
+           {
+             patterns: [ "^#{prefix}/tickets/[^/?]+(?:\\?.*)?$" ],
+             properties: { context: "default", title: title, pull_to_refresh_enabled: false },
+             comment: "A case, read on the support page (thread_page = :support). Pull to refresh is off " \
+                      "for the same reason as the wizard: the composer at its foot holds what is typed."
+           }
+         end)
+      ].compact
     end
 
     # A duration in the reader's own language ("1 día", "4 hours") — the
@@ -447,6 +457,24 @@ module SupportDesk
       # An app whose locale has no date translations (no rails-i18n) would
       # otherwise show "Translation missing" to a customer.
       words.start_with?("Translation missing") ? duration.inspect : words
+    end
+
+    # The answer promise, in the unit the desk made it in: `reply_within =
+    # 72.hours` reads "72 hours", `3.days` reads "3 days", `24.hours` reads
+    # "24 hours". A wait is approximate and `humanize_duration` rounds it
+    # ("about 8 hours", "3 days"); a promise is a number somebody chose, and
+    # rounding it says something they did not.
+    #
+    # The words are `support_desk.durations.<unit>`, pluralized by count. A
+    # duration of more than one unit (1.day + 2.hours), a fractional one, or
+    # a unit with no words in this locale is said the way a wait is.
+    def humanize_promise(duration)
+      parts = duration.respond_to?(:parts) ? duration.parts : {}
+      unit, count = parts.first if parts.size == 1
+      key = :"support_desk.durations.#{unit}"
+      return humanize_duration(duration) unless count.is_a?(Integer) && I18n.exists?(key)
+
+      I18n.t(key, count: count)
     end
 
     # A stable, URL-safe key for an actor (agent, requester, desk), used in
