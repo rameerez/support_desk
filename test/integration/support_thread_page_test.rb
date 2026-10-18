@@ -68,6 +68,28 @@ class SupportThreadPageTest < ActionDispatch::IntegrationTest
     assert_equal 0, @alice.unread_support_count
   end
 
+  test "the page reads the acknowledgement too, even when it was pinned a tick ahead of the clock" do
+    with_support_config(acknowledgement: "Got it") do
+      freeze_time do
+        ticket = ticket_for(@alice, topic: :account, message: "Hello")
+        login_as @alice
+        get "/messages/support/tickets/#{ticket.reference}"
+
+        assert_response :success
+        assert_equal 0, ticket.conversation.participant_for(@alice).reload.unread_count
+      end
+    end
+  end
+
+  test "owning the case is not enough once the seat in its conversation is gone" do
+    @ticket.conversation.participant_for(@alice).update_columns(left_at: Time.current)
+    login_as @alice
+
+    get "/messages/support/tickets/#{@ticket.reference}"
+
+    assert_response :not_found
+  end
+
   test "a case hidden from the inbox still answers its requester at every chats endpoint" do
     login_as @alice
     assert_empty @alice.chats.where(id: @ticket.conversation_id), "precondition: the inbox leaves support out"

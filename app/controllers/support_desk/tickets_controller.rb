@@ -113,7 +113,10 @@ module SupportDesk
     # reach this conversation through SupportDesk::ConversationAccess.
     def render_thread(ticket)
       @ticket = ticket
-      @conversation = ticket.conversation
+      # Through the same participation and block rules chats' own endpoints
+      # use: owning the case is not enough once the seat is gone.
+      @conversation = SupportDesk::Ticket.requester_conversation(current_requester, ticket.conversation_id) ||
+                      raise(ActiveRecord::RecordNotFound)
       @participant = @conversation.participant_for(current_requester)
 
       scope = @conversation.messages.includes(:sender, :reactions)
@@ -127,8 +130,10 @@ module SupportDesk
                            @messages.first&.id
       end
       # A pointer resting on a link (Turbo's hover prefetch) is not somebody
-      # reading the case; the visit that follows reads it.
-      @participant&.read! unless prefetch_request?
+      # reading the case; the visit that follows reads it. Read through the
+      # last message on the page, not merely "now": an acknowledgement pinned
+      # one tick after the message it answers may sit just ahead of the clock.
+      @participant&.read!(at: [ Time.current, @messages.last&.created_at ].compact.max) unless prefetch_request?
 
       render :show
     end
