@@ -75,8 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bundle; the reviewed package is in `vendor/cache`, built from tag v0.5.0)
   and on 0.4.2; the dummy app's chats migration is the 0.4.2/0.5.0 template
   (identical in both).
-- chats 0.4.2 and 0.5.0 are not on rubygems yet: publish them before this
-  release, which cannot resolve without them.
+- Requires chats >= 0.4.2; take both from GitHub by tag until they are on
+  rubygems. The suite's own runs: the default bundle (chats 0.5.0 from
+  `vendor/cache`) and `gemfiles/chats_0.4.2.gemfile`, both in CI.
 
 ## [0.3.2] - Unreleased
 

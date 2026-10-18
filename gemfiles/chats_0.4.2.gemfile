@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+# The suite against chats 0.4.2, the floor of support_desk's constraint (>= 0.4.2, < 1.0). The
+# default bundle runs chats 0.5.0 from vendor/cache; this one takes 0.4.2 from GitHub by tag until
+# it is on rubygems. CI runs both (.github/workflows/test.yml, the chats-0.4.2 leg).
+#
+#   BUNDLE_GEMFILE=gemfiles/chats_0.4.2.gemfile bundle install
+#   BUNDLE_GEMFILE=gemfiles/chats_0.4.2.gemfile bundle exec rake test
+
+eval_gemfile File.expand_path("../Gemfile", __dir__)
+
+gem "chats", github: "rameerez/chats", tag: "v0.4.2"

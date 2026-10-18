@@ -123,6 +123,8 @@ class ReplyPromiseTest < ActiveSupport::TestCase
         ticket = ticket_for(@alice, topic: :other, message: "Hello")
 
         assert_equal 0, ticket.conversation.participant_for(@alice).reload.unread_count
+        # Her receipt is hers: the case she opened is still news on the desk's side.
+        assert_predicate ticket.conversation.participant_for(ticket.desk).reload, :unread?
       end
     end
   end
