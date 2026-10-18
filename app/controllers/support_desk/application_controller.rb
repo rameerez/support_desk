@@ -81,10 +81,13 @@ module SupportDesk
       respond_to?(:chats) ? chats : Chats::Engine.routes.url_helpers
     end
 
-    # Where a case is read and answered: its chats conversation, never a
-    # second thread UI of our own.
+    # Where a case is read and answered: its chats conversation, in the
+    # chats inbox (`thread_page = :chats`) or on this engine's ticket page
+    # (`:support`). Never a second thread UI of our own: that page renders
+    # chats' thread.
     def conversation_path_for(ticket)
       return root_path if ticket.conversation.nil?
+      return ticket_path(ticket.reference) if SupportDesk.config.support_thread_page?
 
       chats_routes.conversation_path(ticket.conversation)
     end

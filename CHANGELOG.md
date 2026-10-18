@@ -4,6 +4,50 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Support apart from the inbox.** `config.thread_page = :support` reads a
+  case on the engine's own page, `/support/tickets/T-AB12CD`, which renders
+  chats' thread template (same bubbles, composer and realtime) with its way
+  back leading to the support list. `support_thread_path`, the list rows and
+  the redirect after opening a case follow the setting. The default,
+  `:chats`, is unchanged. A third Hotwire Native rule pushes the ticket page
+  under `:support`.
+- **A requester's own case always opens through chats.** chats (>= 0.4.1)
+  finds every thread and composer request through `viewer.chats`, which
+  applies the host's `inbox_scope`; a host keeping support out of its inbox
+  would 404 its requesters inside their own cases. The engine prepends a
+  fallback to `Chats::ApplicationController#find_conversation`
+  (`SupportDesk::ConversationAccess`): a miss is looked for once more among
+  the viewer's own cases, by participation and blocks, without the listing
+  scope. Nothing else the scope hides becomes reachable.
+- **`acknowledgement`**, a desk setting: the system line posted right under a
+  requester's first message, in the same transaction. Same values and
+  interpolations as `opening_line`; nil by default, and the gem ships
+  `support_desk.thread.acknowledgement` to opt into.
+- `SupportDesk.humanize_promise` and `DeskConfiguration#reply_promise`: the
+  promise in the unit the desk wrote it in, from the new
+  `support_desk.durations.*` keys.
+- `support_desk.thread.closed_notice` can interpolate `%{reply_within}`,
+  `%{desk}` and `%{label}`.
+
+### Changed
+
+- The answer promise (`support_reply_promise`, the wizard's line, and
+  `%{reply_within}` in every line) is now said in the unit `reply_within`
+  was configured in: `24.hours` reads "24 hours" where it read "1 day", and
+  `8.hours` reads "8 hours" where it read "about 8 hours". A duration of more
+  than one unit, or a fractional one, reads as before. Waits in the console
+  are unchanged.
+
+### Compatibility
+
+- Verified against chats 0.4.2 as well as the locked 0.3.2: the whole suite
+  passes on both, except the tripwire that compares the dummy's chats
+  migration with the installed chats' template (the dummy copies 0.3.2's).
+
 ## [0.3.2] - Unreleased
 
 ### Fixed

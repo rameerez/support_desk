@@ -61,6 +61,18 @@ SupportDesk.configure do |config|
   # screen, so a logged-out visitor meets YOUR login flow.
   #
   # config.authenticate_method = :authenticate_user!
+  #
+  # Where a case is read:
+  #   :chats    in the chats inbox's own thread (/messages/:id), with the
+  #             desk as one grouped row there
+  #   :support  on this engine's own page (/support/tickets/T-AB12CD): a
+  #             support area of its own, for a host that keeps support out
+  #             of the inbox (`inbox_entry = :never`, and a chats
+  #             `inbox_scope` that leaves SupportDesk::Ticket conversations
+  #             out). The thread is still chats': its bubbles, composer and
+  #             realtime, on a page whose way back leads here.
+  #
+  # config.thread_page = :chats
 
   # ==========================================================================
   # THE DESK
@@ -135,6 +147,13 @@ SupportDesk.configure do |config|
   # config.opening_line = "Has abierto una conversación sobre «%{label}». Te contestamos aquí."
   # config.opening_line_from_support = "%{desk} ha abierto esta conversación contigo sobre «%{label}»."
   #
+  # The line posted right UNDER a requester's first message ("Thanks, we got
+  # it. We usually reply in under 72 hours."): the answer to "did that go
+  # through?", before anybody has read it. Same values and interpolations as
+  # the opening line; nil (the default) posts nothing. The gem ships one:
+  #
+  # config.acknowledgement = :"support_desk.thread.acknowledgement"
+  #
   # What a requester writing into a closed ticket does:
   #   :reopen_on_reply  the case comes back (no wall, no dead end)
   #   :locked           the composer is replaced by a notice
@@ -143,7 +162,8 @@ SupportDesk.configure do |config|
   #
   # The answer promise: the SLA breach threshold AND the line requesters are
   # shown when they write ("normalmente en menos de 24 h"). One setting, one
-  # truth. `at_risk_after` is the earlier, softer warning for the queue.
+  # truth, said in the unit you write it in (72.hours reads "72 hours").
+  # `at_risk_after` is the earlier, softer warning for the queue.
   #
   # config.reply_within = 24.hours
   # config.at_risk_after = 4.hours

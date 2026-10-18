@@ -1,0 +1,8 @@
+<%# One case, read where support lives (`config.thread_page = :support`).
+
+    It is chats' thread: the same template, so the same bubbles, composer,
+    read state and live updates as every conversation in the app, with the
+    desk's verified name in its header. Only the way back differs: its
+    `root_path` is this engine's, the support list (SupportDesk::ThreadHelper).
+    Eject this file to put anything of your own around it. %>
+<%= render template: "chats/conversations/show" %>

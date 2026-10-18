@@ -150,6 +150,13 @@ module SupportDesk
       # needed to load the class.
       _assistant = SupportDesk::Assistant
 
+      # A requester's own case opens through chats whatever the host's
+      # `inbox_scope` lists (SupportDesk::ConversationAccess). Here and not in
+      # an initializer because both classes reload: a reloaded chats
+      # controller is a new class, and it needs the seam again.
+      chats_controller = Chats::ApplicationController
+      chats_controller.prepend(SupportDesk::ConversationAccess) unless chats_controller < SupportDesk::ConversationAccess
+
       SupportDesk.config.validate_classes! if SupportDesk.configured?
     end
   end

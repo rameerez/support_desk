@@ -42,6 +42,19 @@ class NativePathRulesTest < ActiveSupport::TestCase
     assert_equal true, SupportDesk.native_path_rules(mount: "/support").first[:properties][:pull_to_refresh_enabled]
   end
 
+  test "under thread_page = :support the ticket page is a pushed screen too" do
+    SupportDesk.config.thread_page = :support
+    rules = SupportDesk.native_path_rules(mount: "/support")
+    pattern = Regexp.new(rules.last[:patterns].first)
+
+    assert_equal 3, rules.size
+    assert_equal false, rules.last[:properties][:pull_to_refresh_enabled]
+    assert_match pattern, "/support/tickets/T-AB12CD"
+    assert_match pattern, "/support/tickets/T-AB12CD?from=email"
+    assert_no_match pattern, "/support/tickets/T-AB12CD/request_human"
+    assert_no_match pattern, "/support/new"
+  end
+
   test "a regex-flavoured mount point is escaped, not interpolated" do
     pattern = Regexp.new(SupportDesk.native_path_rules(mount: "/a.b").first[:patterns].first)
 

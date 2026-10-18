@@ -16,6 +16,11 @@ module SupportDesk
     before_action :set_wizard, only: %i[new create]
     include Chats::SendRateLimited
 
+    # The ticket page renders chats' thread template, which names chats'
+    # routes bare (SupportDesk::ThreadHelper) and asks for these two.
+    helper SupportDesk::ThreadHelper
+    helper_method :chats_current_messager, :chats_counterpart
+
     # Their cases: open ones as rows, closed ones folded away, and the door
     # to open another.
     def index
@@ -67,10 +72,15 @@ module SupportDesk
     end
 
     # A stable URL for a case — what an email or a push notification links
-    # to. The case is READ in its conversation, so this is a redirect and
-    # nothing else.
+    # to. Under `thread_page = :chats` the case is read in the inbox's thread,
+    # so this is a redirect and nothing else. Under `:support` it is the page
+    # the case is read on: chats' own thread, with its back link leading
+    # here rather than to an inbox support is not part of.
     def show
-      redirect_to conversation_path_for(find_ticket)
+      ticket = find_ticket
+      return redirect_to conversation_path_for(ticket) unless SupportDesk.config.support_thread_page? && ticket.conversation
+
+      render_thread(ticket)
     end
 
     # "Prefiero hablar con una persona." The one thing a requester can
@@ -95,6 +105,41 @@ module SupportDesk
     private
 
     def chat_rate_limit_messager = current_requester
+
+    # chats' thread page, rendered here: the same latest page of messages,
+    # the same «new messages» line and the same read on open as
+    # Chats::ConversationsController#show, for chats' own template. Older
+    # pages, the composer and the live updates are chats' endpoints, which
+    # reach this conversation through SupportDesk::ConversationAccess.
+    def render_thread(ticket)
+      @ticket = ticket
+      @conversation = ticket.conversation
+      @participant = @conversation.participant_for(current_requester)
+
+      scope = @conversation.messages.includes(:sender, :reactions)
+      scope = scope.with_attached_files if scope.respond_to?(:with_attached_files)
+      page = scope.recent_first.limit(Chats.config.messages_per_page + 1).to_a
+      @more_messages = page.size > Chats.config.messages_per_page
+      @messages = page.first(Chats.config.messages_per_page).reverse
+
+      if @participant&.unread?
+        @first_unread_id = @participant.unread_messages.where(id: @messages.map(&:id)).oldest_first.pick(:id) ||
+                           @messages.first&.id
+      end
+      # A pointer resting on a link (Turbo's hover prefetch) is not somebody
+      # reading the case; the visit that follows reads it.
+      @participant&.read! unless prefetch_request?
+
+      render :show
+    end
+
+    def prefetch_request?
+      request.headers["X-Sec-Purpose"] == "prefetch" || request.headers["Sec-Purpose"].to_s.include?("prefetch")
+    end
+
+    # What chats' thread template asks its controller for.
+    def chats_current_messager = current_requester
+    def chats_counterpart = @conversation&.counterpart_for(current_requester)
 
     def set_wizard
       @wizard = SupportDesk::Wizard.new(current_requester, params)

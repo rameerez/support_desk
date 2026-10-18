@@ -192,6 +192,19 @@ module SupportDesk
         find_by(conversation_id: conversation.id)
       end
 
+      # The conversation behind one of +requester+'s own cases, by id, while
+      # they still hold its seat — or nil. What chats falls back to when the
+      # host's `inbox_scope` keeps support out of the inbox (see
+      # SupportDesk::ConversationAccess): participation is what makes a
+      # conversation theirs to read, and the inbox is only where it is listed.
+      def requester_conversation(requester, id)
+        return nil unless requester.respond_to?(:support_tickets) && id.present?
+
+        Chats::Conversation.inbox_for(requester)
+                           .where(id: requester.support_tickets.select(:conversation_id))
+                           .find_by(id: id)
+      end
+
       # Open a ticket and post its first message. Usually called as
       # `requester.ask_support!(…)` — or, when the desk writes first, as
       # `agent.open_support_conversation_with!(…)`. This is the seam under
@@ -621,6 +634,7 @@ module SupportDesk
         ticket.send(:record_registration!, posted) if posted
         ticket.send(:stamp_assistant_action!) if by_support && SupportDesk.ai_actor?(by)
         pin_opening_lines!(ticket, notices, posted)
+        post_acknowledgement!(ticket, posted) if posted && !by_support
         ticket
       end
 
@@ -629,6 +643,23 @@ module SupportDesk
         return nil if line.blank?
 
         ticket.conversation.post_system_message!(line)
+      end
+
+      # The desk's acknowledgement, right under the requester's first message
+      # and in the same transaction, so "did that go through?" is answered by
+      # the very commit that made it so. Pinned one tick AFTER the message
+      # whenever the clock did not move between the two inserts (the same tie
+      # `pin_opening_lines!` breaks the other way), and it is then the
+      # conversation's last message: what a list row previews.
+      def post_acknowledgement!(ticket, posted)
+        line = ticket.desk_config.acknowledgement_for(ticket)
+        return if line.blank?
+
+        notice = ticket.conversation.post_system_message!(line)
+        return if notice.created_at > posted.created_at
+
+        notice.update_columns(created_at: posted.created_at + ordering_tick)
+        ticket.conversation.recompute_last_message!
       end
 
       # chats orders a transcript by (created_at, id), and inserting one row
@@ -724,7 +755,7 @@ module SupportDesk
     def chat_locked_notice
       return I18n.t("support_desk.thread.unavailable_notice") if requester_unavailable?
 
-      I18n.t("support_desk.thread.closed_notice")
+      I18n.t("support_desk.thread.closed_notice", **desk_config.line_interpolations(self))
     end
 
     # Whether the person this case belongs to can be written to at all right

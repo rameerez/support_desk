@@ -20,6 +20,18 @@ class ConfigurationTest < ActiveSupport::TestCase
     assert_match(/can't be blank/, error.message)
   end
 
+  test "thread_page is :chats or :support, and nothing else gets past assignment" do
+    assert_equal :chats, @config.thread_page
+    assert_not @config.support_thread_page?
+
+    @config.thread_page = "support"
+    assert_equal :support, @config.thread_page
+    assert_predicate @config, :support_thread_page?
+
+    error = assert_raises(SupportDesk::ConfigurationError) { @config.thread_page = :inbox }
+    assert_match(/thread_page must be one of :chats, :support/, error.message)
+  end
+
   # --- Desk settings -----------------------------------------------------------
 
   test "top level setters configure the default desk" do
@@ -141,7 +153,8 @@ class ConfigurationTest < ActiveSupport::TestCase
     end
     ticket = alice.ask_support!("hola")
 
-    assert_equal "Sobre «Something else»: Soporte responde en menos de 1 day.",
+    # The promise in the unit it was written in (SupportDesk.humanize_promise).
+    assert_equal "Sobre «Something else»: Soporte responde en menos de 24 hours.",
                  ticket.desk_config.opening_line_for(ticket)
     assert_equal ticket.messages.oldest_first.first.body, ticket.desk_config.opening_line_for(ticket)
   end

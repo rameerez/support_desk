@@ -153,6 +153,7 @@ configuration mistake is a boot failure, never a 3 a.m. `NoMethodError`.
 | `current_agent_method` | `:current_user` | how the console finds the person answering (or define `current_agent` in your controller) |
 | `authenticate_method` | `:authenticate_user!` | your own filter, run before every requester screen |
 | `visible_desks_for` | `nil` (every desk) | `->(agent) { … }` returning the desks this agent may work; scopes the whole console |
+| `thread_page` | `:chats` | where a requester reads a case: `:chats` (its thread in the chats inbox) or `:support` (this engine's own ticket page, for support kept apart from the inbox; see [Support apart from the inbox](#support-apart-from-the-inbox)) |
 | `authorize_console` | `nil` (allow) | `->(agent, ticket, action) { … }`; asked before every console action, `ticket` is nil for `index`, `new`, `next` and `open_conversation`; a hook that raises **denies** |
 | `assistant(key) { … }` | — | declare an assistant (see [Assistants](#-assistants)); `config.assistants`, `config.assistant?(key)` read them back |
 | `default_assistant` | the only one declared | which assistant the `:default` desk gets when more than one exists |
@@ -185,7 +186,7 @@ SupportDesk.desk(:billing)  # another one (nil if nobody configured it)
 | `reply_policy` | `:anyone` | `:anyone` (a drop-in posts, signed; an unheld case is taken by whoever answers) · `:take_over` (replying reassigns) · `:assignee_only` (raises `NotAllowed`) |
 | `announce_assignments` | `:first_only` | `:first_only` ("Lucía is taking care of your request" once) · `:always` (hand-offs too) · `:never` |
 | `closed_tickets` | `:reopen_on_reply` | `:reopen_on_reply` (a requester writing reopens the case) · `:locked` (composer replaced by a notice) |
-| `reply_within` | `24.hours` | the SLA breach threshold **and** the promise the requester reads |
+| `reply_within` | `24.hours` | the SLA breach threshold **and** the promise the requester reads, said in the unit you write it in (`72.hours` reads "72 hours") |
 | `at_risk_after` | `4.hours` | when a waiting case starts showing as at risk |
 | `open_rate_limit` | `{ to: 5, within: 1.hour }` | how often one requester may **ask**; `nil` disables. Counts only cases the requester opened |
 | `max_open_tickets` | `5` | how many cases one requester may have open; `nil` disables. Same rule |
@@ -195,6 +196,7 @@ SupportDesk.desk(:billing)  # another one (nil if nobody configured it)
 | `auto_close_after` | `nil` | reserved for the sweep job: a duration after which an answered case closes itself |
 | `opening_line` | `nil` | the system line a requester-opened thread starts with (see [Writing first](#writing-first)) |
 | `opening_line_from_support` | the gem's I18n copy | the same line for a case the desk opened |
+| `acknowledgement` | `nil` | the system line posted right under a requester's first message ("Thanks, we got it…"; see [Writing first](#the-line-a-thread-opens-with)) |
 | `find_requester { \|query\| … }` | `nil` | how a console turns what an agent typed into a requester record |
 
 `SupportDesk.doctor.print` checks all of it against a running app (see
@@ -410,7 +412,7 @@ mount SupportDesk::Engine => "/support"   # CarHey mounts it at "/messages/suppo
 | `GET /support` | their cases — open ones as chats rows, closed ones folded away, and the door into a new one |
 | `GET /support/new` | the wizard: pick a topic, pick the thing, write. One URL, three Turbo frames |
 | `POST /support/tickets` | `ask_support!`, then straight into the conversation |
-| `GET /support/tickets/:id` | a stable URL for a case (`/support/tickets/T-AB12CD` works too), redirecting to its thread |
+| `GET /support/tickets/:id` | a stable URL for a case (`/support/tickets/T-AB12CD` works too): a redirect to its thread, or the page it is read on under `thread_page = :support` |
 
 The screens inherit `config.parent_controller`, so your layout, your
 authentication (`config.authenticate_method`) and your locale switching all
@@ -440,6 +442,48 @@ door in its place (`config.inbox_entry = :always | :when_tickets | :never`) —
 a support entry that only exists once you already have a ticket is
 undiscoverable.
 
+### Support apart from the inbox
+
+Some products want support to be a place of its own: a Support button that
+leads to the person's cases, rather than an official row among their
+conversations. Three settings say so:
+
+```ruby
+# config/initializers/support_desk.rb
+config.thread_page = :support     # a case is read at /support/tickets/T-AB12CD
+config.inbox_entry = :never       # no door in the chats inbox
+
+# config/initializers/chats.rb: support conversations out of the inbox, the unread badge and everything else that lists
+config.inbox_scope = ->(relation, _viewer) {
+  relation.where(subject_type: nil).or(relation.where.not(subject_type: "SupportDesk::Ticket"))
+}
+```
+
+(`subject_type: nil` keeps the conversations that are about nothing, which is
+most of them: `where.not` alone would hide those too.)
+
+The ticket page **is chats' thread**: the engine renders chats' own template,
+so the bubbles, the composer, read state, typing and realtime are the ones
+every other conversation has, with the desk's verified name in the header.
+Only the way back differs: it leads to the support list. Older pages, the
+composer and the live updates still go to chats' endpoints.
+
+Those endpoints find a conversation through `viewer.chats`, which applies the
+host's `inbox_scope` (chats >= 0.4.1), so a scope that keeps support out of
+the inbox would also keep a requester out of their own case. The engine
+prepends one fallback to chats' `find_conversation`
+(`SupportDesk::ConversationAccess`): a conversation chats cannot find is
+looked for once more among the viewer's **own** cases, through the same
+participation and block rules (`Chats::Conversation.inbox_for`) without the
+listing scope. Nobody gains a conversation they are not seated in, and
+anything else the scope hides stays a 404.
+
+Links follow the setting: `support_thread_path`, the list's rows and the
+redirect after a case is opened all lead to the ticket page, by reference.
+Telling the requester an answer arrived is then yours, since the chats
+badge no longer counts it: subscribe to `agent_replied` (see [Events](#events))
+and link the notification to `support_desk.ticket_path(ticket.reference)`.
+
 Hotwire Native hosts merge the engine's path rules into their own, AFTER any
 rule that could swallow them:
 
@@ -462,7 +506,7 @@ URL, so the back gesture and cold-boot deep links work.
 | `link_to_support(about:, text:, **html)` | the door into the wizard (nothing when there is nobody to ask, or nothing they may ask about) |
 | `support_unread_badge` | unread support messages, counted against the chats read horizon |
 | `support_desk_styles` | the bundled stylesheet tag for your `<head>` |
-| `support_reply_promise` | "We usually reply in under 24 hours", from `reply_within` |
+| `support_reply_promise` | "We usually reply in under 24 hours", from `reply_within` (also `SupportDesk.config.desk(key).reply_promise`) |
 | `support_ticket_state(ticket)` | "We're on it" · "We replied" · "We wrote to you" · "Closed" |
 | `support_inbox_door?(viewer)` | whether the inbox should show the door instead of a row (`inbox_entry`) |
 | `support_desk_record(key)`, `support_desk_avatar`, `support_desk_badge` | the desk as a counterpart: record, avatar (initials fallback), verified badge |
@@ -681,6 +725,27 @@ a block given the ticket, or nil. `opening_line` defaults to nil, so
 existing threads open exactly as they do today; `opening_line_from_support`
 has the gem's own copy as its default, because a message from a desk
 somebody never wrote to has to explain itself.
+
+And one line goes **under** the first message, for a case the requester
+opened: the answer to "did that go through?", posted in the same
+transaction, before anybody on the desk has read it.
+
+```ruby
+config.acknowledgement = :"support_desk.thread.acknowledgement"
+# => "Thanks, we got it. We usually reply in under 72 hours."
+```
+
+Same values and interpolations as the opening lines, nil by default. It
+never moves the clocks (it is a system message), it is pinned one database
+tick after the message when the clock did not move between the two inserts,
+and it is then the conversation's last message, which is what a list row
+previews. A reply into a case already open is not acknowledged again.
+
+`%{reply_within}` is the promise in the unit it was configured in
+(`SupportDesk.humanize_promise`: `72.hours` is "72 hours", never "3 days"),
+from `support_desk.durations.*`. The closed notice
+(`support_desk.thread.closed_notice`) takes the same three interpolations,
+so a locked case can say how soon a new one will be answered.
 
 ### From the console
 
@@ -1674,7 +1739,8 @@ SupportDesk.find_topic("billing/invoice")
 SupportDesk.on(event, key: nil) { … }  SupportDesk.off(event, key)
 SupportDesk.doctor
 SupportDesk.native_path_rules(mount:, title:)   # Hotwire Native path rules for the requester screens
-SupportDesk.humanize_duration(24.hours)          # "1 day", in the reader's language
+SupportDesk.humanize_duration(24.hours)          # "1 day", in the reader's language (a wait: rounded)
+SupportDesk.humanize_promise(72.hours)           # "72 hours" (a promise: in the unit it was made in)
 SupportDesk.actor_key(record)                    # a stable key for an actor (GlobalID param); what event payloads store
 SupportDesk.requester_class?(klass)  .supportable_class?(klass)  .agent_class?(klass)
 SupportDesk.eligible?(record, condition)         # how both macros read their `if:`

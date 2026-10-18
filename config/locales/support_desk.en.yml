@@ -14,12 +14,36 @@ en:
       closed_notice: "This conversation is closed. Start a new one if you need anything else."
       reopened_notice: "We reopened this conversation."
       promise: "We usually reply in under %{time}"
+      acknowledgement: "Thanks, we got it. We usually reply in under %{reply_within}."
       opened_by_support: "%{desk} opened this conversation with you about “%{label}”. You can reply right here."
       unavailable_notice: "This account can no longer send or receive messages. The conversation stays here to read."
       human_door: "I’d rather talk to a person"
       human_requested_notice: "Done. Somebody from the team will take it from here."
       handled_by_assistant: "Handled by %{name}"
       handled_by_humans: "Somebody from the team will take it from here"
+    # The answer promise, in the unit the desk wrote it in (SupportDesk.humanize_promise).
+    durations:
+      seconds:
+        one: "1 second"
+        other: "%{count} seconds"
+      minutes:
+        one: "1 minute"
+        other: "%{count} minutes"
+      hours:
+        one: "1 hour"
+        other: "%{count} hours"
+      days:
+        one: "1 day"
+        other: "%{count} days"
+      weeks:
+        one: "1 week"
+        other: "%{count} weeks"
+      months:
+        one: "1 month"
+        other: "%{count} months"
+      years:
+        one: "1 year"
+        other: "%{count} years"
     transcript:
       deleted: "[message deleted]"
     notifications:
