@@ -69,9 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires chats >= 0.5.1; take both from GitHub by tag until they are on
   rubygems. (The old `~> 0.3, >= 0.3.2` already admitted 0.4 and 0.5: `~> 0.3`
   is `>= 0.3, < 1.0`.) 0.5.1 brings the lookup seam the access to a
-  requester's own case is built on; the whole suite runs on it, from the
-  reviewed package in `vendor/cache`. The dummy app's chats migration is
-  chats' current install template.
+  requester's own case is built on. The whole suite runs on chats 0.5.1, the
+  reviewed package in `vendor/cache` built from tag v0.5.1 (6159ea1). The
+  chats 0.4.2 CI leg is gone: the constraint no longer admits it. The dummy
+  app's chats migration is chats' current install template.
 
 ## [0.3.2] - Unreleased
 
