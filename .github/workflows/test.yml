@@ -73,7 +73,9 @@ jobs:
 
       - name: Assert the chats under test
         working-directory: support_desk
-        run: bundle exec ruby -e 'require "chats/version"; abort("CI tests chats #{ENV.fetch("CHATS_VERSION_UNDER_TEST")}, resolved #{Chats::VERSION}") unless Chats::VERSION == ENV.fetch("CHATS_VERSION_UNDER_TEST")'
+        # A block scalar: in a plain YAML scalar ` #` starts a comment and cuts the command short.
+        run: |
+          bundle exec ruby -e 'require "chats/version"; expected = ENV.fetch("CHATS_VERSION_UNDER_TEST"); puts "chats resolved: " + Chats::VERSION + " (expected " + expected + ")"; abort("CI tests chats " + expected + ", but resolved " + Chats::VERSION) unless Chats::VERSION == expected'
 
       - name: Prepare database and run tests
         working-directory: support_desk
@@ -138,7 +140,9 @@ jobs:
 
       - name: Assert the chats under test
         working-directory: support_desk
-        run: bundle exec ruby -e 'require "chats/version"; abort("CI tests chats #{ENV.fetch("CHATS_VERSION_UNDER_TEST")}, resolved #{Chats::VERSION}") unless Chats::VERSION == ENV.fetch("CHATS_VERSION_UNDER_TEST")'
+        # A block scalar: in a plain YAML scalar ` #` starts a comment and cuts the command short.
+        run: |
+          bundle exec ruby -e 'require "chats/version"; expected = ENV.fetch("CHATS_VERSION_UNDER_TEST"); puts "chats resolved: " + Chats::VERSION + " (expected " + expected + ")"; abort("CI tests chats " + expected + ", but resolved " + Chats::VERSION) unless Chats::VERSION == expected'
 
       - name: Prepare database
         working-directory: support_desk
@@ -180,7 +184,9 @@ jobs:
 
       - name: Assert the chats under test
         working-directory: support_desk
-        run: bundle exec ruby -e 'require "chats/version"; abort("CI tests chats #{ENV.fetch("CHATS_VERSION_UNDER_TEST")}, resolved #{Chats::VERSION}") unless Chats::VERSION == ENV.fetch("CHATS_VERSION_UNDER_TEST")'
+        # A block scalar: in a plain YAML scalar ` #` starts a comment and cuts the command short.
+        run: |
+          bundle exec ruby -e 'require "chats/version"; expected = ENV.fetch("CHATS_VERSION_UNDER_TEST"); puts "chats resolved: " + Chats::VERSION + " (expected " + expected + ")"; abort("CI tests chats " + expected + ", but resolved " + Chats::VERSION) unless Chats::VERSION == expected'
 
       - name: Lint
         working-directory: support_desk

@@ -159,6 +159,19 @@ class SupportThreadPageTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  test "a case mislinked to a group about that very case is no case page, even where the host's inbox lists it" do
+    Chats.config.inbox_scope = ->(relation, _viewer) { relation } # the group is in her inbox
+    group = Chats::Conversation.create!(kind: "group", title: "About the case", subject: @ticket)
+    group.add_participant!(@alice)
+    group.add_participant!(create_user(name: "Bob"))
+    @ticket.update_columns(conversation_id: group.id)
+    login_as @alice
+
+    get "/messages/support/tickets/#{@ticket.reference}"
+
+    assert_response :not_found
+  end
+
   test "owning the case is not enough once the seat in its conversation is gone" do
     @ticket.conversation.participant_for(@alice).update_columns(left_at: Time.current)
     login_as @alice

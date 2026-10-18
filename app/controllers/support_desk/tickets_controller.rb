@@ -139,12 +139,15 @@ module SupportDesk
     # `find_conversation` on a chats controller bound to this request, so
     # every rule the host or a product gem added there (its lookup scopes, its
     # own `find_conversation`) decides here exactly as at the chats URL. Then
-    # it must be this very case's conversation. A 404 otherwise, never a hint.
+    # it must be this very case's conversation: direct, about this case (the
+    # rule Ticket.conversations_of holds the chats lookup to). A 404
+    # otherwise, never a hint.
     def chats_conversation(ticket)
       lookup = Chats::ApplicationController.new
       lookup.set_request!(request)
       conversation = lookup.send(:find_conversation, ticket.conversation_id)
-      raise ActiveRecord::RecordNotFound unless conversation.subject_type == ticket.class.polymorphic_name &&
+      raise ActiveRecord::RecordNotFound unless conversation.direct? &&
+                                                conversation.subject_type == ticket.class.polymorphic_name &&
                                                 conversation.subject_id.to_s == ticket.id.to_s
 
       conversation
