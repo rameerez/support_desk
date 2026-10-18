@@ -10,18 +10,6 @@ require "test_helper"
 # so the ticket page is /messages/support/tickets/T-…, and chats' endpoints
 # the thread posts to are /messages/:id/….
 class SupportThreadPageTest < ActionDispatch::IntegrationTest
-  # chats 0.4.1 made `Messager#chats` apply `config.inbox_scope`, which is
-  # what hides a case from its own requester and what the fallback exists
-  # for. The suite's own chats may predate it, so on an older one these
-  # examples ask for 0.4.1's behaviour explicitly: the same host, either way.
-  module InboxScopedChats
-    def chats
-      relation = super
-      Chats.config.inbox_scope.call(relation, self) || relation
-    end
-  end
-  User.prepend(InboxScopedChats) if Gem::Version.new(Chats::VERSION) < Gem::Version.new("0.4.1")
-
   # What a host writes to keep support out of its inbox: a conversation about
   # nothing (a DM) has a NULL subject, so `where.not` alone would hide it too.
   WITHOUT_SUPPORT = lambda do |relation, _viewer|
@@ -97,10 +85,11 @@ class SupportThreadPageTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "a layer that refuses a case on purpose is final, whatever order it was added in" do
+  test "a layer of the host's that refuses a case on purpose is final" do
     controller = Chats::ApplicationController
-    original = controller.instance_method(:find_conversation).super_method
-    # Below the access seam: the class's own method, as a host's class_eval would leave it.
+    original = controller.instance_method(:find_conversation)
+    # The host's own find_conversation, as a class_eval would leave it: support_desk only adds a
+    # lookup scope, so whatever this decides stands.
     controller.define_method(:find_conversation) do |id = params[:id]|
       raise ActiveRecord::RecordNotFound if SupportDesk::Ticket.exists?(conversation_id: id)
 
@@ -116,6 +105,17 @@ class SupportThreadPageTest < ActionDispatch::IntegrationTest
   ensure
     controller.define_method(:find_conversation, original)
     controller.send(:private, :find_conversation)
+  end
+
+  test "the access is a lookup scope chats asks after its own, and nothing else" do
+    login_as @alice
+    get "/messages/#{@ticket.conversation_id}"
+    assert_response :success
+    scopes = @controller.send(:conversation_lookup_scopes)
+
+    assert_equal 2, scopes.size
+    assert_equal @ticket.conversation, scopes.last.find_by(id: @ticket.conversation_id)
+    assert_nil scopes.first.find_by(id: @ticket.conversation_id), "precondition: the host's inbox hides it"
   end
 
   test "a case mislinked to a group or to another conversation opens nothing" do

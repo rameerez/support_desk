@@ -468,15 +468,17 @@ every other conversation has, with the desk's verified name in the header.
 Only the way back differs: it leads to the support list. Older pages, the
 composer and the live updates still go to chats' endpoints.
 
-Those endpoints find a conversation through `viewer.chats`, which applies the
-host's `inbox_scope` (chats >= 0.4.1), so a scope that keeps support out of
-the inbox would also keep a requester out of their own case. The engine
-prepends one fallback to chats' `find_conversation`
-(`SupportDesk::ConversationAccess`): a conversation chats cannot find is
-looked for once more among the viewer's **own** cases, through the same
-participation and block rules (`Chats::Conversation.inbox_for`) without the
-listing scope. Nobody gains a conversation they are not seated in, and
-anything else the scope hides stays a 404.
+Those endpoints find a conversation through the relations chats'
+`conversation_lookup_scopes` returns (chats >= 0.5.1), by default the viewer's
+inbox with the host's `inbox_scope` applied, so a scope that keeps support out
+of the inbox would also keep a requester out of their own case. The engine
+adds one relation after chats' own (`SupportDesk::ConversationAccess`): the
+viewer's **own** cases (`SupportDesk::Ticket.conversations_of`), through the
+same participation and block rules (`Chats::Conversation.inbox_for`) without
+the listing scope, each a direct conversation whose subject is that very
+case. Nobody gains a conversation they are not seated in, anything else the
+scope hides stays a 404, and a host's own `find_conversation` that refuses a
+case still refuses it.
 
 Links follow the setting: `support_thread_path`, the list's rows and the
 redirect after a case is opened all lead to the ticket page, by reference.
@@ -1758,14 +1760,7 @@ SupportDesk::VERSION
 
 After checking out the repo, run `bundle install`, then `bundle exec rake ci`. The dummy app lives in `test/dummy` and mounts all three surfaces the way a real host does: the requester engine at `/messages/support`, `chats` at `/messages`, and the turnkey console at `/admin/support` — plus the same console again inside a host-owned `madmin` namespace, because "the console uses only the public API" is a claim that needs a second implementation to be worth anything.
 
-`chats` is the kernel this gem is a product on and the two are developed in lockstep. support_desk requires `chats >= 0.4.2, < 1.0`. Until those versions are on rubygems, the default bundle takes the reviewed chats 0.5.0 package from `vendor/cache` (built from tag v0.5.0; provenance and checksum in `vendor/cache/README.md`), and `gemfiles/chats_0.4.2.gemfile` runs the suite against the floor, 0.4.2, taken from GitHub by tag:
-
-```bash
-bundle exec rake ci                                                     # chats 0.5.0
-BUNDLE_GEMFILE=gemfiles/chats_0.4.2.gemfile bundle exec rake test      # chats 0.4.2
-```
-
-CI runs both. There is no sibling checkout to keep in step.
+`chats` is the kernel this gem is a product on and the two are developed in lockstep. support_desk requires `chats >= 0.5.1, < 1.0`. Until that is on rubygems, the bundle takes the reviewed chats package from `vendor/cache` (provenance and checksum in `vendor/cache/README.md`), so `bundle exec rake ci` needs no network and no sibling checkout.
 
 ## Contributing
 

@@ -15,14 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the redirect after opening a case follow the setting. The default,
   `:chats`, is unchanged. A third Hotwire Native rule pushes the ticket page
   under `:support`.
-- **A requester's own case always opens through chats.** chats (>= 0.4.1)
-  finds every thread and composer request through `viewer.chats`, which
-  applies the host's `inbox_scope`; a host keeping support out of its inbox
-  would 404 its requesters inside their own cases. The engine prepends a
-  fallback to `Chats::ApplicationController#find_conversation`
-  (`SupportDesk::ConversationAccess`): a miss is looked for once more among
-  the viewer's own cases, by participation and blocks, without the listing
-  scope. Nothing else the scope hides becomes reachable.
+- **A requester's own case always opens through chats.** chats finds every
+  thread and composer request through `viewer.chats`, which applies the
+  host's `inbox_scope`; a host keeping support out of its inbox would 404 its
+  requesters inside their own cases. The engine adds the viewer's own cases
+  to chats' `conversation_lookup_scopes` (`SupportDesk::ConversationAccess`,
+  `SupportDesk::Ticket.conversations_of`): by participation and blocks,
+  without the listing scope, each a direct conversation whose subject is that
+  very case. Nothing else the scope hides becomes reachable.
 - **`acknowledgement`**, a desk setting: the system line posted right under a
   requester's first message, in the same transaction, and read for them as
   it is posted (a receipt for their own words is never news). Same values and
@@ -49,11 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `SupportDesk::ConversationAccess` takes over chats' own lookup miss only (a
-  RecordNotFound for Chats::Conversation with that id, about a conversation
-  the viewer's `chats` does not hold): another layer of `find_conversation`
-  that refuses a case is final whatever the prepend order. The contract is in
-  the module's comment.
+- `SupportDesk::ConversationAccess` adds a requester's own cases as a lookup
+  scope (`conversation_lookup_scopes`, chats 0.5.1) instead of rescuing chats'
+  404: no exception is inspected, and a host's own `find_conversation` that
+  refuses a case is final.
 - The access fallback and the ticket page require the case and its
   conversation to point at each other (a direct conversation whose subject is
   that case): a ticket mislinked to a group or to another conversation opens
@@ -67,17 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Compatibility
 
-- chats `>= 0.4.2, < 1.0` (it was `~> 0.3, >= 0.3.2`, which already admitted
-  0.4 and 0.5: `~> 0.3` is `>= 0.3, < 1.0`). The floor is honest now: the
-  support page and its access seam are built for chats that applies
-  `inbox_scope` inside `Messager#chats` (0.4.1+) and re-runs `can_message` on
-  every send (0.4.2). The whole suite runs on chats 0.5.0 (the default
-  bundle; the reviewed package is in `vendor/cache`, built from tag v0.5.0)
-  and on 0.4.2; the dummy app's chats migration is the 0.4.2/0.5.0 template
-  (identical in both).
-- Requires chats >= 0.4.2; take both from GitHub by tag until they are on
-  rubygems. The suite's own runs: the default bundle (chats 0.5.0 from
-  `vendor/cache`) and `gemfiles/chats_0.4.2.gemfile`, both in CI.
+- Requires chats >= 0.5.1; take both from GitHub by tag until they are on
+  rubygems. (The old `~> 0.3, >= 0.3.2` already admitted 0.4 and 0.5: `~> 0.3`
+  is `>= 0.3, < 1.0`.) 0.5.1 brings the lookup seam the access to a
+  requester's own case is built on; the whole suite runs on it, from the
+  reviewed package in `vendor/cache`. The dummy app's chats migration is
+  chats' current install template.
 
 ## [0.3.2] - Unreleased
 

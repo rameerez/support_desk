@@ -192,24 +192,33 @@ module SupportDesk
         find_by(conversation_id: conversation.id)
       end
 
-      # The conversation behind one of +requester+'s own cases, by id, while
-      # they still hold its seat — or nil. What chats falls back to when the
-      # host's `inbox_scope` keeps support out of the inbox (see
-      # SupportDesk::ConversationAccess): participation is what makes a
-      # conversation theirs to read, and the inbox is only where it is listed.
+      # The conversations behind +requester+'s own cases, while they still
+      # hold its seat: chats' participation and block rules (`inbox_for`),
+      # without the host's `inbox_scope`. Participation is what makes a
+      # conversation theirs to read; the inbox is only where it is listed.
+      # What chats adds to its lookup (SupportDesk::ConversationAccess) and
+      # what the ticket page reads from.
       #
-      # The case and its conversation have to point at each other: a direct
-      # conversation whose subject IS one of this requester's cases, and that
+      # A case and its conversation have to point at each other: a direct
+      # conversation whose subject IS one of this requester's cases, that very
       # case's conversation. A ticket mislinked to a group, or to a
       # conversation about something else, opens nothing.
-      def requester_conversation(requester, id)
-        return nil unless requester.respond_to?(:support_tickets) && id.present?
+      def conversations_of(requester)
+        return Chats::Conversation.none unless requester.respond_to?(:support_tickets)
 
-        cases = requester.support_tickets.where(conversation_id: id)
+        tickets = arel_table
+        conversations = Chats::Conversation.arel_table
+        own_cases = requester.support_tickets.where(tickets[:id].eq(conversations[:subject_id])).select(:conversation_id)
         Chats::Conversation.inbox_for(requester).direct
-                           .where(id: cases.select(:conversation_id))
-                           .where(subject_type: polymorphic_name, subject_id: cases.select(:id))
-                           .find_by(id: id)
+                           .where(subject_type: polymorphic_name)
+                           .where(id: own_cases)
+      end
+
+      # One of them, by id, or nil.
+      def requester_conversation(requester, id)
+        return nil if id.blank?
+
+        conversations_of(requester).find_by(id: id)
       end
 
       # Open a ticket and post its first message. Usually called as

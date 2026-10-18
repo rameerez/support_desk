@@ -49,12 +49,6 @@ jobs:
             gemfile:
               path: gemfiles/rails_8.1.gemfile
               label: rails-8.1
-          # The floor of the chats constraint: the default bundle runs chats 0.5.0 from
-          # vendor/cache, this leg 0.4.2 from GitHub by tag.
-          - ruby_version: "3.4"
-            gemfile:
-              path: gemfiles/chats_0.4.2.gemfile
-              label: chats-0.4.2
 
     env:
       RAILS_ENV: test

@@ -11,7 +11,9 @@ artifact is published. CI sets `BUNDLE_CACHE_PATH` explicitly so appraisal
 Gemfiles share it. There is no path dependency or sibling-repository checkout.
 The gemspec excludes `vendor/`, so this package is not embedded in support_desk.
 
-support_desk requires chats `>= 0.4.2, < 1.0`; the suite also runs against
-0.4.2 (a per-version Gemfile pointing at that tag). Publish chats 0.4.2 and
-0.5.0 before support_desk 0.4.0, which cannot resolve from rubygems until they
-exist there. After publication, removing this cache is optional.
+support_desk requires chats `>= 0.5.1, < 1.0`. **Pending:** this package is
+0.5.0 and is replaced by chats 0.5.1, built from its tag the same way, as soon
+as the tag exists; until then the default bundle cannot resolve, and the suite
+runs against chats main `ae4b1d2` (the merge that 0.5.1 tags). Publish chats
+0.5.1 before support_desk 0.4.0, which cannot resolve from rubygems without it.
+After publication, removing this cache is optional.
