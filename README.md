@@ -478,7 +478,11 @@ same participation and block rules (`Chats::Conversation.inbox_for`) without
 the listing scope, each a direct conversation whose subject is that very
 case. Nobody gains a conversation they are not seated in, anything else the
 scope hides stays a 404, and a host's own `find_conversation` that refuses a
-case still refuses it.
+case still refuses it. support_desk only ever adds a scope beside the host's:
+a host that must refuse a viewer entirely returns no scopes, and then nothing
+opens for them, their cases included. The ticket page asks chats the same
+question (chats' own `find_conversation`), so it never shows what the chats
+URL would refuse.
 
 Links follow the setting: `support_thread_path`, the list's rows and the
 redirect after a case is opened all lead to the ticket page, by reference.

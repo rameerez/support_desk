@@ -113,10 +113,7 @@ module SupportDesk
     # reach this conversation through SupportDesk::ConversationAccess.
     def render_thread(ticket)
       @ticket = ticket
-      # Through the same participation and block rules chats' own endpoints
-      # use: owning the case is not enough once the seat is gone.
-      @conversation = SupportDesk::Ticket.requester_conversation(current_requester, ticket.conversation_id) ||
-                      raise(ActiveRecord::RecordNotFound)
+      @conversation = chats_conversation(ticket)
       @participant = @conversation.participant_for(current_requester)
 
       scope = @conversation.messages.includes(:sender, :reactions)
@@ -136,6 +133,21 @@ module SupportDesk
       @participant&.read!(at: [ Time.current, @messages.last&.created_at ].compact.max) unless prefetch_request?
 
       render :show
+    end
+
+    # The case's conversation, as chats' own endpoints would find it: chats'
+    # `find_conversation` on a chats controller bound to this request, so
+    # every rule the host or a product gem added there (its lookup scopes, its
+    # own `find_conversation`) decides here exactly as at the chats URL. Then
+    # it must be this very case's conversation. A 404 otherwise, never a hint.
+    def chats_conversation(ticket)
+      lookup = Chats::ApplicationController.new
+      lookup.set_request!(request)
+      conversation = lookup.send(:find_conversation, ticket.conversation_id)
+      raise ActiveRecord::RecordNotFound unless conversation.subject_type == ticket.class.polymorphic_name &&
+                                                conversation.subject_id.to_s == ticket.id.to_s
+
+      conversation
     end
 
     def prefetch_request?

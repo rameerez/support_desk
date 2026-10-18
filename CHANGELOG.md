@@ -52,7 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SupportDesk::ConversationAccess` adds a requester's own cases as a lookup
   scope (`conversation_lookup_scopes`, chats 0.5.1) instead of rescuing chats'
   404: no exception is inspected, and a host's own `find_conversation` that
-  refuses a case is final.
+  refuses a case is final. It only ever adds a scope beside the host's: a host
+  that returns no scopes for a viewer (a suspended account) opens nothing for
+  them, their cases included.
+- The ticket page resolves its conversation through chats' own
+  `find_conversation` (a chats controller bound to the request), so whatever
+  refuses a case at the chats URL refuses it on the ticket page too.
 - The access fallback and the ticket page require the case and its
   conversation to point at each other (a direct conversation whose subject is
   that case): a ticket mislinked to a group or to another conversation opens
@@ -71,8 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is `>= 0.3, < 1.0`.) 0.5.1 brings the lookup seam the access to a
   requester's own case is built on. The whole suite runs on chats 0.5.1, the
   reviewed package in `vendor/cache` built from tag v0.5.1 (6159ea1). The
-  chats 0.4.2 CI leg is gone: the constraint no longer admits it. The dummy
-  app's chats migration is chats' current install template.
+  chats 0.4.2 CI leg is gone: the constraint no longer admits it. Every CI job
+  asserts the chats it resolved (`CHATS_VERSION_UNDER_TEST`), so a later chats
+  release never silently becomes what CI tests. The dummy app's chats
+  migration is chats' current install template.
 
 ## [0.3.2] - Unreleased
 

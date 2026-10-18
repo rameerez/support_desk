@@ -19,6 +19,9 @@ permissions:
 # cache for the root Gemfile and every appraisal; no sibling checkout is needed.
 env:
   BUNDLE_CACHE_PATH: ${{ github.workspace }}/support_desk/vendor/cache
+  # The chats every leg is gated on. Lockfiles are not committed and the gemspec admits later chats,
+  # so each job asserts what it resolved: a later chats release never silently becomes what CI tests.
+  CHATS_VERSION_UNDER_TEST: "0.5.1"
 
 jobs:
   # Main test suite — Ruby versions and Rails compatibility, on SQLite
@@ -67,6 +70,10 @@ jobs:
           ruby-version: ${{ matrix.ruby_version }}
           bundler-cache: true
           working-directory: support_desk
+
+      - name: Assert the chats under test
+        working-directory: support_desk
+        run: bundle exec ruby -e 'require "chats/version"; abort("CI tests chats #{ENV.fetch("CHATS_VERSION_UNDER_TEST")}, resolved #{Chats::VERSION}") unless Chats::VERSION == ENV.fetch("CHATS_VERSION_UNDER_TEST")'
 
       - name: Prepare database and run tests
         working-directory: support_desk
@@ -129,6 +136,10 @@ jobs:
           bundler-cache: true
           working-directory: support_desk
 
+      - name: Assert the chats under test
+        working-directory: support_desk
+        run: bundle exec ruby -e 'require "chats/version"; abort("CI tests chats #{ENV.fetch("CHATS_VERSION_UNDER_TEST")}, resolved #{Chats::VERSION}") unless Chats::VERSION == ENV.fetch("CHATS_VERSION_UNDER_TEST")'
+
       - name: Prepare database
         working-directory: support_desk
         # db:migrate:reset, not db:test:prepare: the latter loads schema.rb,
@@ -166,6 +177,10 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
           working-directory: support_desk
+
+      - name: Assert the chats under test
+        working-directory: support_desk
+        run: bundle exec ruby -e 'require "chats/version"; abort("CI tests chats #{ENV.fetch("CHATS_VERSION_UNDER_TEST")}, resolved #{Chats::VERSION}") unless Chats::VERSION == ENV.fetch("CHATS_VERSION_UNDER_TEST")'
 
       - name: Lint
         working-directory: support_desk

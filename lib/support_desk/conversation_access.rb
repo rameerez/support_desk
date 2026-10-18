@@ -19,13 +19,24 @@ module SupportDesk
   # a layer of the host's that refuses a conversation (its own
   # `find_conversation`, or a scope it drops) still refuses it.
   #
+  # == The contract with the host
+  #
+  # support_desk only ever adds a scope beside the host's. A host that must
+  # refuse a viewer entirely (a suspended account) returns no scopes, and that
+  # is final: with nothing to stand beside, support_desk adds nothing either.
+  # The ticket page asks the same question (SupportDesk::TicketsController
+  # resolves its conversation through chats' own `find_conversation`).
+  #
   # Prepended to Chats::ApplicationController by the engine, in `to_prepare`
   # so it survives a code reload.
   module ConversationAccess
     protected
 
     def conversation_lookup_scopes
-      super + [ SupportDesk::Ticket.conversations_of(chats_current_messager) ]
+      scopes = super
+      return scopes if scopes.empty?
+
+      scopes + [ SupportDesk::Ticket.conversations_of(chats_current_messager) ]
     end
   end
 end

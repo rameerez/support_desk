@@ -88,6 +88,7 @@ class SupportThreadPageTest < ActionDispatch::IntegrationTest
   test "a layer of the host's that refuses a case on purpose is final" do
     controller = Chats::ApplicationController
     original = controller.instance_method(:find_conversation)
+    original = original.super_method until original.owner == controller
     # The host's own find_conversation, as a class_eval would leave it: support_desk only adds a
     # lookup scope, so whatever this decides stands.
     controller.define_method(:find_conversation) do |id = params[:id]|
@@ -101,10 +102,31 @@ class SupportThreadPageTest < ActionDispatch::IntegrationTest
     get "/messages/#{@ticket.conversation_id}"
     assert_response :not_found
     get "/messages/support/tickets/#{@ticket.reference}"
-    assert_response :success, "the ticket page asks the case, not that layer"
+    assert_response :not_found, "the ticket page asks chats the same question"
   ensure
     controller.define_method(:find_conversation, original)
     controller.send(:private, :find_conversation)
+  end
+
+  test "a host that opens nothing for a viewer is final: support adds no scope beside none" do
+    controller = Chats::ApplicationController
+    # chats' own method, the one the class owns (support_desk's is prepended above it).
+    original = controller.instance_method(:conversation_lookup_scopes)
+    original = original.super_method until original.owner == controller
+    # The host's own rule, as a class_eval would leave it: a suspended viewer opens nothing.
+    controller.define_method(:conversation_lookup_scopes) { [] }
+    controller.send(:protected, :conversation_lookup_scopes)
+    login_as @alice
+
+    get "/messages/#{@ticket.conversation_id}"
+    assert_response :not_found
+    post "/messages/#{@ticket.conversation_id}/messages", params: { message: { body: "hi" } }, as: :turbo_stream
+    assert_response :not_found
+    get "/messages/support/tickets/#{@ticket.reference}"
+    assert_response :not_found
+  ensure
+    controller.define_method(:conversation_lookup_scopes, original)
+    controller.send(:protected, :conversation_lookup_scopes)
   end
 
   test "the access is a lookup scope chats asks after its own, and nothing else" do
