@@ -270,6 +270,15 @@ module SupportDesk
           reply_within: (SupportDesk.humanize_promise(reply_within) if reply_within) }
       end
 
+      # The `_with_promise` variant of an I18n key, when this desk promises a
+      # time and the variant exists; the key as written otherwise.
+      def promised_key(symbol)
+        return symbol if reply_within.nil?
+
+        promised = :"#{symbol}_with_promise"
+        I18n.exists?(promised) ? promised : symbol
+      end
+
       # --- Who answers ----------------------------------------------------------
 
       # The agent pool: notified while a ticket is unassigned, offered in the
@@ -592,12 +601,16 @@ module SupportDesk
               "#{LINE_INTERPOLATIONS.keys.map { |key| "%{#{key}}" }.join(", ")}."
       end
 
-      # One configured line, resolved and interpolated for +ticket+.
+      # One configured line, resolved and interpolated for +ticket+. An I18n
+      # key reads its `<key>_with_promise` variant when this desk promises a
+      # time and the variant exists, so a desk with `reply_within = nil` never
+      # says "we usually reply in under ." (the gem's assistant lines work the
+      # same way).
       def line_for(ticket, setting, name)
         return nil if setting.nil?
 
         line = case setting
-        when Symbol then I18n.t(setting, **line_interpolations(ticket), raise: true)
+        when Symbol then I18n.t(promised_key(setting), **line_interpolations(ticket), raise: true)
         when String then interpolate_line(setting, line_interpolations(ticket), name)
         else setting.call(ticket)
         end

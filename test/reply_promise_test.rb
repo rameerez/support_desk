@@ -104,6 +104,29 @@ class ReplyPromiseTest < ActiveSupport::TestCase
     end
   end
 
+  test "a desk that promises nothing acknowledges without a promise" do
+    with_support_config(acknowledgement: :"support_desk.thread.acknowledgement", reply_within: nil) do
+      ticket = I18n.with_locale(:en) { ticket_for(@alice, topic: :other, message: "Hello") }
+
+      assert_equal "Thanks, we got it.", ticket.conversation.messages.oldest_first.last.body
+    end
+    with_support_config(acknowledgement: :"support_desk.thread.acknowledgement", reply_within: nil) do
+      ticket = I18n.with_locale(:es) { ticket_for(@alice, topic: :account, message: "Hola") }
+
+      assert_equal "Gracias, lo hemos recibido.", ticket.conversation.messages.oldest_first.last.body
+    end
+  end
+
+  test "the acknowledgement is never news to the requester: their read horizon moves through it" do
+    with_support_config(acknowledgement: "Got it") do
+      freeze_time do
+        ticket = ticket_for(@alice, topic: :other, message: "Hello")
+
+        assert_equal 0, ticket.conversation.participant_for(@alice).reload.unread_count
+      end
+    end
+  end
+
   test "no acknowledgement is configured by default" do
     ticket = ticket_for(@alice, topic: :other, message: "Hello")
 

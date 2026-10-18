@@ -197,11 +197,18 @@ module SupportDesk
       # host's `inbox_scope` keeps support out of the inbox (see
       # SupportDesk::ConversationAccess): participation is what makes a
       # conversation theirs to read, and the inbox is only where it is listed.
+      #
+      # The case and its conversation have to point at each other: a direct
+      # conversation whose subject IS one of this requester's cases, and that
+      # case's conversation. A ticket mislinked to a group, or to a
+      # conversation about something else, opens nothing.
       def requester_conversation(requester, id)
         return nil unless requester.respond_to?(:support_tickets) && id.present?
 
-        Chats::Conversation.inbox_for(requester)
-                           .where(id: requester.support_tickets.select(:conversation_id))
+        cases = requester.support_tickets.where(conversation_id: id)
+        Chats::Conversation.inbox_for(requester).direct
+                           .where(id: cases.select(:conversation_id))
+                           .where(subject_type: polymorphic_name, subject_id: cases.select(:id))
                            .find_by(id: id)
       end
 
@@ -651,15 +658,22 @@ module SupportDesk
       # whenever the clock did not move between the two inserts (the same tie
       # `pin_opening_lines!` breaks the other way), and it is then the
       # conversation's last message: what a list row previews.
+      #
+      # It is the desk's receipt for words the requester has just written, so
+      # it is never news to them: their read horizon moves through it. Without
+      # that, a tick dated after the clock (a frozen or coarse one) would stay
+      # unread on a page that already shows it, chats' own thread included,
+      # which reads at "now".
       def post_acknowledgement!(ticket, posted)
         line = ticket.desk_config.acknowledgement_for(ticket)
         return if line.blank?
 
         notice = ticket.conversation.post_system_message!(line)
-        return if notice.created_at > posted.created_at
-
-        notice.update_columns(created_at: posted.created_at + ordering_tick)
-        ticket.conversation.recompute_last_message!
+        if notice.created_at <= posted.created_at
+          notice.update_columns(created_at: posted.created_at + ordering_tick)
+          ticket.conversation.recompute_last_message!
+        end
+        ticket.conversation.participant_for(ticket.requester)&.read!(at: notice.created_at)
       end
 
       # chats orders a transcript by (created_at, id), and inserting one row

@@ -81,6 +81,62 @@ class SupportThreadPageTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "under the default thread page, chats' own thread shows the acknowledgement read, even with the clock frozen" do
+    SupportDesk.config.thread_page = :chats
+    Chats.config.inbox_scope = ->(relation, _viewer) { relation }
+    with_support_config(acknowledgement: "Got it") do
+      freeze_time do
+        ticket = ticket_for(@alice, topic: :account, message: "Hello")
+        login_as @alice
+        get "/messages/#{ticket.conversation_id}"
+
+        assert_response :success
+        assert_select ".chats-thread", text: /Got it/
+        assert_equal 0, ticket.conversation.participant_for(@alice).reload.unread_count
+      end
+    end
+  end
+
+  test "a layer that refuses a case on purpose is final, whatever order it was added in" do
+    controller = Chats::ApplicationController
+    original = controller.instance_method(:find_conversation).super_method
+    # Below the access seam: the class's own method, as a host's class_eval would leave it.
+    controller.define_method(:find_conversation) do |id = params[:id]|
+      raise ActiveRecord::RecordNotFound if SupportDesk::Ticket.exists?(conversation_id: id)
+
+      original.bind_call(self, id)
+    end
+    controller.send(:private, :find_conversation)
+    login_as @alice
+
+    get "/messages/#{@ticket.conversation_id}"
+    assert_response :not_found
+    get "/messages/support/tickets/#{@ticket.reference}"
+    assert_response :success, "the ticket page asks the case, not that layer"
+  ensure
+    controller.define_method(:find_conversation, original)
+    controller.send(:private, :find_conversation)
+  end
+
+  test "a case mislinked to a group or to another conversation opens nothing" do
+    bob = create_user(name: "Bob")
+    group = Chats::Conversation.create!(kind: "group", title: "Not support")
+    group.add_participant!(@alice)
+    group.add_participant!(bob)
+    @ticket.update_columns(conversation_id: group.id)
+    assert_nil SupportDesk::Ticket.requester_conversation(@alice, group.id)
+
+    elsewhere = @alice.chat_with(bob)
+    @ticket.update_columns(conversation_id: elsewhere.id)
+    assert_nil SupportDesk::Ticket.requester_conversation(@alice, elsewhere.id)
+
+    # And through chats: neither is reachable as a support case, under a scope that hides both.
+    Chats.config.inbox_scope = ->(relation, _viewer) { relation.where.not(id: [ group.id, elsewhere.id ]) }
+    login_as @alice
+    get "/messages/#{elsewhere.id}"
+    assert_response :not_found
+  end
+
   test "owning the case is not enough once the seat in its conversation is gone" do
     @ticket.conversation.participant_for(@alice).update_columns(left_at: Time.current)
     login_as @alice

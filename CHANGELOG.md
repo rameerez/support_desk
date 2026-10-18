@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-18
 
 ### Added
 
@@ -24,9 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the viewer's own cases, by participation and blocks, without the listing
   scope. Nothing else the scope hides becomes reachable.
 - **`acknowledgement`**, a desk setting: the system line posted right under a
-  requester's first message, in the same transaction. Same values and
+  requester's first message, in the same transaction, and read for them as
+  it is posted (a receipt for their own words is never news). Same values and
   interpolations as `opening_line`; nil by default, and the gem ships
   `support_desk.thread.acknowledgement` to opt into.
+- An I18n key given as a line reads its `<key>_with_promise` variant when the
+  desk promises a time and the variant exists (the assistant lines already
+  did): the shipped acknowledgement is "Thanks, we got it." on a desk with
+  `reply_within = nil`, and adds the promise otherwise.
 - `SupportDesk.humanize_promise` and `DeskConfiguration#reply_promise`: the
   promise in the unit the desk wrote it in, from the new
   `support_desk.durations.*` keys.
@@ -44,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `SupportDesk::ConversationAccess` takes over chats' own lookup miss only (a
+  RecordNotFound for Chats::Conversation with that id, about a conversation
+  the viewer's `chats` does not hold): another layer of `find_conversation`
+  that refuses a case is final whatever the prepend order. The contract is in
+  the module's comment.
+- The access fallback and the ticket page require the case and its
+  conversation to point at each other (a direct conversation whose subject is
+  that case): a ticket mislinked to a group or to another conversation opens
+  nothing.
+- The ticket page resolves its conversation through chats' participation and
+  block rules: owning the case is no longer enough once the seat is gone.
 - The support list's "showing the N most recent" line under a long closed
   section (`support_desk.tickets.closed_capped`) had no copy in English or
   Spanish, so a requester with more than 20 closed cases read "translation
@@ -51,9 +67,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Compatibility
 
-- Verified against chats 0.4.2 as well as the locked 0.3.2: the whole suite
-  passes on both, except the tripwire that compares the dummy's chats
-  migration with the installed chats' template (the dummy copies 0.3.2's).
+- chats `>= 0.4.2, < 1.0` (it was `~> 0.3, >= 0.3.2`, which already admitted
+  0.4 and 0.5: `~> 0.3` is `>= 0.3, < 1.0`). The floor is honest now: the
+  support page and its access seam are built for chats that applies
+  `inbox_scope` inside `Messager#chats` (0.4.1+) and re-runs `can_message` on
+  every send (0.4.2). The whole suite runs on chats 0.5.0 (the default
+  bundle; the reviewed package is in `vendor/cache`, built from tag v0.5.0)
+  and on 0.4.2; the dummy app's chats migration is the 0.4.2/0.5.0 template
+  (identical in both).
+- chats 0.4.2 and 0.5.0 are not on rubygems yet: publish them before this
+  release, which cannot resolve without them.
 
 ## [0.3.2] - Unreleased
 

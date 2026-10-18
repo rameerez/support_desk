@@ -735,6 +735,12 @@ config.acknowledgement = :"support_desk.thread.acknowledgement"
 # => "Thanks, we got it. We usually reply in under 72 hours."
 ```
 
+An I18n key reads its `<key>_with_promise` variant when the desk promises a
+time and the variant exists (the shipped key has one), so a desk with
+`reply_within = nil` says "Thanks, we got it." and nothing it cannot keep.
+The requester's read horizon moves through the acknowledgement as it is
+posted: it is a receipt for what they just wrote, never news to them.
+
 Same values and interpolations as the opening lines, nil by default. It
 never moves the clocks (it is a system message), it is pinned one database
 tick after the message when the clock did not move between the two inserts,

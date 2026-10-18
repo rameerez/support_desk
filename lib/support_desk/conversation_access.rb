@@ -19,13 +19,29 @@ module SupportDesk
   #
   # Prepended to Chats::ApplicationController by the engine, in `to_prepare`
   # so it survives a code reload.
+  #
+  # == The contract with other layers
+  #
+  # It takes over ONE refusal only: chats' own lookup missing, a
+  # RecordNotFound for Chats::Conversation with this id, about a conversation
+  # the viewer's `chats` really does not hold. Anything else another layer of
+  # `find_conversation` raises is final, whatever order the layers were
+  # prepended in. To refuse a support conversation of your own, raise your own
+  # error or a bare `ActiveRecord::RecordNotFound`, not chats' lookup shape.
   module ConversationAccess
     private
 
     def find_conversation(id = params[:id])
       super
-    rescue ActiveRecord::RecordNotFound
+    rescue ActiveRecord::RecordNotFound => e
+      raise unless chats_inbox_miss?(e, id)
+
       SupportDesk::Ticket.requester_conversation(chats_current_messager, id) || raise
+    end
+
+    def chats_inbox_miss?(error, id)
+      error.model == Chats::Conversation.name && error.id.to_s == id.to_s &&
+        !chats_current_messager.chats.exists?(id: id)
     end
   end
 end
