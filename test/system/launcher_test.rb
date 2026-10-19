@@ -50,7 +50,8 @@ class LauncherSystemTest < ApplicationSystemTestCase
     open_launcher
     find(".chats-tray__item[open] .chats-row__link", text: "Something else").click
     assert_selector ".chats-tray__item[open] .chats-message__text", text: "It is on its way"
-    using_wait_time(5) { assert_equal 0, @alice.reload.unread_support_count }
+    # The panel's thread reads itself (a POST to chats' read) once it is on screen.
+    Timeout.timeout(5) { sleep 0.1 until @alice.unread_support_count.zero? }
     perform_enqueued_jobs
     assert_selector "#support_desk_launcher_badge", visible: :hidden
   end

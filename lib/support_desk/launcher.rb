@@ -42,15 +42,21 @@ module SupportDesk
         broadcast_badge_of(messager)
       end
 
-      # Replace +requester+'s launcher badge, wherever it is on screen. In a
-      # job, counted now: a count a moment stale heals on the next event, and
-      # a missed one on the launcher's catch-up (GET tickets/badge).
+      # Replace +requester+'s launcher badge, wherever it is on screen: one
+      # job, which counts when it renders (nothing is counted in the request
+      # that wrote the message). A missed one heals on the launcher's
+      # catch-up (GET tickets/badge).
+      #
+      # It runs whether or not this host renders a launcher: there is no
+      # telling, from a job, whether anybody is listening, and a switch for it
+      # would let a launcher's badge silently never move. Support is
+      # human-paced, so this is one small job per message in a case.
       def broadcast_badge_of(requester)
         Turbo::StreamsChannel.broadcast_replace_later_to(
           requester, :support_desk,
           target: BADGE_ID,
           partial: BADGE_PARTIAL,
-          locals: { count: requester.unread_support_count }
+          locals: { requester: requester }
         )
       end
     end

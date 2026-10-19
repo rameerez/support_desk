@@ -319,3 +319,11 @@
   .support-desk-panel { font-size: 1rem; }
   .support-desk-panel__wizard .support-desk-form__input { font-size: 16px; }
 }
+
+/* The wall in the panel: its title at the panel's size, room around it. */
+.support-desk-panel__wall { padding-bottom: 1rem; }
+.support-desk-panel__wall .chats-inbox__header { padding: 0.85rem 0.85rem 0.25rem; }
+.support-desk-panel__wall .chats-inbox__title { font-size: 1.05rem; margin: 0; }
+.support-desk-panel__wall :is(.support-desk-notice__title, .support-desk-form) { margin-inline: 0.75rem; padding-inline: 0; }
+.support-desk-panel__wall > .support-desk-button,
+.support-desk-panel__wall .support-desk-button { margin: 0.5rem 0.75rem 0; }

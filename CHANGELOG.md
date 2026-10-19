@@ -29,13 +29,19 @@ until you render the launcher.
   `new`, `case`, and the limit wall) inside `layouts/support_desk/panel`;
   every other request renders exactly as before. In the panel a new case
   opens in the panel, and so does any case, whatever `thread_page` says. A
-  case there is chats' compact thread body (`window: true`), read only while
-  the panel is open.
+  case there is chats' compact thread body (`window: true`), which reads
+  itself once the panel is open (the server never reads a panel render: a
+  frame loading behind a closed panel must not put the badge out). The limit
+  wall has its own panel screen (`support_desk/panel/rate_limited`, the
+  page's content from `tickets/_limit_wall`).
 - **A live badge.** `unread_support_count` on the requester's
   `[requester, :support_desk]` stream, replaced wherever chats says an unread
   count in a case may have moved (`Chats.on(:unread_changed)`), the case's own
   notices included, and asked again from `GET /support/tickets/badge` when the
-  stream missed one. The Messages badge never counts it.
+  stream missed one. The Messages badge never counts it. One small job per
+  message in a case, counting as it renders, whether or not the host renders
+  a launcher: a job cannot tell whether anybody listens, and a switch would
+  let a launcher's badge silently never move.
 - `support_panel?`, `support_desk_top_frame` (the frame a link that leaves a
   step targets: `"_top"` on a page, the panel in the panel), and
   `support_desk_slot` with two slots, `panel_top` and `panel_footer`.

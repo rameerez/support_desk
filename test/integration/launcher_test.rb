@@ -156,8 +156,12 @@ class LauncherTest < ActionDispatch::IntegrationTest
     assert_redirected_to "/messages/support/tickets/#{ticket.reference}"
     assert_equal :chats, SupportDesk.config.thread_page, "the dummy reads cases in the chats inbox"
 
+    reply_as @lucia, ticket, "We are on it"
+    unread = @alice.unread_support_count
     get "/messages/support/tickets/#{ticket.reference}", headers: PANEL
     assert_response :success
+    assert_equal unread, @alice.unread_support_count,
+                 "the panel's thread reads itself once the panel is open, never on the server's render"
     assert_select "turbo-frame##{SupportDesk::Launcher::FRAME}" do
       assert_select ".chats-thread.chats-thread--window[data-chats--thread-read-pending-value='true']" do
         assert_select "header.chats-window__header.support-desk-panel__nav" do
@@ -183,6 +187,22 @@ class LauncherTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_entity
     assert_select "turbo-frame##{SupportDesk::Launcher::FRAME} .support-desk-error", text: /few lines/
+  end
+
+  test "the limit wall in the panel: the same wall, in a screen of the panel" do
+    login_as @alice
+
+    with_support_config(max_open_tickets: 1) do
+      ticket_for(@alice, topic: :other)
+      post "/messages/support/tickets", params: { topic: "account", message: "Another one" }, headers: PANEL
+    end
+
+    assert_response :too_many_requests
+    assert_no_missing_translations
+    assert_select "turbo-frame##{SupportDesk::Launcher::FRAME} .support-desk-panel__wall" do
+      assert_select ".chats-row__link"
+      assert_select "textarea#support_desk_kept_message", text: "Another one"
+    end
   end
 
   test "another requester's case is a 404 in the panel too" do

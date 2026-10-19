@@ -142,7 +142,14 @@ module SupportDesk
       # reading the case; the visit that follows reads it. Read through the
       # last message on the page, not merely "now": an acknowledgement pinned
       # one tick after the message it answers may sit just ahead of the clock.
-      @participant&.read!(at: [ Time.current, @messages.last&.created_at ].compact.max) unless prefetch_request?
+      #
+      # Not in the launcher's panel: there the thread is the compact one a
+      # dock window renders, and it reads itself once the panel is open and
+      # the requester is with it (chats' read gate, which the tray keeps). A
+      # frame that loads behind a closed panel must not put the badge out.
+      unless prefetch_request? || support_panel?
+        @participant&.read!(at: [ Time.current, @messages.last&.created_at ].compact.max)
+      end
 
       render_screen :show, panel: "support_desk/panel/case"
     end
@@ -216,7 +223,7 @@ module SupportDesk
                                        .includes(:desk, :subject, conversation: { last_message: :sender })
                                        .recent_activity_first.to_a
       @unread_counts = unread_counts_for(@open_tickets)
-      render_screen :rate_limited, status: :too_many_requests
+      render_screen :rate_limited, panel: "support_desk/panel/rate_limited", status: :too_many_requests
     end
 
     # One grouped query for every row's badge (see

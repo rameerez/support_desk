@@ -23,7 +23,9 @@ class LauncherBadgeTest < ActiveSupport::TestCase
     assert_operator badges.size, :>=, 1
     assert_equal SupportDesk::Launcher::BADGE_ID, badges.last[:target]
     assert_equal "replace", badges.last[:action].to_s
-    assert_equal @alice.unread_support_count, badges.last[:locals][:count]
+    assert_equal({ requester: @alice }, badges.last[:locals], "counted as it renders, in the job")
+    html = ApplicationController.render(partial: SupportDesk::Launcher::BADGE_PARTIAL, locals: badges.last[:locals])
+    assert_includes html, %(data-count="#{@alice.unread_support_count}")
   end
 
   test "a notice the case posts on its own (a system message) moves the badge too" do
@@ -38,7 +40,8 @@ class LauncherBadgeTest < ActiveSupport::TestCase
 
     @ticket.conversation.mark_read_by!(@alice)
 
-    assert_equal [ 0 ], badge_broadcasts_for(@alice).map { |badge| badge[:locals][:count] }
+    assert_equal [ @alice ], badge_broadcasts_for(@alice).map { |badge| badge[:locals][:requester] }
+    assert_equal 0, @alice.unread_support_count
   end
 
   test "a conversation that is not a case never touches the launcher" do
