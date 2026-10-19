@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Intended as **0.5.0**: "Need help?" in the corner. **Requires chats >= 0.7.0**
+Intended as **0.5.0**: "Need help?" in the corner. **Requires chats >= 0.7.1**
 (its tray and its `:unread_changed` event). No migration; nothing changes
 until you render the launcher.
 

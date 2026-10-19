@@ -46,10 +46,10 @@ Gem::Specification.new do |spec|
   # lookup seam a requester's own case is added to (SupportDesk::
   # ConversationAccess), on top of what 0.4.x and 0.5.0 brought (inbox_scope
   # applied to Messager#chats, can_message on every send, the thread as a
-  # partial, the messaging dock). 0.7.0: the tray the launcher sits in
+  # partial, the messaging dock). 0.7 (0.7.1, its release): the tray the launcher sits in
   # (`chats_tray`, `chats_tray_item`) and `:unread_changed`, which keeps its
   # badge live. The whole suite runs on it.
-  spec.add_dependency "chats", ">= 0.7.0", "< 1.0"
+  spec.add_dependency "chats", ">= 0.7.1", "< 1.0"
   spec.add_dependency "globalid", "~> 1.0"
   spec.add_dependency "railties", ">= 7.2.0", "< 9.0"
 end

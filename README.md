@@ -529,7 +529,7 @@ the page they were on.
 | --- | --- | --- |
 | ![The panel: the way to a new case with its promise, and the open cases](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/panel.png) | ![A case's thread in the panel, an answer signed by the agent](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/case.png) | ![The wizard's last step in the panel, the promise under the form](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/new.png) |
 
-It is an item of chats' **tray** (chats >= 0.7.0), so chats draws the tab,
+It is an item of chats' **tray** (chats >= 0.7.1), so chats draws the tab,
 the panel's chrome and the phone's sheet, and runs them: one menu open at a
 time with the Messages panel, the windows giving it room rather than being
 covered, Escape, the open item remembered on a desk, a 48px round button and a
@@ -1757,7 +1757,7 @@ that is exactly when a seat gets stranded.
 
 ## Compatibility
 
-Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`). chats >= 0.7.0 (0.5.0 and later: the launcher sits in chats' tray and its badge listens to chats' `:unread_changed`).
+Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`). chats >= 0.7.1 (0.5.0 and later: the launcher sits in chats' tray and its badge listens to chats' `:unread_changed`).
 
 PostgreSQL and SQLite enforce unique new-case creation, one open assignment per ticket and
 one pending proposal per ticket with **partial unique indexes**. New submissions reuse an existing open case. Reopening
@@ -1841,7 +1841,7 @@ SupportDesk::VERSION
 
 After checking out the repo, run `bundle install`, then `bundle exec rake ci`. The dummy app lives in `test/dummy` and mounts all three surfaces the way a real host does: the requester engine at `/messages/support`, `chats` at `/messages`, and the turnkey console at `/admin/support` — plus the same console again inside a host-owned `madmin` namespace, because "the console uses only the public API" is a claim that needs a second implementation to be worth anything.
 
-`chats` is the kernel this gem is a product on and the two are developed in lockstep. support_desk requires `chats >= 0.7.0, < 1.0`. Until that is on rubygems, the bundle takes the reviewed chats package from `vendor/cache` (provenance, checksum and the step that adds it in `vendor/cache/README.md`), so `bundle exec rake ci` needs no network and no sibling checkout.
+`chats` is the kernel this gem is a product on and the two are developed in lockstep. support_desk requires `chats >= 0.7.1, < 1.0`. Until that is on rubygems, the bundle takes the reviewed chats package from `vendor/cache` (provenance, checksum and the step that adds it in `vendor/cache/README.md`), so `bundle exec rake ci` needs no network and no sibling checkout.
 
 ## Contributing
 

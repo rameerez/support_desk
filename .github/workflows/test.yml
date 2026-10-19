@@ -21,7 +21,7 @@ env:
   BUNDLE_CACHE_PATH: ${{ github.workspace }}/support_desk/vendor/cache
   # The chats every leg is gated on. Lockfiles are not committed and the gemspec admits later chats,
   # so each job asserts what it resolved: a later chats release never silently becomes what CI tests.
-  CHATS_VERSION_UNDER_TEST: "0.7.0"
+  CHATS_VERSION_UNDER_TEST: "0.7.1"
 
 jobs:
   # Main test suite — Ruby versions and Rails compatibility, on SQLite
