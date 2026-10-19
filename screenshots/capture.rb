@@ -110,6 +110,7 @@ SupportDesk.configure do |config|
   config.requester_class = "User"
   config.name = DESK_NAME
   config.avatar = DESK_AVATAR
+  config.email = "help@pepperbox.example" # the launcher's signed-out panel offers it
   config.reply_within = 30.minutes
   config.at_risk_after = 10.minutes
   config.agents { User.where(admin: true) }
@@ -558,6 +559,103 @@ session.execute_script('document.querySelectorAll("details").forEach((el) => (el
 flush_to!(session, "select[name=agent_id]")
 settle(session)
 shoot!(cdp, "09-handoff")
+
+# --- 10. The launcher (0.5.0) -------------------------------------------------
+#
+# A desk's corner, not a phone's portrait, so these live in screenshots/launcher/
+# at their own size (outside the 640x960 grid check below): a 1280x800 desk at
+# 2x, clipped to the bottom-right corner it lives in, and a 390x844 phone at 2x.
+
+LAUNCHER_OUT = File.join(OUT, "launcher")
+FileUtils.mkdir_p(LAUNCHER_OUT)
+
+def desk!(cdp, width, height)
+  cdp.execute_cdp("Emulation.setDeviceMetricsOverride", width: width, height: height, deviceScaleFactor: 2, mobile: false)
+end
+
+def clip!(cdp, name, x:, y:, width:, height:)
+  data = cdp.execute_cdp("Page.captureScreenshot", format: "png", captureBeyondViewport: false,
+                                                   clip: { x: x, y: y, width: width, height: height, scale: 1 })
+  File.binwrite(File.join(LAUNCHER_OUT, "#{name}.png"), Base64.decode64(data.fetch("data")))
+  puts "  -> launcher/#{name}.png"
+end
+
+# The dummy's /doors is a page of bare test links; behind the launcher it
+# should look like a host's page: Maya's orders tonight.
+HOST_PAGE = <<~JS
+  document.querySelectorAll("#subject-door, #custom-door, #plain-door, #badge").forEach((el) => el.remove());
+  const page = document.createElement("main");
+  page.style.cssText = "max-width:46rem;margin:2rem auto;padding:0 1.5rem;font-family:inherit";
+  page.innerHTML = `<h1 style="font-size:1.6rem;margin:0 0 1rem">Tonight</h1>` +
+    [["Pad Thai + 2 sides", "Bangkok Bicycle · on its way"], ["Katsu curry", "Sumi Kitchen · delivered 19:40"],
+     ["Margherita pizza", "Forno Vecchio · delivered yesterday"]].map(([name, line]) =>
+      `<div style="padding:1rem 1.1rem;margin:0 0 .75rem;border:1px solid #e3ece7;border-radius:1rem;background:#fff">` +
+      `<strong style="display:block">${name}</strong><span style="color:#5b6b63">${line}</span></div>`).join("");
+  document.querySelector(".pb-bar").after(page);
+JS
+
+def with_launcher(session, cdp, where)
+  session.visit "/doors"
+  cdp.manage.add_cookie(name: "launcher", value: where)
+  session.execute_script("localStorage.clear()")
+  session.visit "/doors"
+  session.assert_selector ".chats-tray__item"
+  session.execute_script(HOST_PAGE)
+end
+
+def open_launcher(session)
+  session.find(".chats-tray__launcher").click
+  session.assert_selector ".chats-tray__item[open]"
+end
+
+CORNER = { x: 560, y: 200, width: 720, height: 600 }.freeze
+
+desk!(cdp, 1280, 800)
+login(session, MAYA_ID)
+with_launcher(session, cdp, "dock")
+settle(session)
+clip!(cdp, "bar", x: 640, y: 704, width: 640, height: 96)
+
+open_launcher(session)
+session.assert_selector ".chats-tray__item[open] .chats-row__link", minimum: 2
+settle(session)
+clip!(cdp, "panel", **CORNER)
+
+session.find(".chats-tray__item[open] .chats-row__link", text: "Tonkotsu ramen").click
+session.assert_selector ".chats-tray__item[open] .chats-message__signature"
+session.execute_script('document.querySelector(".chats-tray__item[open] .chats-thread__scroll").scrollTop = 1e6')
+settle(session)
+clip!(cdp, "case", **CORNER)
+
+session.find(".chats-tray__item[open] a[aria-label='Back']").click
+session.find(".chats-tray__item[open] .support-desk-door").click
+session.find(".chats-tray__item[open] .support-desk-choice", text: "Something else").click
+session.find(".chats-tray__item[open] textarea[name=message]")
+       .fill_in(with: "Can I change the address on tonight's order? It's going to the office.")
+settle(session)
+clip!(cdp, "new", **CORNER)
+
+desk!(cdp, 390, 844)
+with_launcher(session, cdp, "standalone")
+settle(session)
+shoot_phone = lambda do |name|
+  data = cdp.execute_cdp("Page.captureScreenshot", format: "png", captureBeyondViewport: false)
+  File.binwrite(File.join(LAUNCHER_OUT, "#{name}.png"), Base64.decode64(data.fetch("data")))
+  puts "  -> launcher/#{name}.png"
+end
+shoot_phone.call("phone-button")
+open_launcher(session)
+session.assert_selector ".chats-tray__item[open] .chats-row__link", minimum: 2
+sleep 0.4 # the sheet rising
+settle(session)
+shoot_phone.call("phone-sheet")
+
+session.reset!
+desk!(cdp, 1280, 800)
+with_launcher(session, cdp, "standalone")
+open_launcher(session)
+settle(session)
+clip!(cdp, "signed-out", **CORNER)
 
 session.quit
 

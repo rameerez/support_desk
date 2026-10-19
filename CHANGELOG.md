@@ -4,6 +4,57 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Intended as **0.5.0**: "Need help?" in the corner. **Requires chats >= 0.7.0**
+(its tray and its `:unread_changed` event). No migration; nothing changes
+until you render the launcher.
+
+### Added
+
+- **The launcher.** `support_launcher` puts a "Need help?" tab in the
+  bottom-right corner: in chats' messaging dock's tray, beside its bar
+  (`chats_dock { support_launcher }`), or in a corner of its own when there is
+  no dock. Its panel is this engine's own screens in a frame — their open
+  cases, a new case (the wizard, with the promise under the form), a case's
+  thread — so nobody leaves the page they are on. chats draws and runs the
+  chrome (one menu open at a time, the windows giving it room, Escape,
+  memory, the phone's round button and full-screen sheet); this engine ships
+  no JavaScript for it. `show_for: :everyone` shows it to visitors who are
+  signed out too, whose panel says how to reach the desk (sign in through
+  `/support`, the desk's `config.email`, the host's `help_url:`).
+- **The panel is the pages.** A request from the panel's frame
+  (`Turbo-Frame: support_desk_panel`, `SupportDesk::Launcher.panel_request?`)
+  is answered with the screen's panel template (`support_desk/panel/home`,
+  `new`, `case`, and the limit wall) inside `layouts/support_desk/panel`;
+  every other request renders exactly as before. In the panel a new case
+  opens in the panel, and so does any case, whatever `thread_page` says. A
+  case there is chats' compact thread body (`window: true`), read only while
+  the panel is open.
+- **A live badge.** `unread_support_count` on the requester's
+  `[requester, :support_desk]` stream, replaced wherever chats says an unread
+  count in a case may have moved (`Chats.on(:unread_changed)`), the case's own
+  notices included, and asked again from `GET /support/tickets/badge` when the
+  stream missed one. The Messages badge never counts it.
+- `support_panel?`, `support_desk_top_frame` (the frame a link that leaves a
+  step targets: `"_top"` on a page, the panel in the panel), and
+  `support_desk_slot` with two slots, `panel_top` and `panel_footer`.
+- `support_desk.launcher.*` in en and es; `rails g support_desk:views` ejects
+  the launcher and its panel's screens too (`--views launcher`).
+
+### Changed
+
+- The requester partials that targeted `_top` (`_pick_topic`, `_pick_thing`,
+  `_write`, `_wizard_header`) use `support_desk_top_frame`, and
+  `support_thread_path` leads to the ticket page in the panel. **If you
+  ejected them and use the launcher**, make the same change in your copies,
+  or their links leave the panel for the page.
+- The dummy app loads Turbo and Stimulus for real (its importmap pinned
+  neither, so the browser tests ran on plain HTML), and two tests that leaned
+  on that were corrected: the console's refused send is rendered in place by
+  Turbo, and the thread page under chats 0.6's two panes shows the inbox's
+  badged desk row beside the thread.
+
 ## [0.4.0] - 2026-10-18
 
 ### Added
