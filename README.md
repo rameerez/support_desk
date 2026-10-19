@@ -1,5 +1,7 @@
 # 🎫 `support_desk` - Customer support for your Rails app, as conversations — answered by your team and by AI agents on a leash
 
+**External agent integration:** The current assistant brief/turn/proposal contract can serve as a host integration seam. A remote service still needs host-owned authentication, durable event delivery, current policy checks and reconciliation; the gem does not ship a ReplyBrain HTTP connector. Local conversation resolution does not prove completion of external business work.
+
 [![Gem Version](https://badge.fury.io/rb/support_desk.svg)](https://badge.fury.io/rb/support_desk) [![Build Status](https://github.com/rameerez/support_desk/workflows/Tests/badge.svg)](https://github.com/rameerez/support_desk/actions)
 
 > [!TIP]
