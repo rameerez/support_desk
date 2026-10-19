@@ -93,6 +93,16 @@ en:
       about: "Need help with %{subject}?"
       existing: "See your support conversation"
       new_conversation: "Start a new conversation"
+    launcher:
+      label: "Need help?"
+      open: "Open support"
+      all: "All your conversations"
+      open_page: "Open in a page"
+      signed_out:
+        lead: "Sign in and write to us: your conversations with us are kept in your account."
+        sign_in: "Sign in to write to us"
+        email_html: "Can't sign in? Write to %{email}."
+        help: "Visit the help centre"
     inbox:
       empty_hint: "Need help? Write to us"
     limits:

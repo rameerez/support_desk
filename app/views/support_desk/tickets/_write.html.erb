@@ -3,7 +3,8 @@
 
     The form targets `_top`: it POSTs to /tickets and the answer is a
     redirect into the conversation, which must replace the page, not land
-    inside the wizard frame. %>
+    inside the wizard frame. In the launcher's panel it targets the panel
+    (support_desk_top_frame), and the new case opens there. %>
 <%= render "support_desk/tickets/wizard_header", wizard: wizard, error: error,
            ask: t("support_desk.wizard.write") %>
 
@@ -14,7 +15,7 @@
   <div class="support-desk-notice">
     <p class="support-desk-notice__title"><%= t("support_desk.wizard.already_open") %></p>
     <%= link_to t("support_desk.doors.existing"), support_thread_path(existing),
-                class: "support-desk-button", data: { turbo_frame: "_top" } %>
+                class: "support-desk-button", data: { turbo_frame: support_desk_top_frame } %>
   </div>
 <% else %>
   <%= render "support_desk/tickets/context_card", subject: wizard.subject if wizard.subject %>
@@ -23,7 +24,7 @@
                 multipart: true,
                 method: :post,
                 class: "support-desk-form",
-                data: { turbo_frame: "_top" } do %>
+                data: { turbo_frame: support_desk_top_frame } do %>
     <% wizard.state_params.each do |name, value| %>
       <%= hidden_field_tag name, value %>
     <% end %>

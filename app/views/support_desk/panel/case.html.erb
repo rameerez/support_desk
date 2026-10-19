@@ -1,0 +1,36 @@
+<%# A case in the launcher's panel (GET /tickets/:id from the panel's
+    frame): chats' own thread body, the compact one a dock window renders
+    (`window: true`: live, read only while the panel is open, the composer at
+    the bottom, the desk's signature on its answers), under the panel's way
+    back to the list and out to the case's page, in a dock window's header
+    classes so the two look alike wherever a host themes them. %>
+<%= render layout: "chats/conversations/thread",
+           locals: {
+             conversation: @conversation,
+             messages: @messages,
+             more: @more_messages,
+             first_unread_id: @first_unread_id,
+             counterpart: chats_counterpart,
+             window: true
+           } do %>
+  <header class="chats-window__header support-desk-panel__nav">
+    <%= link_to support_desk_routes.root_path, class: "chats-window__icon",
+                title: t("support_desk.wizard.back"), "aria-label": t("support_desk.wizard.back") do %>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+           stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5m6-6-6 6 6 6"/></svg>
+    <% end %>
+    <span class="chats-window__identity support-desk-panel__heading">
+      <span class="chats-window__name"><%= @ticket.label %></span>
+      <span class="chats-window__subject"><%= support_ticket_state(@ticket) %></span>
+    </span>
+    <%= link_to support_desk_routes.ticket_path(@ticket.reference), class: "chats-window__icon",
+                title: t("support_desk.launcher.open_page"), "aria-label": t("support_desk.launcher.open_page"),
+                data: { turbo_frame: "_top" } do %>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+           stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+    <% end %>
+  </header>
+  <% if (door = support_human_door(@ticket)).present? %>
+    <div class="support-desk-panel__human"><%= door %></div>
+  <% end %>
+<% end %>

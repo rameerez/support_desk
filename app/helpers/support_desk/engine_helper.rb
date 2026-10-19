@@ -16,6 +16,14 @@ module SupportDesk
     # Which frame the wizard renders on each of its three steps.
     WIZARD_PARTIALS = { topic: "pick_topic", subject: "pick_thing", compose: "write" }.freeze
 
+    # Who sees the launcher.
+    LAUNCHER_AUDIENCES = %i[signed_in everyone].freeze
+
+    # The launcher panel's slots: a host drops
+    # `app/views/support_desk/slots/_<name>.html.erb` in and it renders there
+    # (gets `requester:`, nil for a visitor who is signed out).
+    SLOTS = %w[panel_top panel_footer].freeze
+
     # The door: "¿Necesitas ayuda con esto?" next to a record, or "Contactar
     # con soporte" on its own.
     #
@@ -68,6 +76,62 @@ module SupportDesk
       return if ticket.nil?
 
       render partial: "support_desk/tickets/human_door", locals: { ticket: ticket }
+    end
+
+    # The "Need help?" launcher: an item of chats' tray (chats >= 0.7.0),
+    # bottom-right, whose panel is this engine's own screens — their cases,
+    # a new one (the wizard, with the promise), a case's thread — in a frame.
+    #
+    #   <%= chats_dock do %>                    <%# beside the messaging dock's bar %>
+    #     <%= support_launcher %>
+    #   <% end %>
+    #
+    #   <%= support_launcher %>                 <%# no dock: a corner of its own %>
+    #
+    #   show_for:  :signed_in (default) shows it to requesters only;
+    #              :everyone also to visitors who are signed out, whose panel
+    #              says how to reach the desk (sign in, its address, help_url)
+    #   help_url:  the host's public help centre, linked from the panel
+    #
+    # Renders nothing for a visitor who is signed out under :signed_in. The
+    # /support pages stay what they are; the panel is a window onto them.
+    def support_launcher(show_for: :signed_in, help_url: nil)
+      unless LAUNCHER_AUDIENCES.include?(show_for)
+        raise ArgumentError, "support_launcher(show_for:) is one of #{LAUNCHER_AUDIENCES.inspect}, not #{show_for.inspect}"
+      end
+
+      requester = support_desk_requester
+      return if requester.nil? && show_for == :signed_in
+
+      chats_tray { render("support_desk/launcher/launcher", requester: requester, help_url: help_url) }
+    end
+
+    # Whether this render answers the launcher's panel (its frame asked):
+    # the screens then render their panel templates, and links stay inside.
+    def support_panel?
+      SupportDesk::Launcher.panel_request?(respond_to?(:request) ? request : nil)
+    end
+
+    # The frame a link that leaves the current screen targets: the whole page
+    # ("_top"), or, in the launcher's panel, the panel itself (nil: the
+    # nearest frame).
+    #
+    #   link_to "Back", root_path, data: { turbo_frame: support_desk_top_frame }
+    def support_desk_top_frame
+      support_panel? ? nil : "_top"
+    end
+
+    # Render a host's slot partial when it exists (see SLOTS). Absent slots
+    # cost one memoized lookup and render nothing; a name outside SLOTS is
+    # never looked up.
+    def support_desk_slot(name, **locals)
+      key = name.to_s
+      return unless SLOTS.include?(key)
+
+      @support_desk_slots ||= {}
+      @support_desk_slots[key] = lookup_context.exists?("support_desk/slots/#{key}", [], true) unless
+        @support_desk_slots.key?(key)
+      render(partial: "support_desk/slots/#{key}", locals: locals) if @support_desk_slots[key]
     end
 
     # --- What the bundled views render with -----------------------------------
@@ -177,11 +241,12 @@ module SupportDesk
 
     # Where a case is read and answered: its chats conversation, or the
     # engine's own ticket page under `thread_page = :support` (by reference:
-    # the URL people read back from a screen). Falls back to the ticket URL
-    # (which redirects to the same place) for the one case that has no
-    # conversation yet, so a link is never dead.
+    # the URL people read back from a screen) and in the launcher's panel,
+    # whose ticket page is the case inside the panel. Falls back to the
+    # ticket URL (which redirects to the same place) for the one case that
+    # has no conversation yet, so a link is never dead.
     def support_thread_path(ticket)
-      return support_desk_routes.ticket_path(ticket.reference) if SupportDesk.config.support_thread_page?
+      return support_desk_routes.ticket_path(ticket.reference) if support_panel? || SupportDesk.config.support_thread_page?
       return support_desk_routes.ticket_path(ticket) if ticket.conversation.nil? || !respond_to?(:chats_routes)
 
       chats_routes.conversation_path(ticket.conversation)

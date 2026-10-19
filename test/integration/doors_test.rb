@@ -89,7 +89,10 @@ class DoorsTest < ActionDispatch::IntegrationTest
     one_door = count_queries { get "/doors/#{orders.first.id}" }
     # The page draws three doors over the same record; a list screen in a
     # host draws one per card. Either way the lookup happens once.
-    door_lookups = one_door.grep(/support_desk_tickets.*subject_id/m)
+    # The door's lookup: the requester's open tickets about something. (The
+    # badge's count also names support_desk_tickets and subject_id, in a
+    # subquery of chats_conversations: not a door.)
+    door_lookups = one_door.grep(/\ASELECT "support_desk_tickets"\..*"subject_id" IS NOT NULL/m)
 
     assert_equal 1, door_lookups.size, "each door ran its own lookup:\n#{one_door.join("\n")}"
   end

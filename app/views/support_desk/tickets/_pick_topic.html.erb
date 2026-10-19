@@ -25,6 +25,6 @@
   <div class="chats-empty">
     <p class="chats-empty__title"><%= t("support_desk.wizard.no_topics") %></p>
     <%= link_to t("support_desk.wizard.back_to_list"), support_desk_routes.root_path,
-                class: "support-desk-button", data: { turbo_frame: "_top" } %>
+                class: "support-desk-button", data: { turbo_frame: support_desk_top_frame } %>
   </div>
 <% end %>

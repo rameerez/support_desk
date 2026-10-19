@@ -1,0 +1,36 @@
+<%# The launcher's panel, first screen (GET / from the panel's frame): the
+    way to a new case with the promise on it, their open cases as the same
+    rows the page has (each opens in the panel), and the way to the page,
+    where the closed ones are. `data-chats-tray-refresh`: chats' tray reloads
+    this screen (morphed in place) when the launcher's badge moves. %>
+<div class="support-desk-panel__screen" data-chats-tray-refresh>
+  <%= support_desk_slot :panel_top, requester: current_requester %>
+
+  <%= render "support_desk/tickets/door" %>
+
+  <% if @open_tickets.any? %>
+    <%# The dock's own list classes: the same compact rows as its recent list. %>
+    <ul class="chats-inbox__list chats-dock__list">
+      <%= render partial: "support_desk/tickets/ticket_row", collection: @open_tickets, as: :ticket,
+                 locals: { unread_counts: @unread_counts } %>
+    </ul>
+  <% else %>
+    <div class="chats-empty">
+      <p class="chats-empty__title"><%= t("support_desk.tickets.empty_title") %></p>
+      <p class="chats-empty__hint"><%= t("support_desk.tickets.empty_hint") %></p>
+    </div>
+  <% end %>
+
+  <% if @open_tickets.any? || @closed_count.positive? %>
+    <%# The dock's "See all messages", for support. %>
+    <%= link_to support_desk_routes.root_path, class: "chats-dock__see-all support-desk-panel__all",
+                data: { turbo_frame: "_top" } do %>
+      <%= t("support_desk.launcher.all") %>
+      <% if @closed_count.positive? %>
+        <span class="support-desk-panel__count"><%= t("support_desk.tickets.closed_section", count: @closed_count) %></span>
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <%= support_desk_slot :panel_footer, requester: current_requester %>
+</div>

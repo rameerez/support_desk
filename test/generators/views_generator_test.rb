@@ -25,6 +25,12 @@ class ViewsGeneratorTest < Rails::Generators::TestCase
     # The rows this engine contributes to chats' own screens travel too.
     assert_file "app/views/chats/slots/_inbox_top.html.erb"
     assert_file "app/views/chats/slots/_locked_composer.html.erb"
+
+    # And the launcher, with the screens its panel shows.
+    assert_file "app/views/support_desk/launcher/_launcher.html.erb"
+    assert_file "app/views/support_desk/launcher/_icon.html.erb"
+    assert_file "app/views/support_desk/panel/home.html.erb"
+    assert_file "app/views/support_desk/panel/case.html.erb"
   end
 
   test "can eject a single group" do
@@ -32,6 +38,7 @@ class ViewsGeneratorTest < Rails::Generators::TestCase
 
     assert_file "app/views/support_desk/tickets/index.html.erb"
     assert_no_file "app/views/chats/slots/_inbox_top.html.erb"
+    assert_no_file "app/views/support_desk/launcher/_launcher.html.erb"
   end
 
   test "the ejected views are the ones the engine renders" do

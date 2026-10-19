@@ -505,12 +505,88 @@ Both surfaces are pushed screens, never modals: every wizard step is a real
 URL, so the back gesture and cold-boot deep links work.
 
 
+### "Need help?" in the corner: the launcher
+
+The support pages are where help lives; the launcher is the door that is
+always there. One line puts a **Need help?** tab in the bottom-right corner,
+and its panel is the same screens in a frame: their open cases, a new case
+(the wizard, with the promise under the form), a case's thread. Nobody leaves
+the page they were on.
+
+```erb
+<%# A host with chats' messaging dock: the launcher sits in the dock's tray, beside its bar %>
+<%= chats_dock do %>
+  <%= support_launcher %>
+<% end %>
+
+<%# A host without the dock: the launcher brings the corner with it %>
+<%= support_launcher %>
+```
+
+![The launcher beside the messaging dock's bar](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/bar.png)
+
+| Their cases | A case, in the panel | A new one |
+| --- | --- | --- |
+| ![The panel: the way to a new case with its promise, and the open cases](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/panel.png) | ![A case's thread in the panel, an answer signed by the agent](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/case.png) | ![The wizard's last step in the panel, the promise under the form](https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/new.png) |
+
+It is an item of chats' **tray** (chats >= 0.7.1), so chats draws the tab,
+the panel's chrome and the phone's sheet, and runs them: one menu open at a
+time with the Messages panel, the windows giving it room rather than being
+covered, Escape, the open item remembered on a desk, a 48px round button and a
+full-screen sheet on a phone (`chats_dock launcher: false` takes the buttons
+away). The look is the dock's, themed with the same `--chats-dock-*`
+variables. This engine ships no JavaScript of its own for it.
+
+- **The panel is the pages.** A request from the panel's frame
+  (`Turbo-Frame: support_desk_panel`) is answered with the screen's panel
+  template (`support_desk/panel/home`, `new`, `case`) inside
+  `layouts/support_desk/panel`; every other request renders exactly as before.
+  Links that leave a step target the panel instead of the page
+  (`support_desk_top_frame`), a case opens in the panel whatever
+  `thread_page` says (`support_thread_path`), and a new case opens there
+  after it is sent. ⤢ opens the case's page; "All your conversations" the
+  list, closed ones included.
+- **A case in the panel is chats' thread**, the compact body a dock window
+  renders: live, the composer at the bottom, the desk's signature, the way to
+  a person. It is read only while the panel is open (the tray item is the
+  thread's read gate), and when the page itself shows the same case (its
+  page, or a dock window), the panel goes back to the list rather than show
+  it twice.
+- **The badge** is `unread_support_count`, unread messages across their own
+  cases (the number `support_unread_badge` shows), live on the requester's
+  `[requester, :support_desk]` stream: it moves wherever chats says an unread
+  count may have moved (`:unread_changed`), the case's own notices included,
+  and catches up from `GET /support/tickets/badge` when the stream missed one.
+  It never touches the Messages badge, which counts the inbox (your
+  `inbox_scope` applied): a host that keeps support out of the inbox gets two
+  separate numbers. The open list reloads in place when it moves.
+- **Signed out**, `support_launcher show_for: :everyone` shows the same tab,
+  and its panel says how to reach you: sign in (through `/support`, so your
+  own authentication asks and brings them back), the desk's `config.email`
+  for those who can't, and your help centre (`help_url:`).
+
+<img src="https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/phone-sheet.png" alt="A phone: the panel is a full-screen sheet" width="240"> <img src="https://raw.githubusercontent.com/rameerez/support_desk/main/screenshots/launcher/signed-out.png" alt="Signed out: how to reach the desk" width="400">
+
+```erb
+<%= support_launcher show_for: :everyone, help_url: "https://example.com/help" %>
+```
+
+The words are `support_desk.launcher.*` (override them in your own locale
+files); the icon is `support_desk/launcher/_icon` (eject it to draw your own).
+Two slots put your own content in the panel, above and below it:
+`app/views/support_desk/slots/_panel_top.html.erb` and `_panel_footer.html.erb`
+(both get `requester:`, nil when signed out). The `/support` pages stay the
+place support lives; keep your Support links to them.
+
 ### Every helper the requester views can use
 
 | helper | what it renders |
 |---|---|
 | `link_to_support(about:, text:, **html)` | the door into the wizard (nothing when there is nobody to ask, or nothing they may ask about) |
+| `support_launcher(show_for: :signed_in, help_url: nil)` | the ["Need help?" launcher](#need-help-in-the-corner-the-launcher), in chats' tray |
 | `support_unread_badge` | unread support messages, counted against the chats read horizon |
+| `support_panel?` / `support_desk_top_frame` | whether this render answers the launcher's panel; the frame a link that leaves a step targets (`"_top"`, or the panel) |
+| `support_desk_slot(name, **locals)` | the launcher panel's `panel_top` / `panel_footer` slots |
 | `support_desk_styles` | the bundled stylesheet tag for your `<head>` |
 | `support_reply_promise` | "We usually reply in under 24 hours", from `reply_within` (also `SupportDesk.config.desk(key).reply_promise`) |
 | `support_ticket_state(ticket)` | "We're on it" · "We replied" · "We wrote to you" · "Closed" |
@@ -532,8 +608,9 @@ the screens yours:
 rails generate support_desk:views
 ```
 
-That copies `app/views/support_desk/tickets/**` and the two rows this engine
-contributes to chats' screens (`app/views/chats/slots/**`) into your app,
+That copies `app/views/support_desk/tickets/**`, the launcher and its panel's
+screens (`support_desk/launcher/**`, `support_desk/panel/**`) and the two rows
+this engine contributes to chats' screens (`app/views/chats/slots/**`) into your app,
 where they shadow the gem's copies — the Devise move. Delete your copy and
 the default comes back; upgrade the gem and your copy is untouched. Every
 view helper the templates use stays available afterwards, so an ejected copy
@@ -1680,7 +1757,7 @@ that is exactly when a seat gets stranded.
 
 ## Compatibility
 
-Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`).
+Rails 7.2, 8.0 and 8.1; Ruby >= 3.2; PostgreSQL, SQLite and MySQL; bigint or UUID primary keys (the migration follows your app's `primary_key_type`). chats >= 0.7.1 (0.5.0 and later: the launcher sits in chats' tray and its badge listens to chats' `:unread_changed`).
 
 PostgreSQL and SQLite enforce unique new-case creation, one open assignment per ticket and
 one pending proposal per ticket with **partial unique indexes**. New submissions reuse an existing open case. Reopening
@@ -1764,7 +1841,7 @@ SupportDesk::VERSION
 
 After checking out the repo, run `bundle install`, then `bundle exec rake ci`. The dummy app lives in `test/dummy` and mounts all three surfaces the way a real host does: the requester engine at `/messages/support`, `chats` at `/messages`, and the turnkey console at `/admin/support` — plus the same console again inside a host-owned `madmin` namespace, because "the console uses only the public API" is a claim that needs a second implementation to be worth anything.
 
-`chats` is the kernel this gem is a product on and the two are developed in lockstep. support_desk requires `chats >= 0.5.1, < 1.0`. Until that is on rubygems, the bundle takes the reviewed chats package from `vendor/cache` (provenance and checksum in `vendor/cache/README.md`), so `bundle exec rake ci` needs no network and no sibling checkout.
+`chats` is the kernel this gem is a product on and the two are developed in lockstep. support_desk requires `chats >= 0.7.1, < 1.0`. Until that is on rubygems, the bundle takes the reviewed chats package from `vendor/cache` (provenance, checksum and the step that adds it in `vendor/cache/README.md`), so `bundle exec rake ci` needs no network and no sibling checkout.
 
 ## Contributing
 

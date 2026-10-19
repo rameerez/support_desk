@@ -52,7 +52,10 @@ class VerifiedDeskTest < ActionDispatch::IntegrationTest
 
     get "/messages/#{conversation.id}"
     assert_response :success
-    assert_empty css_select(BADGE)
+    # chats 0.6 renders the thread beside the inbox list (two panes), and the
+    # list holds the desk's badged door: the claim is about Bob's thread.
+    assert_empty css_select(".chats-split__conversation #{BADGE}, .chats-thread #{BADGE}")
+
     assert_equal "Bob", css_select(".chats-thread__title").first.text.strip
   end
 

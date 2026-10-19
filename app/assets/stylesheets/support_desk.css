@@ -250,3 +250,80 @@
      only the error notice carries colours of its own. */
   .support-desk-error { background: #3f1d1d; color: #fecaca; }
 }
+
+/* --- The launcher's panel (0.5.0) ------------------------------------------- *
+ *
+ * `support_launcher` is an item of chats' tray: chats draws its tab, the
+ * panel's chrome and the phone's sheet. This is the content: a frame that
+ * fills the panel and scrolls inside it. Rows, the empty state, "All your
+ * conversations" and a case's header wear the dock's own classes
+ * (.chats-dock__list, .chats-dock__see-all, .chats-window__header), so a
+ * host's dock theme reaches them too.
+ */
+.support-desk-launcher__name { overflow: hidden; text-overflow: ellipsis; }
+
+.support-desk-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  font-size: 0.875rem;
+}
+.support-desk-panel__screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.support-desk-panel__screen > .support-desk-door { margin: 0.75rem; }
+.support-desk-panel__all { margin-top: auto; gap: 0.4rem; }
+/* inline-block: the link's underline (a host's, on hover) stops at the count. */
+.support-desk-panel__count { display: inline-block; font-weight: 400; color: var(--support-desk-text-muted); }
+.support-desk-panel__loading { margin: auto; padding: 1.5rem; text-align: center; }
+
+/* The wizard, compacted to the panel's width. */
+.support-desk-panel__wizard .support-desk-wizard__header { padding: 0.85rem 0.85rem 0.15rem; }
+.support-desk-panel__wizard .support-desk-wizard__ask { font-size: 1.05rem; }
+.support-desk-panel__wizard :is(.support-desk-choice, .support-desk-card, .support-desk-error, .support-desk-notice) {
+  margin-inline: 0.75rem;
+}
+.support-desk-panel__wizard .support-desk-choice { padding: 0.7rem 0.85rem; }
+.support-desk-panel__wizard .support-desk-form { padding: 0 0.75rem 1rem; }
+.support-desk-panel__wizard .support-desk-form__input { padding: 0.65rem 0.8rem; }
+
+/* A case: the dock window's header, and the way to a person under it. */
+.support-desk-panel__nav { padding: 0 4px; gap: 2px; }
+.support-desk-panel__heading { padding: 0 6px; }
+.support-desk-panel__human {
+  flex: none;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--chats-dock-edge, var(--support-desk-border));
+}
+.support-desk-panel__human .support-desk-notice__title { margin: 0; font-size: 0.8125rem; }
+
+/* Signed out: how to reach the desk. */
+.support-desk-panel__signed-out { gap: 0.75rem; padding: 1rem; }
+.support-desk-panel__lead,
+.support-desk-panel__promise,
+.support-desk-panel__note { margin: 0; }
+.support-desk-panel__lead { font-size: 0.9375rem; font-weight: 600; }
+.support-desk-panel__promise,
+.support-desk-panel__note { color: var(--support-desk-text-muted); }
+.support-desk-panel__note a,
+.support-desk-panel__link { color: inherit; font-weight: 600; }
+
+/* A phone: the sheet fills the screen; fields at 16px, or iOS zooms in. */
+@media (max-width: 699.98px), (max-height: 499.98px) {
+  .support-desk-panel { font-size: 1rem; }
+  .support-desk-panel__wizard .support-desk-form__input { font-size: 16px; }
+}
+
+/* The wall in the panel: its title at the panel's size, room around it. */
+.support-desk-panel__wall { padding-bottom: 1rem; }
+.support-desk-panel__wall .chats-inbox__header { padding: 0.85rem 0.85rem 0.25rem; }
+.support-desk-panel__wall .chats-inbox__title { font-size: 1.05rem; margin: 0; }
+.support-desk-panel__wall :is(.support-desk-notice__title, .support-desk-form) { margin-inline: 0.75rem; padding-inline: 0; }
+.support-desk-panel__wall > .support-desk-button,
+.support-desk-panel__wall .support-desk-button { margin: 0.5rem 0.75rem 0; }

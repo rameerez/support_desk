@@ -1,0 +1,25 @@
+<%# The launcher's panel for a visitor who is signed out
+    (`support_launcher show_for: :everyone`): how to reach the desk. Signing
+    in goes through /support, so the host's own authentication asks for it
+    and brings them back here; the desk's address is for those who can't
+    sign in (often why they need help); the help centre when the host has
+    one. Locals: desk (its configuration), help_url. %>
+<div class="support-desk support-desk-panel support-desk-panel__screen support-desk-panel__signed-out">
+  <%= support_desk_slot :panel_top, requester: nil %>
+
+  <p class="support-desk-panel__lead"><%= t(".lead") %></p>
+  <% if (promise = desk.reply_promise) %>
+    <p class="support-desk-panel__promise"><%= promise %></p>
+  <% end %>
+
+  <%= link_to t(".sign_in"), support_desk_routes.root_path, class: "support-desk-button", data: { turbo_frame: "_top" } %>
+
+  <% if desk.email.present? %>
+    <p class="support-desk-panel__note"><%= t(".email_html", email: mail_to(desk.email)) %></p>
+  <% end %>
+  <% if help_url.present? %>
+    <%= link_to t(".help"), help_url, class: "support-desk-panel__link" %>
+  <% end %>
+
+  <%= support_desk_slot :panel_footer, requester: nil %>
+</div>
