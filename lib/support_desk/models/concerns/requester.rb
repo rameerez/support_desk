@@ -93,9 +93,13 @@ module SupportDesk
     end
 
     # Unread messages across every support conversation this requester has,
-    # counted against the chats read horizon — the number for a nav badge.
+    # counted against the chats read horizon — the number for a nav badge
+    # and the launcher's. Counted through the cases they can open
+    # (Ticket.conversations_of: their seat still there, the same scope the
+    # case page and chats' lookup use), so the badge never counts a case that
+    # would 404.
     def unread_support_count
-      conversation_ids = support_tickets.where.not(conversation_id: nil).distinct.pluck(:conversation_id)
+      conversation_ids = SupportDesk::Ticket.conversations_of(self).reorder(nil).distinct.pluck(:id)
       return 0 if conversation_ids.empty?
 
       Chats::Conversation.unread_counts_for(self, conversation_ids).values.sum

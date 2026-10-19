@@ -54,6 +54,17 @@ class MacrosTest < ActiveSupport::TestCase
     assert_equal 0, @alice.unread_support_count
   end
 
+  test "unread_support_count never counts a case whose seat is gone: the badge and the case agree" do
+    ticket = ticket_for(@alice)
+    ticket.reply!("una", by: @lucia)
+    assert_operator @alice.unread_support_count, :>, 0
+
+    ticket.conversation.participant_for(@alice).leave!
+
+    assert_equal 0, @alice.unread_support_count, "the case would 404 for them now, so it counts for nothing"
+    assert_nil SupportDesk::Ticket.requester_conversation(@alice, ticket.conversation_id), "as the case lookup says"
+  end
+
   test "a requester with tickets can't be deleted out from under them" do
     ticket_for(@alice)
 
