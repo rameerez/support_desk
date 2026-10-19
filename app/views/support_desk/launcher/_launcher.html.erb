@@ -1,0 +1,40 @@
+<%# The "Need help?" launcher (`support_launcher`): one item of chats' tray,
+    beside the messaging dock's bar or in a corner of its own. chats draws the
+    tab, the panel's chrome and the phone's sheet, and runs them (one open at
+    a time, Escape, memory, the badge's catch-up); this is what is ours: the
+    words, the icon, the live badge and the panel's content.
+
+    Signed in, the panel is a lazy frame onto this engine's own screens (the
+    list, the wizard, a case), answered with their panel templates
+    (SupportDesk::TicketsController). `data-chats-tray-home`: if the page
+    ever shows the case the panel shows, the panel goes back to the list.
+    `refresh: :morph`: the list reloads in place when the badge moves.
+    Signed out, a short panel says how to reach the desk.
+
+    Locals: requester (nil when signed out), help_url. %>
+<% desk_key = requester ? requester.class.support_desk_key : :default %>
+<% desk = SupportDesk.config.desk(desk_key) %>
+<%= stylesheet_link_tag "support_desk" %>
+<%= chats_tray_item :support,
+      label: t("support_desk.launcher.label"),
+      title: safe_join([ tag.span(desk.name, class: "support-desk-launcher__name"), support_desk_badge(desk_key) ]),
+      icon: render("support_desk/launcher/icon"),
+      badge: (safe_join([ turbo_stream_from(requester, :support_desk),
+                          render("support_desk/launcher/badge", count: requester.unread_support_count) ]) if requester),
+      badge_url: (support_desk_routes.badge_tickets_path if requester) do %>
+  <% if requester %>
+    <%= turbo_frame_tag SupportDesk::Launcher::FRAME,
+          src: support_desk_routes.root_path,
+          loading: :lazy,
+          refresh: :morph,
+          class: "support-desk support-desk-panel",
+          data: { chats_tray_home: support_desk_routes.root_path } do %>
+      <%# Until the frame loads, and for good without JavaScript. %>
+      <p class="support-desk-panel__loading">
+        <%= link_to t("support_desk.launcher.open"), support_desk_routes.root_path, data: { turbo_frame: "_top" } %>
+      </p>
+    <% end %>
+  <% else %>
+    <%= render "support_desk/launcher/signed_out", desk: desk, help_url: help_url %>
+  <% end %>
+<% end %>

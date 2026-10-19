@@ -1,0 +1,6 @@
+<%# The launcher's panel (SupportDesk::Launcher): a screen answering the
+    panel's frame is the screen inside that frame, and nothing else of the
+    host's layout. Turbo takes the frame's content into the panel. %>
+<%= turbo_frame_tag SupportDesk::Launcher::FRAME do %>
+  <%= yield %>
+<% end %>

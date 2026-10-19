@@ -1,0 +1,8 @@
+<%# The wizard in the launcher's panel (GET /new from the panel's frame):
+    the same step partials as the page, in the panel's one frame instead of
+    the page's `support_wizard` (and never `advance`: the address bar is the
+    host's page). Every step's links navigate the panel; the form posts from
+    it and the new case opens in it. %>
+<div class="support-desk-panel__screen support-desk-panel__wizard">
+  <%= render support_wizard_partial(@wizard), wizard: @wizard, error: @error %>
+</div>

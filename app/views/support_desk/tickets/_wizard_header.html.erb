@@ -10,7 +10,7 @@
     <%= link_to t("support_desk.wizard.back"),
                 support_desk_routes.root_path,
                 class: "support-desk-wizard__back",
-                data: { turbo_frame: "_top" } %>
+                data: { turbo_frame: support_desk_top_frame } %>
   <% end %>
 
   <% if (ask = local_assigns[:ask] || wizard.ask) %>

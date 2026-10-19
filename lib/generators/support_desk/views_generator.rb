@@ -23,15 +23,21 @@ module SupportDesk
 
       # Which groups to eject. `tickets` is every requester screen (the list,
       # the wizard's three frames, the rows and the doors); `slots` is the
-      # row this engine contributes to chats' inbox.
+      # row this engine contributes to chats' inbox; `launcher` is the
+      # "Need help?" launcher (its tab, badge, icon and signed-out panel) and
+      # the screens its panel shows.
       class_option :views,
                    type: :array,
-                   default: %w[tickets slots],
-                   desc: "Which view groups to copy (tickets, slots)"
+                   default: %w[tickets slots launcher],
+                   desc: "Which view groups to copy (tickets, slots, launcher)"
 
       def copy_views
         directory "support_desk/tickets", "app/views/support_desk/tickets" if include?("tickets")
         directory "chats/slots", "app/views/chats/slots" if include?("slots")
+        return unless include?("launcher")
+
+        directory "support_desk/launcher", "app/views/support_desk/launcher"
+        directory "support_desk/panel", "app/views/support_desk/panel"
       end
 
       def show_styling_tip

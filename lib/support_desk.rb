@@ -330,9 +330,11 @@ module SupportDesk
 
     # --- The chats seam -------------------------------------------------------------
 
-    # Subscribe the gem's own `:message_created` listener, which is what
+    # Subscribe the gem's own chats listeners: `:message_created`, which is what
     # keeps `awaiting`, the SLA clocks and reopen-on-reply true without
-    # anybody remembering to call anything.
+    # anybody remembering to call anything, and `:unread_changed`, which
+    # keeps the launcher's badge live.
+
     #
     # Safe to call as often as you like: chats replaces a subscriber
     # registered under the same `key:` rather than stacking another one.
@@ -345,6 +347,11 @@ module SupportDesk
         # The constant is resolved on every call on purpose: in development
         # the Ticket class is a new object after each reload.
         SupportDesk::Ticket.for_conversation(message.conversation)&.register!(message)
+      end
+      # The launcher's badge (chats >= 0.7.0): wherever an unread count in a
+      # case's conversation may have moved, the case's own notices included.
+      Chats.on(:unread_changed, key: :support_desk_launcher) do |messager:, conversation:|
+        SupportDesk::Launcher.unread_changed(messager, conversation)
       end
       self
     end

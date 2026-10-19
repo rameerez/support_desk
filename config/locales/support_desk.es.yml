@@ -109,6 +109,16 @@ es:
       about: "¿Necesitas ayuda con %{subject}?"
       existing: "Ver tu conversación de soporte"
       new_conversation: "Abrir una nueva conversación"
+    launcher:
+      label: "¿Necesitas ayuda?"
+      open: "Abrir soporte"
+      all: "Todas tus conversaciones"
+      open_page: "Abrir en una página"
+      signed_out:
+        lead: "Inicia sesión y escríbenos: tus conversaciones con nosotros se guardan en tu cuenta."
+        sign_in: "Inicia sesión para escribirnos"
+        email_html: "¿No puedes iniciar sesión? Escribe a %{email}."
+        help: "Visita el centro de ayuda"
     inbox:
       empty_hint: "¿Necesitas ayuda? Escríbenos"
     limits:

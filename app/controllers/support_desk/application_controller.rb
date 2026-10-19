@@ -81,13 +81,29 @@ module SupportDesk
       respond_to?(:chats) ? chats : Chats::Engine.routes.url_helpers
     end
 
+    # Whether this request is the launcher's panel (SupportDesk::Launcher):
+    # then the screens answer with the panel's templates.
+    def support_panel?
+      SupportDesk::Launcher.panel_request?(request)
+    end
+
+    # A screen: +page+ on the page, or, in the launcher's panel, +panel+
+    # inside the panel's frame (layouts/support_desk/panel) and nothing else
+    # of the layout.
+    def render_screen(page, panel: page, **options)
+      return render(page, **options) unless support_panel?
+
+      render panel, layout: "support_desk/panel", **options
+    end
+
     # Where a case is read and answered: its chats conversation, in the
     # chats inbox (`thread_page = :chats`) or on this engine's ticket page
     # (`:support`). Never a second thread UI of our own: that page renders
-    # chats' thread.
+    # chats' thread. In the launcher's panel, always the ticket page, which
+    # answers the panel with the case inside it.
     def conversation_path_for(ticket)
       return root_path if ticket.conversation.nil?
-      return ticket_path(ticket.reference) if SupportDesk.config.support_thread_page?
+      return ticket_path(ticket.reference) if support_panel? || SupportDesk.config.support_thread_page?
 
       chats_routes.conversation_path(ticket.conversation)
     end

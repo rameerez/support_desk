@@ -19,6 +19,10 @@ SupportDesk::Engine.routes.draw do
   # for emails and notifications, that never has to know where chats is
   # mounted.
   resources :tickets, only: %i[create show] do
+    # The launcher's badge, as a Turbo Stream: what its stream missed
+    # (a reconnect, a return to the tab), asked again by chats' tray.
+    get :badge, on: :collection
+
     # The door out of a machine. It is a POST on the CASE rather than
     # anything to do with chats, because it is a fact about the case: from
     # here on a person is expected, whatever the assistant would have done

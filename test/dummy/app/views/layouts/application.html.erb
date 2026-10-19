@@ -2,7 +2,9 @@
 <html>
   <head>
     <title>Dummy</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <%= csrf_meta_tags %>
+    <%= action_cable_meta_tag %>
     <%# Turbo, for real: a <turbo-frame> is only a frame in a browser that
         has Turbo loaded, so the system tests need this to be testing
         anything at all. %>
@@ -22,5 +24,17 @@
         <link> inline in the body — a host theme in <head> would lose to it on
         document order for every rule of equal specificity. %>
     <%= render "layouts/demo_chrome" %>
+
+    <%# The launcher, the two ways a host renders it (the `launcher` cookie,
+        set by the browser tests): in the messaging dock's tray, or on its
+        own in a corner when there is no dock. Absent: no launcher at all. %>
+    <% case cookies[:launcher] %>
+    <% when "dock" %>
+      <%= chats_dock do %>
+        <%= support_launcher show_for: :everyone, help_url: "https://help.example.com" %>
+      <% end %>
+    <% when "standalone" %>
+      <%= support_launcher show_for: :everyone, help_url: "https://help.example.com" %>
+    <% end %>
   </body>
 </html>

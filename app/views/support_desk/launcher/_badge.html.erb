@@ -1,0 +1,5 @@
+<%# The launcher's badge: unread messages across the requester's cases
+    (`unread_support_count`), hidden at zero. What their
+    `[requester, :support_desk]` stream replaces (SupportDesk::Launcher) and
+    GET tickets/badge answers. %>
+<%= chats_tray_badge count, id: SupportDesk::Launcher::BADGE_ID %>

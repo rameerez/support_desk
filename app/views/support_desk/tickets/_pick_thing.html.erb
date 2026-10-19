@@ -14,7 +14,7 @@
         <% if open_ticket %>
           <%= link_to support_thread_path(open_ticket),
                       class: "support-desk-choice support-desk-choice--taken",
-                      data: { turbo_frame: "_top" } do %>
+                      data: { turbo_frame: support_desk_top_frame } do %>
             <span class="support-desk-choice__label"><%= record.support_label %></span>
             <span class="support-desk-choice__hint"><%= t("support_desk.wizard.already_open") %> ›</span>
           <% end %>
