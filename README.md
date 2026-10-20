@@ -1841,7 +1841,7 @@ SupportDesk::VERSION
 
 After checking out the repo, run `bundle install`, then `bundle exec rake ci`. The dummy app lives in `test/dummy` and mounts all three surfaces the way a real host does: the requester engine at `/messages/support`, `chats` at `/messages`, and the turnkey console at `/admin/support` — plus the same console again inside a host-owned `madmin` namespace, because "the console uses only the public API" is a claim that needs a second implementation to be worth anything.
 
-`chats` is the kernel this gem is a product on and the two are developed in lockstep. support_desk requires `chats >= 0.7.1, < 1.0`. Until that is on rubygems, the bundle takes the reviewed chats package from `vendor/cache` (provenance, checksum and the step that adds it in `vendor/cache/README.md`), so `bundle exec rake ci` needs no network and no sibling checkout.
+`chats` is the kernel this gem is a product on and the two are developed in lockstep. support_desk requires `chats >= 0.7.1, < 1.0`, from rubygems; CI asserts the exact chats it resolved (`CHATS_VERSION_UNDER_TEST` in `.github/workflows/test.yml`), so a new chats release is adopted by a deliberate bump, never silently.
 
 ## Contributing
 
