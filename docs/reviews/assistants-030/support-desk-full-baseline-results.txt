@@ -1,0 +1,192 @@
+== 20260101000000 CreateDummyHostTables: migrating ============================
+-- create_table(:users)
+   -> 0.0006s
+-- create_table(:orders)
+   -> 0.0009s
+-- create_table(:invoices)
+   -> 0.0005s
+== 20260101000000 CreateDummyHostTables: migrated (0.0020s) ===================
+
+== 20260101000001 CreateChatsTables: migrating ================================
+-- create_table(:chats_conversations, {id: :primary_key})
+   -> 0.0009s
+-- add_index(:chats_conversations, [:subject_type, :subject_id], {name: "index_chats_conversations_on_subject"})
+   -> 0.0002s
+-- add_index(:chats_conversations, :direct_key, {unique: true, name: "index_chats_conversations_on_direct_key"})
+   -> 0.0001s
+-- add_index(:chats_conversations, :last_message_at, {name: "index_chats_conversations_on_last_message_at"})
+   -> 0.0001s
+-- create_table(:chats_participants, {id: :primary_key})
+   -> 0.0003s
+-- add_index(:chats_participants, [:conversation_id, :messager_type, :messager_id], {unique: true, name: "index_chats_participants_uniqueness"})
+   -> 0.0001s
+-- add_index(:chats_participants, [:messager_type, :messager_id], {name: "index_chats_participants_on_messager"})
+   -> 0.0001s
+-- create_table(:chats_messages, {id: :primary_key})
+   -> 0.0004s
+-- add_index(:chats_messages, [:conversation_id, :created_at, :id], {name: "index_chats_messages_on_conversation_and_created_at"})
+   -> 0.0001s
+-- add_index(:chats_messages, [:sender_type, :sender_id], {name: "index_chats_messages_on_sender"})
+   -> 0.0001s
+-- add_index(:chats_messages, [:author_type, :author_id], {name: "index_chats_messages_on_author"})
+   -> 0.0001s
+-- add_index(:chats_messages, :reply_to_id, {name: "index_chats_messages_on_reply_to_id"})
+   -> 0.0001s
+-- create_table(:chats_reactions, {id: :primary_key})
+   -> 0.0002s
+-- add_index(:chats_reactions, [:message_id, :reactor_type, :reactor_id, :emoji], {unique: true, name: "index_chats_reactions_uniqueness"})
+   -> 0.0005s
+== 20260101000001 CreateChatsTables: migrated (0.0034s) =======================
+
+== 20260101000002 CreateSupportDeskTables: migrating ==========================
+-- create_table(:support_desk_desks, {id: :primary_key})
+   -> 0.0004s
+-- add_index(:support_desk_desks, :key, {unique: true, name: "index_support_desk_desks_on_key"})
+   -> 0.0003s
+-- create_table(:support_desk_tickets, {id: :primary_key})
+   -> 0.0006s
+-- add_index(:support_desk_tickets, :reference, {unique: true, name: "index_support_desk_tickets_on_reference"})
+   -> 0.0001s
+-- add_index(:support_desk_tickets, [:requester_type, :requester_id, :status], {name: "index_support_desk_tickets_on_requester"})
+   -> 0.0001s
+-- add_index(:support_desk_tickets, [:desk_id, :status, :awaiting, :waiting_since], {name: "index_support_desk_tickets_on_queue"})
+   -> 0.0003s
+-- add_index(:support_desk_tickets, [:assignee_type, :assignee_id, :status], {name: "index_support_desk_tickets_on_assignee"})
+   -> 0.0001s
+-- add_index(:support_desk_tickets, [:subject_type, :subject_id], {name: "index_support_desk_tickets_on_subject"})
+   -> 0.0001s
+-- add_index(:support_desk_tickets, :conversation_id, {unique: true, name: "index_support_desk_tickets_on_conversation_id"})
+   -> 0.0002s
+-- add_index(:support_desk_tickets, [:desk_id, :external_ref], {unique: true, name: "index_support_desk_tickets_on_external_ref"})
+   -> 0.0001s
+-- add_index(:support_desk_tickets, [:requester_type, :requester_id, :desk_id, :cardinality_key], {unique: true, where: "status <> 'closed'", name: "index_support_desk_tickets_on_open_cardinality"})
+   -> 0.0001s
+-- create_table(:support_desk_assignments, {id: :primary_key})
+   -> 0.0003s
+-- add_index(:support_desk_assignments, [:ticket_id, :assigned_at], {name: "index_support_desk_assignments_on_ticket"})
+   -> 0.0002s
+-- add_index(:support_desk_assignments, [:agent_type, :agent_id, :released_at], {name: "index_support_desk_assignments_on_agent"})
+   -> 0.0001s
+-- add_index(:support_desk_assignments, :ticket_id, {unique: true, where: "released_at IS NULL", name: "index_support_desk_assignments_on_open_ticket"})
+   -> 0.0001s
+-- create_table(:support_desk_events, {id: :primary_key})
+   -> 0.0002s
+-- add_index(:support_desk_events, [:ticket_id, :created_at], {name: "index_support_desk_events_on_ticket"})
+   -> 0.0001s
+-- add_index(:support_desk_events, [:ticket_id, :kind], {name: "index_support_desk_events_on_kind"})
+   -> 0.0001s
+== 20260101000002 CreateSupportDeskTables: migrated (0.0032s) =================
+
+== 20260101000003 CreateActiveStorageTables: migrating ========================
+-- create_table(:active_storage_blobs)
+   -> 0.0049s
+-- create_table(:active_storage_attachments)
+   -> 0.0005s
+-- create_table(:active_storage_variant_records)
+   -> 0.0008s
+== 20260101000003 CreateActiveStorageTables: migrated (0.0063s) ===============
+
+== 20260101000004 AddOpenedByToSupportDeskTickets: migrating ==================
+-- column_exists?(:support_desk_tickets, :opened_by_type)
+   -> 0.0015s
+-- column_exists?(:support_desk_tickets, :opened_by_id)
+   -> 0.0008s
+-- add_reference(:support_desk_tickets, :opened_by, {polymorphic: true, null: true, type: "bigint", index: false})
+   -> 0.0007s
+-- add_index(:support_desk_tickets, [:opened_by_type, :opened_by_id], {name: "index_support_desk_tickets_on_opened_by"})
+   -> 0.0001s
+-- execute("UPDATE support_desk_tickets SET opened_by_type = requester_type, opened_by_id = requester_id WHERE opened_by_id IS NULL")
+   -> 0.0000s
+== 20260101000004 AddOpenedByToSupportDeskTickets: migrated (0.0039s) =========
+
+== 20260101000005 AddSupportBlockedToUsers: migrating =========================
+-- add_column(:users, :support_blocked, :boolean, {null: false, default: false})
+   -> 0.0008s
+== 20260101000005 AddSupportBlockedToUsers: migrated (0.0008s) ================
+
+== 20260101000006 AddAssistantsToSupportDesk: migrating =======================
+-- table_exists?(:support_desk_assistants)
+   -> 0.0002s
+-- create_table(:support_desk_assistants, {id: :primary_key})
+   -> 0.0004s
+-- index_exists?(:support_desk_assistants, :key, {name: "index_support_desk_assistants_on_key"})
+   -> 0.0000s
+-- add_index(:support_desk_assistants, :key, {unique: true, name: "index_support_desk_assistants_on_key"})
+   -> 0.0001s
+-- table_exists?(:support_desk_drafts)
+   -> 0.0001s
+-- create_table(:support_desk_drafts, {id: :primary_key})
+   -> 0.0024s
+-- add_foreign_key(:support_desk_drafts, :support_desk_tickets, {column: :ticket_id})
+   -> 0.0051s
+-- index_exists?(:support_desk_drafts, [:ticket_id, :created_at], {name: "index_support_desk_drafts_on_ticket"})
+   -> 0.0000s
+-- add_index(:support_desk_drafts, [:ticket_id, :created_at], {name: "index_support_desk_drafts_on_ticket"})
+   -> 0.0001s
+-- index_exists?(:support_desk_drafts, [:author_type, :author_id, :status], {name: "index_support_desk_drafts_on_author"})
+   -> 0.0002s
+-- add_index(:support_desk_drafts, [:author_type, :author_id, :status], {name: "index_support_desk_drafts_on_author"})
+   -> 0.0001s
+-- index_exists?(:support_desk_drafts, :ticket_id, {name: "index_support_desk_drafts_on_pending"})
+   -> 0.0002s
+-- add_index(:support_desk_drafts, :ticket_id, {unique: true, where: "status = 'pending'", name: "index_support_desk_drafts_on_pending"})
+   -> 0.0001s
+-- column_exists?(:support_desk_tickets, :assistant_revision)
+   -> 0.0009s
+-- add_column(:support_desk_tickets, :assistant_revision, :bigint, {null: false, default: 0})
+   -> 0.0005s
+-- column_exists?(:support_desk_tickets, :last_requester_message_id)
+   -> 0.0006s
+-- add_column(:support_desk_tickets, :last_requester_message_id, "INTEGER")
+   -> 0.0002s
+-- column_exists?(:support_desk_tickets, :assistant_turns_count)
+   -> 0.0010s
+-- add_column(:support_desk_tickets, :assistant_turns_count, :integer, {null: false, default: 0})
+   -> 0.0004s
+-- column_exists?(:support_desk_tickets, :assistant_acted_at)
+   -> 0.0008s
+-- add_column(:support_desk_tickets, :assistant_acted_at, :datetime)
+   -> 0.0003s
+-- column_exists?(:support_desk_tickets, :assistant_paused_at)
+   -> 0.0008s
+-- add_column(:support_desk_tickets, :assistant_paused_at, :datetime)
+   -> 0.0003s
+-- column_exists?(:support_desk_tickets, :assistant_paused_reason)
+   -> 0.0008s
+-- add_column(:support_desk_tickets, :assistant_paused_reason, :string)
+   -> 0.0003s
+-- column_exists?(:support_desk_tickets, :assistant_cap)
+   -> 0.0010s
+-- add_column(:support_desk_tickets, :assistant_cap, :string)
+   -> 0.0004s
+-- column_exists?(:support_desk_tickets, :human_required_at)
+   -> 0.0009s
+-- add_column(:support_desk_tickets, :human_required_at, :datetime)
+   -> 0.0003s
+-- column_exists?(:support_desk_tickets, :human_required_reason)
+   -> 0.0008s
+-- add_column(:support_desk_tickets, :human_required_reason, :string)
+   -> 0.0002s
+-- index_exists?(:support_desk_tickets, [:desk_id, :human_required_at], {name: "index_support_desk_tickets_on_needs_human"})
+   -> 0.0006s
+-- add_index(:support_desk_tickets, [:desk_id, :human_required_at], {name: "index_support_desk_tickets_on_needs_human"})
+   -> 0.0001s
+-- execute("UPDATE support_desk_tickets SET last_requester_message_id = ( SELECT m.id FROM chats_messages m WHERE m.conversation_id = support_desk_tickets.conversation_id AND m.sender_type = support_desk_tickets.requester_type AND m.sender_id = support_desk_tickets.requester_id AND m.kind = 'text' ORDER BY m.created_at DESC, m.id DESC LIMIT 1) WHERE last_requester_message_id IS NULL AND conversation_id IS NOT NULL")
+   -> 0.0000s
+== 20260101000006 AddAssistantsToSupportDesk: migrated (0.0209s) ==============
+
+Run options: --seed 52868
+
+# Running:
+
+.............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+
+Finished in 40.320521s, 28.0998 runs/s, 154.1151 assertions/s.
+1133 runs, 6214 assertions, 0 failures, 0 errors, 0 skips
+
+============================================================
+COVERAGE SUMMARY
+============================================================
+Line Coverage:   97.22%
+Branch Coverage: 81.71%
+============================================================
