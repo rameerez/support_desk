@@ -102,5 +102,4 @@ class AdversarialReviewTest < ActiveSupport::TestCase
     configure_support_desk!
     assert_equal signature, Chats.message_signature_for(message.reload), 'flag off rewrites existing assistant disclosure'
   end
-
 end
