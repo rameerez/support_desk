@@ -26,7 +26,7 @@ module SupportDesk
     def index
       # `:assignee` because a row says who is on the case when that is a
       # machine, and a name per row is a query per row.
-      tickets = current_requester.support_tickets
+      tickets = current_requester.support_tickets.on_current_desks
                                  .includes(:desk, :subject, :assignee, conversation: { last_message: :sender })
       @open_tickets = tickets.not_closed.recent_activity_first.to_a
       @closed_tickets = tickets.closed.newest_first.limit(CLOSED_TICKETS_SHOWN).to_a
@@ -195,9 +195,11 @@ module SupportDesk
 
     # By id, or by the reference people read down a phone line ("T-AB12CD").
     # Always through the requester's OWN tickets, so somebody else's case is
-    # a 404 rather than a redirect into a conversation they can't read.
+    # a 404 rather than a redirect into a conversation they can't read —
+    # and only on the current owner's desks, so another owner's case is a
+    # 404 too.
     def find_ticket
-      scope = current_requester.support_tickets
+      scope = current_requester.support_tickets.on_current_desks
       reference = SupportDesk::Ticket.normalize_reference(params[:id])
 
       if params[:id].to_s.upcase.start_with?(SupportDesk::Ticket::REFERENCE_PREFIX)
@@ -219,7 +221,7 @@ module SupportDesk
     # (their open cases), never a 500 and never a silent failure.
     def render_limit_wall(error)
       @limit_reason = error.is_a?(SupportDesk::TooManyOpenTickets) ? "too_many_open" : "too_fast"
-      @open_tickets = current_requester.support_tickets.not_closed
+      @open_tickets = current_requester.support_tickets.on_current_desks.not_closed
                                        .includes(:desk, :subject, conversation: { last_message: :sender })
                                        .recent_activity_first.to_a
       @unread_counts = unread_counts_for(@open_tickets)

@@ -76,6 +76,35 @@ class AssistantGeneratorTest < Rails::Generators::TestCase
     end
   end
 
+  # A worker has no request and no SupportDesk::Current.owner. The job has to
+  # find the CASE's assistant — the one with its desk's owner — or it would
+  # look up the ownerless one by key and quietly decline every owned case.
+  test "the generated job answers an owned case from a fresh worker, and only for the key it was queued for" do
+    run_generator %w[Rose --disclosure signature]
+    Object.const_set(:ApplicationJob, Class.new(ActiveJob::Base)) unless defined?(::ApplicationJob)
+    load File.join(destination_root, "app/services/support/rose.rb")
+    load File.join(destination_root, "app/jobs/support/rose_turn_job.rb")
+
+    configure_assistant!(:rose, autonomy: :reply)
+    acme = create_user(name: "Acme")
+    ticket = SupportDesk::Current.set(owner: acme) { ticket_for(create_user, message: "Hola") }
+    SupportDesk::Current.reset
+    answer = Support::Rose::Answer.new(kind: :answer, text: "Ya está", confidence: 0.9)
+
+    Support::Rose.stub(:answer, ->(*) { answer }) do
+      Support::RoseTurnJob.perform_now(ticket.id, "someone_else", ticket.assistant_turn)
+      assert_awaiting_reply ticket.reload
+
+      Support::RoseTurnJob.perform_now(ticket.id, "rose", ticket.assistant_turn)
+    end
+
+    assert_awaiting_requester ticket.reload
+    assert_equal acme, ticket.conversation.messages.where(kind: "text").last.author.owner
+  ensure
+    Support.send(:remove_const, :RoseTurnJob) if defined?(Support::RoseTurnJob)
+    Support.send(:remove_const, :Rose) if defined?(Support::Rose)
+  end
+
   test "a two-word name still produces one key, one class and one file each" do
     run_generator %w[CustomerCare --disclosure notice]
 

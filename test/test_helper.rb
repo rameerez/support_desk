@@ -175,8 +175,9 @@ module ActionDispatch
     end
 
     # Act as +user+ for subsequent requests (see the dummy SessionsController).
-    def login_as(user)
-      post "/test_login", params: { user_id: user.id }
+    # +owner:+ is whose desks the session's requests serve (Current.owner).
+    def login_as(user, owner: nil)
+      post "/test_login", params: { user_id: user.id, owner_id: owner&.id }.compact
       assert_response :no_content
     end
 

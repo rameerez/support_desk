@@ -81,6 +81,9 @@ module SupportDesk
         assistant: nil
       }.freeze
 
+      # Everything `apply` may set: the defaults, plus the agent pool.
+      SETTABLE = (DEFAULTS.keys + %i[agents]).freeze
+
       attr_reader :key, :fallback
 
       # A desk's settings, falling back to +fallback+ for anything it
@@ -522,6 +525,25 @@ module SupportDesk
       # Whether THIS desk states the setting itself, rather than inheriting.
       def own?(name) = @settings.key?(name) # :nodoc:
 
+      # Set every setting in +settings+ through its own setter, so a value
+      # from a row is validated exactly like one from the initializer.
+      # `topics:` takes the same block `config.topics` does. What
+      # `config.desk_settings` returns comes in through here.
+      def apply(settings) # :nodoc:
+        settings.to_h.each do |name, value|
+          name = name.to_sym
+          if name == :topics
+            topics(&value)
+          elsif SETTABLE.include?(name)
+            public_send(:"#{name}=", value)
+          else
+            raise ConfigurationError,
+                  "desk #{key}: #{name.inspect} is not a desk setting (#{SETTABLE.map(&:inspect).join(", ")}, :topics)"
+          end
+        end
+        self
+      end
+
       # Forget a setting so this desk inherits it again (tests).
       def reset_setting(name) # :nodoc:
         @settings.delete(name)
@@ -662,12 +684,18 @@ module SupportDesk
         disclosure_line: :"support_desk.system.assistant_disclosure"
       }.freeze
 
-      attr_reader :key
+      # Everything `apply` may set.
+      SETTABLE = (DEFAULTS.keys + %i[hand_off_when cap]).freeze
+
+      attr_reader :key, :fallback
 
       # A fresh assistant, everything at its documented default — except
-      # `disclosure`, which has none.
-      def initialize(key)
+      # `disclosure`, which has none. With a +fallback+ (the initializer's
+      # own assistant, for one whose settings come from a row), anything it
+      # doesn't state is read from there instead.
+      def initialize(key, fallback: nil)
         @key = key.to_sym
+        @fallback = fallback
         @settings = {}
         @hand_off_when = nil
         @cap = nil
@@ -845,7 +873,7 @@ module SupportDesk
       def hand_off_when(&block)
         return @hand_off_when = block if block
 
-        @hand_off_when
+        @hand_off_when || fallback&.hand_off_when
       end
 
       # Set it, validating on assignment (see the reader above).
@@ -859,7 +887,7 @@ module SupportDesk
       def cap(&block)
         return @cap = block if block
 
-        @cap
+        @cap || fallback&.cap
       end
 
       # Set it, validating on assignment (see the reader above).
@@ -926,12 +954,29 @@ module SupportDesk
 
       def read(name) # :nodoc:
         return @settings[name] if @settings.key?(name)
+        return fallback.read(name) if fallback
 
         DEFAULTS[name]
       end
 
       # Whether this assistant states the setting herself (tests).
       def own?(name) = @settings.key?(name) # :nodoc:
+
+      # Set every setting in +settings+ through its own setter — what
+      # `config.assistant_settings` returns comes in through here.
+      def apply(settings) # :nodoc:
+        settings.to_h.each do |name, value|
+          name = name.to_sym
+          unless SETTABLE.include?(name)
+            raise ConfigurationError,
+                  "assistant #{key}: #{name.inspect} is not an assistant setting " \
+                  "(#{SETTABLE.map(&:inspect).join(", ")})"
+          end
+
+          public_send(:"#{name}=", value)
+        end
+        self
+      end
 
       # Forget a setting so it goes back to its default (tests).
       def reset_setting(name) # :nodoc:
@@ -1081,6 +1126,8 @@ module SupportDesk
       @thread_page = :chats
 
       @desks = { default: DeskConfiguration.new(:default) }
+      @desk_settings = nil
+      @assistant_settings = nil
       @assistants = {}
       @default_assistant = nil
       @warnings = []
@@ -1127,7 +1174,7 @@ module SupportDesk
     # back records, a relation, or plain desk keys — all three read the same
     # way in an initializer, so all three are accepted here.
     def desks_visible_to(agent)
-      return Desk.all if visible_desks_for.nil?
+      return Desk.owned_by(Current.owner) if visible_desks_for.nil?
 
       Array(visible_desks_for.call(agent)).filter_map do |desk|
         desk.is_a?(Desk) ? desk : SupportDesk.desk(desk)
@@ -1158,6 +1205,50 @@ module SupportDesk
     rescue StandardError => e
       report_console_authorization_error(e, action)
       false
+    end
+
+    # --- Settings that live in rows ------------------------------------------------
+
+    # Where a desk's settings come from when they are not all in code — one
+    # desk per customer, product or workspace, each with its own name and
+    # promise:
+    #
+    #   config.desk_settings = ->(desk) { desk.owner&.support_settings }
+    #
+    # Called with the Desk record; returns a Hash of desk settings (`name:`,
+    # `reply_within:`, `topics:` with a block…) or nil. Each value goes
+    # through its setter, so a bad row fails like a bad initializer, and
+    # anything the Hash leaves out is read from the initializer as before.
+    # Read once per record: an owned desk is resolved once per request or
+    # job, so a change is picked up by the next one.
+    attr_reader :desk_settings
+
+    def desk_settings=(value)
+      @desk_settings = value.nil? ? nil : ensure_callable(value, "desk_settings")
+    end
+
+    # The same, for an assistant: `autonomy:`, `disclosure:`, `max_turns:`…
+    #
+    #   config.assistant_settings = ->(assistant) { assistant.owner&.assistant_settings }
+    attr_reader :assistant_settings
+
+    def assistant_settings=(value)
+      @assistant_settings = value.nil? ? nil : ensure_callable(value, "assistant_settings")
+    end
+
+    # The configuration a Desk record works under: the initializer's desk,
+    # overlaid with what `desk_settings` says about this one. Internal —
+    # read it as `desk.config`.
+    def desk_configuration_for(record) # :nodoc:
+      base = desk(record.key)
+      overlay(base, desk_settings&.call(record)) { DeskConfiguration.new(base.key, fallback: base) }
+    end
+
+    # The same, for an Assistant record. Raises ConfigurationError when the
+    # initializer no longer declares her — rows add to code, never replace it.
+    def assistant_configuration_for(record) # :nodoc:
+      base = assistant(record.key)
+      overlay(base, assistant_settings&.call(record)) { AssistantConfiguration.new(base.key, fallback: base) }
     end
 
     # --- Desks ------------------------------------------------------------------
@@ -1420,6 +1511,15 @@ module SupportDesk
       raise ConfigurationError,
             "desk #{desk.key}, topic #{topic.path.inspect}: about: #{name} is not supportable. " \
             "Add `supportable topic: :#{topic.path}` to #{name}."
+    end
+
+    def overlay(base, settings)
+      return base if settings.blank?
+      unless settings.respond_to?(:to_h)
+        raise ConfigurationError, "#{base.key}: settings hooks must return a Hash or nil, got #{settings.inspect}"
+      end
+
+      yield.apply(settings)
     end
 
     def ensure_class_name(value, name)

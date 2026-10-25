@@ -152,12 +152,14 @@ configuration mistake is a boot failure, never a 3 a.m. `NoMethodError`.
 | `current_requester_method` | `:current_user` | how the engine finds the person asking |
 | `current_agent_method` | `:current_user` | how the console finds the person answering (or define `current_agent` in your controller) |
 | `authenticate_method` | `:authenticate_user!` | your own filter, run before every requester screen |
-| `visible_desks_for` | `nil` (every desk) | `->(agent) { … }` returning the desks this agent may work; scopes the whole console |
+| `visible_desks_for` | `nil` (every desk of `Current.owner`) | `->(agent) { … }` returning the desks this agent may work; scopes the whole console |
 | `thread_page` | `:chats` | where a requester reads a case: `:chats` (its thread in the chats inbox) or `:support` (this engine's own ticket page, for support kept apart from the inbox; see [Support apart from the inbox](#support-apart-from-the-inbox)) |
 | `authorize_console` | `nil` (allow) | `->(agent, ticket, action) { … }`; asked before every console action, `ticket` is nil for `index`, `new`, `next` and `open_conversation`; a hook that raises **denies** |
 | `assistant(key) { … }` | — | declare an assistant (see [Assistants](#-assistants)); `config.assistants`, `config.assistant?(key)` read them back |
 | `default_assistant` | the only one declared | which assistant the `:default` desk gets when more than one exists |
 | `on(event) { … }` | — | subscribe to an event (see [Events](#events)); pass `key:` from code that reloads |
+| `desk_settings` | `nil` | `->(desk) { … }` returning a Hash of desk settings for that row, overlaid on the initializer (see [A desk per customer](#a-desk-per-customer)) |
+| `assistant_settings` | `nil` | `->(assistant) { … }`, the same for an assistant |
 
 ### Desk settings
 
@@ -201,6 +203,76 @@ SupportDesk.desk(:billing)  # another one (nil if nobody configured it)
 
 `SupportDesk.doctor.print` checks all of it against a running app (see
 [Doctor](#doctor)).
+
+### A desk per customer
+
+One app, many customers, each with its own desk. Give every desk an
+**owner** — any record: an account, a workspace, a product — by saying whose
+request or job this is:
+
+```ruby
+# app/controllers/application_controller.rb
+before_action { SupportDesk::Current.owner = current_workspace }
+
+# a job
+SupportDesk::Current.set(owner: workspace) { workspace.support_digest! }
+```
+
+Now `SupportDesk.desk` is **that workspace's** `:default` desk, created the
+first time it is asked for, and everything that names a desk by key follows:
+`ask_support!`, `Ticket.for_desk`, `overdue` and `at_risk`, the console's desk
+list, `find_topic`. Keys are still declared in code, so `:billing` means the
+same thing for every owner; owners multiply rows, not keys. Everything a
+**requester** sees is that owner's too — their list, a case by reference,
+chats' lookup of their support conversations, `unread_support_count`, the
+launcher's badge (on its own stream per owner) — so one person who is a
+customer of two owners never sees one owner's case from the other's app. Anything reached
+from a ticket ignores `Current.owner` — a case knows its desk, a desk knows
+its owner, and its assistant is that owner's assistant. One owner's assistant
+asking to answer another owner's case is a `NotAnAssistant`.
+
+Each owner can have its own settings, from its own rows:
+
+```ruby
+config.desk_settings      = ->(desk)      { desk.owner&.support_settings }      # { name: "Acme Help", reply_within: 4.hours }
+config.assistant_settings = ->(assistant) { assistant.owner&.assistant_settings } # { autonomy: :reply, max_turns: 3 }
+```
+
+A hook returns a Hash or nil. Every value goes through its own setter, so a
+bad row fails exactly like a bad initializer (`ConfigurationError`), and
+whatever the Hash leaves out comes from the initializer. `topics:` takes the
+same block `config.topics` does.
+
+Without an owner nothing changes: the desk with no owner is the one every
+install had before 0.6, memoised for the process. An owned desk is cached for
+one request or job instead — owners are many and change their settings at
+runtime, so a process-wide memo would grow with every customer and serve
+yesterday's name. `SupportDesk.desk(:default, owner: acme)` and
+`SupportDesk.assistant(:rose, owner: acme)` name one explicitly. The sweeps
+(`release_silent_assistants!`, `redispatch_assistant_turns!`) run once for
+everybody.
+
+**Upgrading to 0.6 — in three stages.** The owners migration adds a nullable
+polymorphic `owner` to desks and assistants, makes keys unique per owner, and
+keeps the old unique key for rows with no owner (a partial index; MySQL has
+none, so there an ownerless key is kept unique by the lookup only). `owner_id`
+follows your generator's primary key type.
+
+1. **Migrate** (`rails g support_desk:upgrade && rails db:migrate`). 0.5
+   processes keep working: nothing has an owner yet.
+2. **Deploy 0.6 to every process** — web, jobs, consoles, anything that loads
+   the gem — and retire the last 0.5 one.
+3. **Only then turn owners on**: set `SupportDesk::Current.owner`, and with it
+   create the first owned desk or assistant.
+
+The order is not a formality. 0.5 finds a desk with `find_by(key:)`, which
+knew nothing of owners, and from the first owned row on a key no longer names
+one row: a 0.5 process still running could hand a case to another owner's
+desk, or act as another owner's assistant. Until stage 3 there is nothing for
+it to pick wrongly; 0.6 never picks an owned row for a request with no owner.
+
+The replay migration (PostgreSQL only) rewrites the events table: run it in a
+quiet window.
 
 ## Topics
 
@@ -307,6 +379,7 @@ ticket.overdue?  ticket.at_risk?
 ticket.time_to_first_reply  ticket.time_to_close
 
 ticket.reply!("…", by: lucia)               # sent by the desk, signed by Lucía
+ticket.reply!("…", by: lucia, turn: seen)   # …only if the case is still at the turn Lucía read
 ticket.note!("VIP customer", by: lucia)     # internal; never in the conversation
 ticket.assign!(to: lucia, by: lucia)        # "take"
 ticket.hand_off!(to: pedro, note: "…", by: lucia)
@@ -335,6 +408,7 @@ ticket.export              # a GDPR-friendly Hash: the requester's transcript an
 ticket.notification_title  # "Support · new message" — safe for a lock screen
 ticket.notification_body   # the label — for an authenticated feed
 ticket.register!(message)  # fold a chats message into the clocks by hand (imports); idempotent, and what the chats subscriber calls
+ticket.post_requester_message!("…", via: :email, external_id: "<id@mail>")   # as the requester, with provenance
 ticket.desk_config         # this desk's slice of the configuration
 
 SupportDesk::Ticket.find_by_reference!("t-ab12cd")      # forgives case, the prefix and Crockford lookalikes (O→0, I/L→1)
@@ -350,7 +424,22 @@ has a `kind` (`opened` `assigned` `handed_off` `released` `drop_in` `closed`
 `reopened` `topic_changed` `subject_attached` `note` `escalated`
 `human_requested` `assistant_paused` `assistant_resumed` `draft_sent`
 `draft_rejected` `assistant_withheld` — plus kinds reserved for later
-releases), an `actor` and a `payload`, and is read-only once written.
+releases), an `actor` and a `payload`, and is read-only once written. Two
+more kinds are signals rather than history — `assistant_turn` (there is
+something to answer, at this turn) and `draft_proposed` — written down so a
+[durable reader](#replaying-what-was-written-down) hears about them; they are
+not in the timeline or the export.
+
+A person's `reply!` and `note!` take an optional `turn:`. With one, they are
+**conditional**: a case that moved on since the turn was read (a customer
+wrote again, somebody else answered) raises `SupportDesk::StaleTurn` and
+nothing is written — the `If-Match` of an answer composed in a review screen
+or sent through an API. Without one, they are what they always were.
+
+`post_requester_message!` posts as the requester — what an importer or a
+channel connector calls. `via:` and `external_id:` ride on the message as
+`metadata["support_desk"]` (`:in_app` is the default and is never stamped);
+a case opened with `open!(via: :email)` stamps its first message too.
 
 ### Scopes
 
@@ -1101,7 +1190,8 @@ seat: `assign!(to: rose, by: rose, turn:)` and `release!(by: rose, turn:)`
 require it when `by:` is an assistant (an omitted turn is an
 `ArgumentError`, a stale one a `StaleTurn`), because a run that finished
 after the case moved on must not release the seat a newer one took. A
-**person's** calls are unchanged and take no turn.
+**person's** calls need no turn; `reply!` and `note!` accept one and are
+then conditional too (see [Tickets](#tickets)).
 
 Two consequences worth knowing:
 
@@ -1698,6 +1788,58 @@ nobody holds the case — the gem computes it so every host gets "assignee or
 everyone" right. System messages (opening lines, closure notices) never emit
 anything and never move the clocks.
 
+### Replaying what was written down
+
+Events fire after commit, in memory: a process that dies between the commit
+and the subscriber loses them. What it cannot lose is what the transaction
+wrote — an event row per transition (the `assistant_turn` and
+`draft_proposed` signals included) and a registration row per message. On
+PostgreSQL 13+ you can read those back, in order, without ever skipping one:
+
+```ruby
+horizon = SupportDesk::Events.replay(horizon: checkpoint.horizon) do |row|
+  Bridge.ingest(row)    # a SupportDesk::Event or a SupportDesk::MessageRegistration
+end
+checkpoint.update!(horizon: horizon)
+```
+
+Every row stores `xact_id`, the transaction that wrote it, and `position`,
+from one sequence for both tables. `replay` captures the oldest transaction
+still running, `h = pg_snapshot_xmin(pg_current_snapshot())`, yields every
+row with `horizon <= xact_id < h` in `(xact_id, position)` order, and returns
+`h` only once that whole range is read. Below `h` every transaction has
+committed or aborted, so the range is final.
+
+Why not "the last position I saw"? Because positions are handed out when a
+row is **inserted**, and transactions commit in any order:
+
+1. B starts a transaction; A starts a later one and inserts position 1.
+2. B inserts position 2 and commits.
+3. A reader polls, sees position 2, and checkpoints it.
+4. A commits position 1 — behind the checkpoint, never read.
+
+The horizon reader polls at step 3 too, but stops below A's transaction,
+which is still open; it reads position 1 on the next poll. The cost is that
+one long-running transaction holds the horizon back for as long as it lives,
+so keep transactions short and watch their age. Transaction ids belong to
+the whole PostgreSQL **server**, so that means any transaction on it — in
+another database too, another app's, a console left in `BEGIN`.
+
+A raise returns nothing and the range is read again, so readers deduplicate
+— `position` identifies a row across both tables. A long range can be
+resumed: the block's second argument is a cursor (JSON-friendly) to save once
+a row's effects are durable, and to pass back as `resume:`:
+
+```ruby
+SupportDesk::Events.replay(horizon: c.horizon, resume: c.resume, batch_size: 500) do |row, resume|
+  Bridge.ingest(row)
+  c.update!(resume: resume)
+end
+```
+
+Call it outside a transaction. On SQLite and MySQL it raises
+`ConfigurationError`; the columns are PostgreSQL only.
+
 ## Errors
 
 Every error inherits `SupportDesk::Error`, so `rescue SupportDesk::Error`
@@ -1765,6 +1907,7 @@ historical cases is deliberately exempt from new-case deduplication: if a newer 
 already exists, both histories remain open and support is notified of the reply. No
 conversation is silently merged, closed or discarded. MySQL has no partial indexes,
 so these guarantees are model-only there; the suite's matrix is SQLite and PostgreSQL.
+[Durable replay](#replaying-what-was-written-down) needs PostgreSQL 13 or later.
 
 ## Testing
 
@@ -1818,8 +1961,10 @@ desk records.
 
 ```ruby
 SupportDesk.configure { |config| … }   SupportDesk.config   SupportDesk.configured?
-SupportDesk.desk(key = :default)       # the Desk record, found or created, memoised
-SupportDesk.assistant(key = nil)       # the Assistant record, memoised; nil when none is configured
+SupportDesk.desk(key = :default, owner: Current.owner)   # the Desk record, found or created, memoised
+SupportDesk.assistant(key = nil, owner: Current.owner)   # the Assistant record, memoised; nil when none is configured
+SupportDesk::Current.owner = workspace                   # whose desks these are, per request or job
+SupportDesk::Events.replay(horizon:, resume: nil, batch_size: 500) { |row, resume| … }   # PostgreSQL 13+
 SupportDesk.reset_assistants!          SupportDesk.ai_actor?(record)
 SupportDesk.release_silent_assistants!            # the net under a dead harness (schedule it)
 SupportDesk.reclaim_assistant_seats!              # seats an assistant may no longer sit in

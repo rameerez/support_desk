@@ -242,6 +242,18 @@ SupportDesk.configure do |config|
   # end
 
   # ==========================================================================
+  # A DESK PER CUSTOMER
+  # ==========================================================================
+  #
+  # Set the owner per request (`SupportDesk::Current.owner = current_account`
+  # in a before_action) and per job, and every owner gets its own desks.
+  # Their settings can come from their own rows — a Hash of desk or
+  # assistant settings, overlaid on everything above:
+  #
+  # config.desk_settings      = ->(desk)      { desk.owner&.support_settings }
+  # config.assistant_settings = ->(assistant) { assistant.owner&.assistant_settings }
+
+  # ==========================================================================
   # EVENTS — the gem emits, your app delivers
   # ==========================================================================
   #

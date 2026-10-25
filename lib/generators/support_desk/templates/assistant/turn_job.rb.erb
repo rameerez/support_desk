@@ -41,7 +41,12 @@ module Support
       ticket = SupportDesk::Ticket.find(ticket_id)
       return unless ticket.assistant_turn == turn          # the case moved on while we waited
 
-      <%= key %> = SupportDesk.assistant(assistant_key)
+      # The CASE's assistant — its desk's, and its desk's owner's — never one
+      # looked up by key here: a worker has no request, so a key alone would
+      # name the assistant with no owner. And only if she is still the one
+      # this turn was queued for.
+      <%= key %> = ticket.assistant
+      return unless <%= key %> && <%= key %>.key == assistant_key.to_s
       return unless ticket.assistant_policy(<%= key %>).may_observe?
 
       answer = <%= service_class %>.answer(ticket.brief, ticket.transcript)

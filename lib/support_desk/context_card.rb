@@ -95,7 +95,7 @@ module SupportDesk
 
     # How many open cases this requester has right now, this one included.
     def requester_open_tickets
-      Ticket.not_closed.where(requester: requester).count
+      Ticket.owned_by(ticket.desk&.owner).not_closed.where(requester: requester).count
     end
 
     # The same card as a Hash, for a JSON console.

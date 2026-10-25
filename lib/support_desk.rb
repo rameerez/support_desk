@@ -95,6 +95,7 @@ module SupportDesk
       @subscribers = nil
       @desks = nil
       @assistants = nil
+      Current.resolved = nil
       self
     end
 
@@ -102,18 +103,20 @@ module SupportDesk
     # tests that truncate tables between examples.
     def reset_desks!
       @desks = nil
+      Current.resolved = nil
       self
     end
 
     # --- Assistants -----------------------------------------------------------
 
-    # The assistant record for +key+, memoised per process — or the desk's
-    # default when called with nothing. nil when this installation has no
-    # assistant at all, which is the answer every existing host gets.
+    # The assistant record for +key+ — or the desk's default when called
+    # with nothing — for +owner+ (SupportDesk::Current.owner unless you
+    # say). nil when this installation has no assistant at all, which is
+    # the answer every existing host gets.
     #
-    # Found or created exactly like a desk, and never INSERT-first: an
-    # assistant is read on every transition and written once in her life.
-    def assistant(key = nil)
+    # Found or created exactly like a desk, never INSERT-first, and cached
+    # the same way: per process without an owner, per request with one.
+    def assistant(key = nil, owner: Current.owner)
       key = (key || config.default_assistant_key)
       return nil if key.nil?
 
@@ -128,7 +131,7 @@ module SupportDesk
       # message she signed still says the same thing after somebody takes
       # her out of the initializer (R8). It writes only when configuration
       # and the row disagree.
-      (assistants[key] ||= Assistant.for(key)).snapshot_disclosure!
+      resolve(assistants, :assistant, key, owner) { Assistant.for(key, owner: owner) }.snapshot_disclosure!
     end
 
     # Every assistant record this process has resolved, keyed by key.
@@ -186,9 +189,10 @@ module SupportDesk
       # A seat nobody can sit in any more is not a silence problem, and it
       # must not need a `responds_within` to be noticed (R6).
       moved = reclaim_assistant_seats!
-      config.assistants.each_key do |key|
-        agent = assistant(key)
-        window = agent&.responds_within
+      # Every owner's assistants, not only the ones this process resolved:
+      # the sweep runs once for the whole installation.
+      Assistant.where(key: config.assistants.keys.map(&:to_s)).find_each do |agent|
+        window = agent.responds_within
         next if window.nil?
 
         Ticket.open.assigned_to(agent).awaiting_reply.waiting_over(window).find_each do |ticket|
@@ -214,8 +218,9 @@ module SupportDesk
       older_than = older_than.to_i.seconds unless older_than.respond_to?(:ago)
       emitted = 0
 
-      config.desks.each_key do |key|
-        agent = desk(key)&.assistant
+      # Every owner's desks, for the same reason as the sweep above.
+      Desk.where(key: config.desks.keys.map(&:to_s)).find_each do |desk|
+        agent = desk.assistant
         # Repair before deciding. A requester message whose registration was
         # lost after commit leaves the clocks describing a case that no longer
         # exists — and `assistant_idle_since` reads those clocks, so the case
@@ -223,7 +228,7 @@ module SupportDesk
         # in COMMITS on its own and emits the turn it produces, so a dead
         # process followed by nothing but this task still ends in an
         # actionable turn (R3).
-        Ticket.for_desk(key).with_unregistered_requester_messages.find_each do |ticket|
+        desk.tickets.with_unregistered_requester_messages.find_each do |ticket|
           emitted += 1 if ticket.reconcile_and_commit!.positive?
         rescue StandardError => e
           report_error(e, context: { hook: :redispatch_assistant_turns, ticket: ticket.id })
@@ -231,10 +236,10 @@ module SupportDesk
 
         next if agent.nil?
 
-        Ticket.open.for_desk(key).assistant_idle_since(older_than.ago).find_each do |ticket|
+        desk.tickets.open.assistant_idle_since(older_than.ago).find_each do |ticket|
           next unless ticket.assistant_policy(agent).may_observe?
 
-          ticket.send(:emit_assistant_turn)
+          ticket.send(:emit_assistant_turn, record: false)
           emitted += 1
         end
       end
@@ -243,34 +248,46 @@ module SupportDesk
 
     # --- Desks ------------------------------------------------------------------
 
-    # The desk record for +key+, memoised per process.
+    # The desk record for +key+, for +owner+ (SupportDesk::Current.owner
+    # unless you say). Keys are declared in code; owners multiply ROWS, so
+    # every owner has its own `:default` desk and `:billing` means the same
+    # thing for all of them.
     #
     # Lazily created with `find_by || create_or_find_by!` and NEVER
     # INSERT-first: a desk is read thousands of times and written once, and
     # an INSERT that fails its unique index on every page view is noise in
     # the log and a wasted round trip.
-    def desk(key = :default)
+    #
+    # Cached in two places, on purpose. A desk with no owner is memoised for
+    # the life of the process, as it always was: there is one of each, and
+    # its settings change with a deploy. An owned desk is cached for the
+    # request or job (in SupportDesk::Current), because owners are many,
+    # come and go, and change their settings at runtime — a process-wide
+    # memo would grow with every customer and serve yesterday's name.
+    def desk(key = :default, owner: Current.owner)
       key = (key || :default).to_sym
       return nil unless config.desk?(key) || key == :default
 
-      desks[key] ||= Desk.for(key)
+      resolve(desks, :desk, key, owner) { Desk.for(key, owner: owner) }
     end
 
-    # Every desk record this process has resolved, keyed by key.
+    # Every ownerless desk record this process has resolved, keyed by key.
     def desks # :nodoc:
       @desks ||= {}
     end
 
     # --- Topics -----------------------------------------------------------------
 
-    # The Topic at +path+, looked up across every configured desk's tree, or
-    # a Topic::Unknown that still renders (never raises in a view).
+    # The Topic at +path+, looked up across every configured desk's tree —
+    # the current owner's own trees first, when `config.desk_settings` hands
+    # them one — or a Topic::Unknown that still renders (never raises in a
+    # view).
     def find_topic(path)
       return nil if path.nil?
 
       path = path.to_s
-      config.desks.each_value do |desk|
-        node = desk.topics.find(path)
+      topic_trees.each do |tree|
+        node = tree.find(path)
         return node if node
       end
 
@@ -495,6 +512,24 @@ module SupportDesk
     end
 
     private
+
+    # The memo behind `desk` and `assistant`: the process-wide +memo+ for
+    # ownerless rows, the request's SupportDesk::Current for owned ones.
+    def resolve(memo, kind, key, owner)
+      return memo[key] ||= yield if owner.nil?
+      unless owner.respond_to?(:persisted?) && owner.persisted?
+        raise ArgumentError, "a support desk owner must be a saved record, got #{owner.inspect}"
+      end
+
+      Current.resolved_records[[ kind, owner.class.polymorphic_name, owner.id, key ]] ||= yield
+    end
+
+    def topic_trees
+      trees = config.desks.values.map(&:topics)
+      return trees if config.desk_settings.nil?
+
+      Desk.owned_by(Current.owner).where(key: config.desks.keys.map(&:to_s)).map { |desk| desk.config.topics } + trees
+    end
 
     def register(registry, klass)
       registry << klass.name if klass.name

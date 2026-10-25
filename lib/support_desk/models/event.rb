@@ -8,6 +8,13 @@ module SupportDesk
   # describe — exactly one row per transition — and are read-only forever
   # after. Hosts with tamper-evident logs mirror them by subscribing to
   # `:ticket_transitioned` rather than by writing here.
+  #
+  # Two kinds are not transitions but SIGNALS, written in the transaction
+  # that produced them so a durable reader (SupportDesk::Events.replay) sees
+  # them even when the process dies before the in-memory event fires:
+  # `assistant_turn` (there is something for the assistant to answer, at
+  # this turn) and `draft_proposed`. Neither is history, so neither is in
+  # the timeline.
   class Event < ApplicationRecord
     self.table_name = "support_desk_events"
 
@@ -15,15 +22,20 @@ module SupportDesk
       opened assigned handed_off released drop_in closed reopened topic_changed subject_attached note
       snoozed woken escalated channel_added email_bounced email_unverified rated tagged
       human_requested assistant_paused assistant_resumed draft_sent draft_rejected assistant_withheld
+      assistant_turn draft_proposed
     ].freeze
 
-    # The five kinds that describe how the desk works rather than what
+    # The kinds that say "something is now owed", not "something happened".
+    SIGNAL_KINDS = %w[assistant_turn draft_proposed].freeze
+
+    # The kinds that describe how the desk works rather than what
     # happened to the case. They join `note` and `drop_in` outside
     # #requester_visible: a customer's export says a person was asked for
     # (`escalated`, `human_requested`), never that a machine's proposal was
     # discarded.
     INTERNAL_KINDS = %w[
       note drop_in assistant_paused assistant_resumed draft_sent draft_rejected assistant_withheld
+      assistant_turn draft_proposed
     ].freeze
 
     belongs_to :ticket, class_name: "SupportDesk::Ticket", inverse_of: :events
@@ -39,6 +51,8 @@ module SupportDesk
     # Everything a requester may see in an export: their own case's story,
     # never the desk's internal reasoning.
     scope :requester_visible, -> { where.not(kind: INTERNAL_KINDS) }
+    # What happened to the case, without the signals — what a timeline shows.
+    scope :history, -> { where.not(kind: SIGNAL_KINDS) }
 
     # Write one event. `actor` may be a record or a Symbol (`:system`,
     # `:routing`) — symbols are kept in the payload, since there is no row

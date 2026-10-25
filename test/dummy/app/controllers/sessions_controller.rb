@@ -5,6 +5,7 @@
 class SessionsController < ApplicationController
   def create
     session[:user_id] = params[:user_id]
+    session[:support_owner_id] = params[:owner_id]
     request.get? ? render(plain: "ok") : head(:no_content)
   end
 

@@ -116,10 +116,13 @@ class VerifiedDeskTest < ActionDispatch::IntegrationTest
   # SELECTs against support_desk_desks while the block runs. Scoped to that
   # table on purpose: the inbox issues plenty of other queries, and this test
   # is about ONE of them.
+  # Statements that READ the desks table — a lookup — and not a query of
+  # another table that names it in a subquery (the owner scope on a
+  # requester's cases, since 0.6).
   def count_desk_queries
     count = 0
     counter = lambda do |_name, _start, _finish, _id, payload|
-      count += 1 if payload[:sql].to_s.match?(/\bFROM\s+["`]?support_desk_desks\b/i)
+      count += 1 if payload[:sql].to_s.match?(/\A\s*SELECT\b[^()]*?\bFROM\s+["`]?support_desk_desks\b/i)
     end
 
     ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }

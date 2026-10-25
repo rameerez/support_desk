@@ -357,6 +357,119 @@ class UpgradeGeneratorTest < Rails::Generators::TestCase
     end
   end
 
+  # --- Owners and replay (0.6.0) ----------------------------------------------------
+
+  test "upgrade copies the owners and replay migrations once, and the dummy migrates copies of both" do
+    run_generator
+    run_generator
+
+    {
+      "add_owners_to_support_desk" => "20260101000008_add_owners_to_support_desk.rb",
+      "add_replay_to_support_desk" => "20260101000009_add_replay_to_support_desk.rb"
+    }.each do |name, copy|
+      assert_equal 1, Dir[File.join(destination_root, "db/migrate/*_#{name}.rb")].size
+      template = File.read(File.expand_path("../../lib/generators/support_desk/templates/#{name}.rb.erb", __dir__))
+      dummy = File.read(File.expand_path("../dummy/db/migrate/#{copy}", __dir__))
+      assert_equal template.split(/^class .*\n/, 2).last, dummy.split(/^class .*\n/, 2).last,
+                   "test/dummy's #{name} migration has drifted from the template"
+    end
+  end
+
+  test "the upgrade message says what 0.6 adds" do
+    output = run_generator
+
+    assert_match(/SupportDesk::Current\.owner/, output)
+    assert_match(/SupportDesk::Events\.replay/, output)
+  end
+
+  test "the owners migration makes a key unique per owner, keeps ownerless keys unique, and rolls back" do
+    with_scratch_database do |connection|
+      run_migration("CreateChatsTables", connection)
+      run_migration("CreateSupportDeskTables", connection)
+      run_migration("AddAssistantsToSupportDesk", connection)
+      insert_desk(connection)
+
+      2.times { run_migration("AddOwnersToSupportDesk", connection) }
+
+      %i[support_desk_desks support_desk_assistants].each do |table|
+        assert connection.column_exists?(table, :owner_type)
+        assert connection.column_exists?(table, :owner_id)
+      end
+      assert_nil connection.select_value("SELECT owner_id FROM support_desk_desks WHERE key = 'default'"),
+                 "an existing desk belongs to nobody, exactly as before"
+      insert_owned_desk(connection, owner_id: 1)
+      insert_owned_desk(connection, owner_id: 2)
+      assert_raises(ActiveRecord::RecordNotUnique) { insert_owned_desk(connection, owner_id: 1) }
+      assert_raises(ActiveRecord::RecordNotUnique) { insert_desk(connection) }
+
+      connection.execute("DELETE FROM support_desk_desks WHERE owner_id IS NOT NULL")
+      run_migration("AddOwnersToSupportDesk", connection, :down)
+
+      assert_not connection.column_exists?(:support_desk_desks, :owner_id)
+      assert connection.index_exists?(:support_desk_desks, :key, unique: true, name: "index_support_desk_desks_on_key")
+      assert connection.index_exists?(:support_desk_assistants, :key, unique: true,
+                                                                      name: "index_support_desk_assistants_on_key")
+    end
+  end
+
+  test "the replay migration numbers every row of both tables from one sequence" do
+    with_scratch_database do |connection|
+      run_migration("CreateChatsTables", connection)
+      run_migration("CreateSupportDeskTables", connection)
+      run_migration("CreateSupportDeskMessageRegistrations", connection)
+      conversation = insert_conversation(connection)
+      insert_legacy_ticket(connection, desk_id: insert_desk(connection), requester_type: "User", requester_id: 7,
+                                       conversation_id: conversation)
+      message = insert_message(connection, conversation_id: conversation, sender_type: "User", sender_id: 7,
+                                           body: "hola", at: Time.current)
+      ticket = connection.select_value("SELECT id FROM support_desk_tickets")
+      connection.execute("INSERT INTO support_desk_message_registrations (message_id, ticket_id) " \
+                         "VALUES (#{connection.quote(message)}, #{connection.quote(ticket)})")
+
+      2.times { run_migration("AddReplayToSupportDesk", connection) }
+
+      unless postgresql?
+        assert_not connection.column_exists?(:support_desk_events, :xact_id), "PostgreSQL only; a no-op elsewhere"
+        next
+      end
+
+      connection.execute("INSERT INTO support_desk_events (ticket_id, kind, payload, created_at) " \
+                         "VALUES (#{connection.quote(ticket)}, 'note', '{}', now())")
+      positions = connection.select_values(
+        "SELECT position FROM support_desk_message_registrations UNION ALL SELECT position FROM support_desk_events"
+      ).map(&:to_i)
+      assert_equal 2, positions.uniq.size, "existing rows were numbered, from the one sequence"
+      assert connection.select_value("SELECT bool_and(xact_id > 0) FROM support_desk_events")
+      assert connection.index_exists?(:support_desk_events, %i[xact_id position], name: "index_support_desk_events_on_replay")
+
+      run_migration("AddReplayToSupportDesk", connection, :down)
+
+      assert_not connection.column_exists?(:support_desk_events, :position)
+      assert_not connection.column_exists?(:support_desk_message_registrations, :xact_id)
+    end
+  end
+
+  if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
+    # An xid8 column would be lost from schema.rb (Rails can't dump the
+    # type) and the whole table with it. bigint survives the round trip.
+    test "the replay columns survive a schema.rb dump" do
+      with_scratch_database do |connection|
+        run_migration("CreateChatsTables", connection)
+        run_migration("CreateSupportDeskTables", connection)
+        run_migration("CreateSupportDeskMessageRegistrations", connection)
+        run_migration("AddReplayToSupportDesk", connection)
+
+        dump = StringIO.new
+        ActiveRecord::SchemaDumper.dump(Scratch.connection_pool, dump)
+
+        assert_no_match(/Could not dump/, dump.string)
+        assert_match(/t\.bigserial "position"/, dump.string)
+        assert_match(/support_desk_events_position_seq/, dump.string)
+        assert_match(/pg_current_xact_id/, dump.string)
+      end
+    end
+  end
+
   private
 
   def postgresql? = ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
@@ -467,6 +580,12 @@ class UpgradeGeneratorTest < Rails::Generators::TestCase
     rows.map do |requester_type, requester_id, opened_by_type, opened_by_id|
       [ "#{requester_type}##{requester_id}", opened_by_type && "#{opened_by_type}##{opened_by_id}" ]
     end
+  end
+
+  def insert_owned_desk(connection, owner_id:)
+    now = connection.quote(Time.current)
+    connection.insert("INSERT INTO support_desk_desks (key, owner_type, owner_id, created_at, updated_at) " \
+                      "VALUES ('default', 'Workspace', #{owner_id}, #{now}, #{now})")
   end
 
   def insert_desk(connection)

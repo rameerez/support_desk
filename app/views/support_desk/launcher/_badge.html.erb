@@ -1,6 +1,14 @@
 <%# The launcher's badge: unread messages across the requester's cases
     (`unread_support_count`), hidden at zero. What their
-    `[requester, :support_desk]` stream replaces (SupportDesk::Launcher, which
+    `SupportDesk::Launcher.stream` replaces (SupportDesk::Launcher, which
     hands it the requester and lets it count as it renders) and GET
-    tickets/badge answers. Locals: count, or requester. %>
-<%= chats_tray_badge local_assigns.fetch(:count) { requester.unread_support_count }, id: SupportDesk::Launcher::BADGE_ID %>
+    tickets/badge answers. Locals: count, or requester and the owner whose
+    cases it counts (a broadcast job has no SupportDesk::Current of its own). %>
+<% count = local_assigns.fetch(:count) do
+     if local_assigns.key?(:owner)
+       SupportDesk::Current.set(owner: local_assigns[:owner]) { requester.unread_support_count }
+     else
+       requester.unread_support_count
+     end
+   end %>
+<%= chats_tray_badge count, id: SupportDesk::Launcher::BADGE_ID %>

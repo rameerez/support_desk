@@ -4,6 +4,85 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-25
+
+A desk per customer, a record you can replay, and two kinds of provenance.
+Two additive migrations (`rails g support_desk:upgrade`); without an owner,
+nothing about an existing install changes.
+
+**Turning owners on is staged**: migrate, deploy 0.6 to every process and
+retire every 0.5 one, and only then set `SupportDesk::Current.owner`. A 0.5
+process looks desks and assistants up by key alone and, once owned rows
+exist, can pick another owner's. See "Upgrading to 0.6" in the README.
+
+### Added
+
+- **Owners.** Desks and assistants gain an optional polymorphic `owner`
+  (migration `add_owners_to_support_desk`): keys are unique per owner, and
+  the old unique key stays, as a partial index, for rows with no owner.
+  `SupportDesk::Current.owner` says whose desks a request or job means;
+  `SupportDesk.desk`, `SupportDesk.assistant`, `Ticket.for_desk`, the SLA
+  scopes (`overdue`, `at_risk`, `past_sla`), `find_topic` and the console's
+  default desk list read that owner's rows. Both readers take `owner:` to
+  name one explicitly. A desk's assistant is its owner's assistant, whatever
+  `Current.owner` says, so another owner's assistant is a `NotAnAssistant`.
+  Owned records are cached per request or job (in `Current`); ownerless ones
+  stay memoised per process, as before.
+- **Settings from rows.** `config.desk_settings = ->(desk) { … }` and
+  `config.assistant_settings = ->(assistant) { … }` return a Hash overlaid on
+  the initializer, through the same validating setters (`topics:` takes a
+  block). `Desk#config` and `Assistant#config` are the overlaid settings.
+- **Durable replay** (PostgreSQL 13+, migration `add_replay_to_support_desk`).
+  Read uncached: under the query cache every request and job runs with, a
+  repeated snapshot query would freeze the horizon.
+  `support_desk_events` and `support_desk_message_registrations` gain
+  `xact_id` (the writing transaction, `pg_current_xact_id()`, stored as
+  bigint so `schema.rb` can dump it) and `position` (one sequence for both
+  tables). `SupportDesk::Events.replay(horizon:, resume: nil, batch_size: 500)`
+  yields every row below the oldest running transaction in `(xact_id,
+  position)` order and returns the next horizon once the range is drained; a
+  cursor yielded with each row resumes a range that raised. See "Replaying
+  what was written down" in the README for the schedule a position
+  checkpoint loses.
+- **`assistant_turn` and `draft_proposed` event rows.** Both signals are now
+  written down in the transaction that produced them (new `Event::KINDS`,
+  internal, and `Event::SIGNAL_KINDS`, kept out of the timeline by the new
+  `Event.history` scope). `redispatch_assistant_turns!` re-emits without
+  writing another row.
+- **Conditional human replies.** `reply!(…, turn:)` and `note!(…, turn:)` by
+  a person raise `StaleTurn` and write nothing when the case moved on since
+  the turn was read. Without `turn:` they are unchanged.
+- **Message provenance.** `post_requester_message!(body, files:, via:,
+  external_id:)` is public and stamps `metadata["support_desk"]` with `via`
+  (never for `:in_app`) and `external_id`; `open!(via:)` stamps the opening
+  message.
+
+### Changed
+
+- **Everything a requester sees is the current owner's.** The engine's list,
+  case lookup (by reference and id) and limit wall, `conversations_of` /
+  `requester_conversation` (and so chats' lookup through
+  `SupportDesk::ConversationAccess`), `awaiting_support_reply?`,
+  `unread_support_count`, the inbox door and `open_support_ticket_about` read
+  `support_tickets.on_current_desks` (new scopes `Ticket.owned_by(owner)` and
+  `Ticket.on_current_desks`). The brief's and context card's open-case counts
+  are the case owner's.
+- **The launcher badge streams per owner** (`SupportDesk::Launcher.stream`,
+  `[requester, :support_desk, owner]` when there is one) and the broadcast job
+  counts under the case's owner.
+- The console's queue badge is cached per desk ROW, not per key.
+- The generated turn job resolves the case's own assistant
+  (`ticket.assistant`, its desk owner's) and acts only if her key is the one
+  queued. A worker has no `Current.owner`; a lookup by key named the ownerless
+  assistant. Regenerate, or make the same two-line change in yours.
+- A note with a `turn:` locks the conversation and folds in unregistered
+  requester messages before comparing it, as a reply does.
+- `release_silent_assistants!` and `redispatch_assistant_turns!` iterate
+  assistant and desk rows rather than configured keys, so one run covers
+  every owner.
+- The requester views' desk name, promise and inbox door read the current
+  owner's desk (`support_desk_config`), still without creating it.
+
 ## [0.5.0] - 2026-10-19
 
 Intended as **0.5.0**: "Need help?" in the corner. **Requires chats >= 0.7.1**
