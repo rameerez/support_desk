@@ -87,9 +87,10 @@ module SupportDesk
     # what they don't.
     def support_context = {}
 
-    # True when any of this requester's open tickets is waiting on the desk.
+    # True when any of this requester's open tickets is waiting on the desk
+    # — on the current owner's desks, like everything a requester sees.
     def awaiting_support_reply?
-      support_tickets.not_closed.awaiting_reply.exists?
+      support_tickets.on_current_desks.not_closed.awaiting_reply.exists?
     end
 
     # Unread messages across every support conversation this requester has,

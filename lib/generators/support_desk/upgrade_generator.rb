@@ -73,11 +73,14 @@ module SupportDesk
         say "     old web/jobs, migrate, then start only the new version. Review historical"
         say "     suspect callbacks before resuming; old clocks cannot prove delivery."
         say "     Do not roll code back to a writer that cannot record receipts."
-        say "  6. 0.6.0 is additive and rolling-safe. Desks and assistants gain an optional"
-        say "     owner (one desk per customer: SupportDesk::Current.owner = current_account);"
-        say "     on PostgreSQL 13+, events and message registrations gain xact_id and"
-        say "     position for SupportDesk::Events.replay. That one rewrites the events"
-        say "     table: run it in a quiet window."
+        say "  6. 0.6.0: desks and assistants gain an optional owner (one desk per"
+        say "     customer: SupportDesk::Current.owner = current_account). Turn it on in"
+        say "     THREE STAGES: migrate; deploy 0.6 to every process and retire every 0.5"
+        say "     one; only then set SupportDesk::Current.owner. A 0.5 process finds desks"
+        say "     by key alone and, once owned rows exist, can pick another owner's."
+        say "     On PostgreSQL 13+, events and message registrations gain xact_id and"
+        say "     position for SupportDesk::Events.replay. That migration rewrites the"
+        say "     events table: run it in a quiet window."
         say "  7. See the CHANGELOG for the full list.\n", :green
       end
 

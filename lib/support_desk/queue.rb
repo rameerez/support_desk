@@ -200,8 +200,10 @@ module SupportDesk
       @agent_key ||= [ agent.class.polymorphic_name, agent.id.to_s ]
     end
 
+    # The desk's ROW, not only its key: every owner has a `:default` desk,
+    # and one agent working two owners' queues has two badges.
     def badge_cache_key
-      [ "support_desk", "queue", desk.key, "badge", SupportDesk.actor_key(agent) ]
+      [ "support_desk", "queue", desk.key, desk.id, "badge", SupportDesk.actor_key(agent) ]
     end
   end
 end

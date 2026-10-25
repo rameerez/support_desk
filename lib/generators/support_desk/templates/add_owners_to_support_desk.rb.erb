@@ -15,7 +15,13 @@
 #
 # `owner_id` follows your generator's primary key type (uuid or bigint).
 # If your owners are keyed differently, change `owner_id_type` before you
-# migrate. Additive and rolling-safe; every statement is guarded.
+# migrate. Every statement is guarded.
+#
+# The migration itself is safe under 0.5: until a row has an owner, a key
+# still names one row. TURNING OWNERS ON is not: 0.5 finds desks and
+# assistants with `find_by(key:)`, so the first owned row can be picked by a
+# 0.5 process. Migrate, deploy 0.6 to every process and retire every 0.5
+# one, and only then set SupportDesk::Current.owner.
 class AddOwnersToSupportDesk < ActiveRecord::Migration<%= migration_version %>
   TABLES = { support_desk_desks: "desks", support_desk_assistants: "assistants" }.freeze
 

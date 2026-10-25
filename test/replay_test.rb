@@ -86,8 +86,36 @@ if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
       [ rows, next_horizon ]
     end
 
+    # The horizon is the SERVER's, not this database's: a transaction open
+    # anywhere on it — another suite, a console, another app on the same
+    # PostgreSQL — holds it back, exactly as the contract says it must. So a
+    # test that needs its own rows below the horizon polls, as a real reader
+    # does, until the horizon has passed +xid+ (and fails, saying so, if it
+    # never does).
+    def replay_past(xid, horizon = 0, **options)
+      rows = []
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 20
+      loop do
+        horizon = SupportDesk::Events.replay(horizon: horizon, **options) { |row| rows << row }
+        return [ rows, horizon ] if horizon > xid
+
+        if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+          pinning = ActiveRecord::Base.connection.select_rows(<<~SQL)
+            SELECT pid, datname, application_name, backend_xid::text, state, left(query, 80)
+              FROM pg_stat_activity WHERE backend_xid IS NOT NULL
+          SQL
+          flunk "the horizon stayed at #{horizon}, below #{xid}, for 20s. Holding it: #{pinning.inspect}"
+        end
+        sleep 0.05
+      end
+    end
+
+    def newest_xid
+      [ SupportDesk::Event.maximum(:xact_id), SupportDesk::MessageRegistration.maximum(:xact_id) ].compact.max
+    end
+
     test "every committed row of both tables, oldest first, then the horizon after them" do
-      rows, horizon = replay(0)
+      rows, horizon = replay_past(newest_xid)
 
       assert_includes rows.map(&:class), SupportDesk::Event
       assert_includes rows.map(&:class), SupportDesk::MessageRegistration
@@ -98,12 +126,12 @@ if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
     end
 
     test "the rows of one transaction come out together, in the order they were written" do
-      _rows, horizon = replay(0)
+      _rows, horizon = replay_past(newest_xid)
       SupportDesk::Event.transaction do
         3.times { |n| SupportDesk::Event.record!(ticket: @ticket, kind: :note, actor: :system, payload: { "n" => n }) }
       end
 
-      rows, = replay(horizon)
+      rows, = replay_past(newest_xid, horizon)
 
       assert_equal [ 0, 1, 2 ], rows.map { |row| row.payload["n"] }
       assert_equal 1, rows.map(&:xact_id).uniq.size
@@ -115,7 +143,7 @@ if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
     # stand on B's position and never read A's row. The horizon reader
     # stopped below A's transaction, so the next poll finds it.
     test "a row committed late behind a higher position is read on the next poll" do
-      _rows, horizon = replay(0)
+      _rows, horizon = replay_past(newest_xid)
       a, b = 2.times.map { separate_connection }
 
       b.execute("BEGIN")
@@ -129,11 +157,13 @@ if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
       assert_operator b_xid, :<, a_xid
       assert_operator a_position, :<, b_position
 
-      first, horizon = replay(horizon)
+      # Polled while A is still open: the horizon gets past B, never past A.
+      first, horizon = replay_past(b_xid, horizon)
       assert_equal [ b_position ], first.map(&:position)
+      assert_operator horizon, :<=, a_xid
 
       a.execute("COMMIT")
-      second, = replay(horizon)
+      second, = replay_past(a_xid, horizon)
 
       assert_equal [ a_position ], second.map(&:position),
                    "a position checkpoint at #{b_position} would have skipped #{a_position} for ever"
@@ -143,10 +173,12 @@ if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
 
     test "a range that raised is resumed after the last row handled, with the end it started with" do
       2.times { ticket_for(create_user, message: "otro") }
-      everything, = replay(0)
+      everything, = replay_past(newest_xid)
       handled = []
       resume = nil
 
+      # Every transaction that wrote a row above has finished, so this
+      # range's end is past all of them, whatever else the server is doing.
       assert_raises(RuntimeError) do
         SupportDesk::Events.replay(horizon: 0, batch_size: 2) do |row, cursor|
           raise "the process died" if handled.size == 3
@@ -164,8 +196,37 @@ if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
       assert_equal resume["until"], horizon
     end
 
+    # Every request and job runs with ActiveRecord's query cache on, and so
+    # does every test. The snapshot is the same SQL on every poll: cached,
+    # the horizon would never move again and a row another process commits
+    # would never be read.
+    test "a reader under the query cache still sees the horizon move" do
+      assert ActiveRecord::Base.connection.query_cache_enabled, "the scenario needs the cache on"
+      _rows, horizon = replay_past(newest_xid)
+      replay(horizon) # the snapshot is now in the cache
+      writer = separate_connection
+      # Another thread, as another process would be: a write on THIS thread
+      # clears its query caches and would hide the bug.
+      positions, xid = Thread.new do
+        written = 2.times.map do
+          writer.execute("BEGIN")
+          writer.select_value("SELECT pg_current_xact_id()")
+          position = insert_note(writer).to_i
+          writer.execute("COMMIT")
+          position
+        end
+        [ written, writer.select_value("SELECT max(xact_id) FROM support_desk_events").to_i ]
+      end.value
+
+      rows, = replay_past(xid, horizon)
+
+      assert_equal positions, rows.map(&:position)
+    ensure
+      writer&.disconnect!
+    end
+
     test "the horizon never moves past a transaction that is still open" do
-      _rows, horizon = replay(0)
+      _rows, horizon = replay_past(newest_xid)
       writer = separate_connection
       writer.execute("BEGIN")
       pinned = writer.select_value("SELECT pg_current_xact_id()::text::bigint").to_i
@@ -173,7 +234,7 @@ if ActiveRecord::Base.connection.adapter_name.match?(/\Apostg/i)
 
       rows, stuck = replay(horizon)
 
-      assert_equal pinned, stuck
+      assert_operator stuck, :<=, pinned
       assert_empty rows, "the newer committed rows wait until the pin is gone"
     ensure
       writer&.disconnect!

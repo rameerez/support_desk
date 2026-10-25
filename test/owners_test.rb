@@ -99,6 +99,77 @@ class OwnersTest < ActiveSupport::TestCase
     assert_empty SupportDesk::Ticket.overdue.where(id: [ acme_case, globex_case ])
   end
 
+  # --- What a requester of two owners sees -----------------------------------------------
+
+  test "a requester's conversations, waits and unread counts are the current owner's only" do
+    acme_case = as(@acme) { ticket_for(@alice, message: "acme") }
+    globex_case = as(@globex) { ticket_for(@alice, message: "globex") }
+    globex_case.reply!("from globex", by: @lucia)
+
+    as(@acme) do
+      assert_equal [ acme_case.conversation ], SupportDesk::Ticket.conversations_of(@alice).to_a
+      assert_nil SupportDesk::Ticket.requester_conversation(@alice, globex_case.conversation_id)
+      assert_equal 0, @alice.unread_support_count
+      assert_predicate @alice, :awaiting_support_reply?
+    end
+    as(@globex) do
+      assert_equal [ globex_case.conversation ], SupportDesk::Ticket.conversations_of(@alice).to_a
+      assert_operator @alice.unread_support_count, :>, 0
+      assert_not_predicate @alice, :awaiting_support_reply?
+    end
+  end
+
+  test "chats' lookup gets the current owner's support conversations only" do
+    acme_case = as(@acme) { ticket_for(@alice, message: "acme") }
+    as(@globex) { ticket_for(@alice, message: "globex") }
+    # chats' own controller, reduced to the two methods the module meets.
+    host = Class.new do
+      def initialize(viewer) = @viewer = viewer
+      def chats_current_messager = @viewer
+
+      protected
+
+      def conversation_lookup_scopes = [ Chats::Conversation.none ]
+
+      prepend SupportDesk::ConversationAccess
+    end
+
+    added = as(@acme) { host.new(@alice).send(:conversation_lookup_scopes).last.to_a }
+
+    assert_equal [ acme_case.conversation ], added
+  end
+
+  test "the brief and the context card count the case owner's open cases, whoever asks" do
+    acme_case = as(@acme) { ticket_for(@alice, message: "acme") }
+    as(@globex) { ticket_for(@alice, message: "globex") }
+
+    as(@globex) do
+      assert_equal 1, acme_case.brief.to_h.dig(:requester, :open_cases)
+      assert_equal 1, acme_case.context_card.requester_open_tickets
+    end
+  end
+
+  test "an agent's queue badge is cached per owner's desk, not per key" do
+    as(@acme) { ticket_for(@alice, message: "acme") }
+    as(@globex) { 2.times { |n| ticket_for(create_user, message: "globex #{n}") } }
+
+    assert_equal 1, as(@acme) { @lucia.support_queue.badge }
+    assert_equal 2, as(@globex) { @lucia.support_queue.badge }
+  end
+
+  test "the launcher badge streams per owner, and counts under the case's owner" do
+    acme_case = as(@acme) { ticket_for(@alice, message: "acme") }
+
+    assert_equal [ @alice, :support_desk, @acme ], as(@acme) { SupportDesk::Launcher.stream(@alice) }
+    assert_equal [ @alice, :support_desk ], SupportDesk::Launcher.stream(@alice)
+
+    broadcasts = []
+    SupportDesk::Launcher.stub(:broadcast_badge_of, ->(requester, owner:) { broadcasts << [ requester, owner ] }) do
+      SupportDesk::Launcher.unread_changed(@alice, acme_case.conversation)
+    end
+    assert_equal [ [ @alice, @acme ] ], broadcasts
+  end
+
   # --- Settings from rows ----------------------------------------------------------------
 
   test "desk_settings overlays the initializer with each owner's own settings" do
@@ -165,6 +236,36 @@ class OwnersTest < ActiveSupport::TestCase
   test "the hooks validate on assignment" do
     assert_raises(SupportDesk::ConfigurationError) { SupportDesk.config.desk_settings = :nope }
     assert_raises(SupportDesk::ConfigurationError) { SupportDesk.config.assistant_settings = "nope" }
+  end
+
+  # --- Rolling out: 0.5 and 0.6 side by side ---------------------------------------------
+
+  # What 0.5's Desk.for and Assistant.for ran, verbatim: a key, and nothing
+  # about owners.
+  def legacy_desk(key) = SupportDesk::Desk.find_by(key: key.to_s) || SupportDesk::Desk.create_or_find_by!(key: key.to_s)
+  def legacy_assistant(key) = SupportDesk::Assistant.find_by(key: key.to_s) || SupportDesk::Assistant.create_or_find_by!(key: key.to_s)
+
+  test "migrated, nobody owned yet: a 0.5 process and a 0.6 one resolve the same rows" do
+    configure_assistant!(:rose)
+
+    assert_equal SupportDesk.desk, legacy_desk(:default)
+    assert_equal SupportDesk.assistant(:rose), legacy_assistant(:rose)
+  end
+
+  test "from the first owned row a 0.5 process can take another owner's desk and assistant — why 0.5 must be gone first" do
+    configure_assistant!(:rose)
+    SupportDesk::Assistant.delete_all # the owners are turned on before anybody resolved an ownerless Rose
+    SupportDesk.reset_assistants!
+    acme_desk = as(@acme) { SupportDesk.desk }
+    acme_rose = as(@acme) { SupportDesk.assistant(:rose) }
+
+    assert_equal acme_desk, legacy_desk(:default), "0.5, serving a request with no owner, picked Acme's desk"
+    assert_equal acme_rose, legacy_assistant(:rose), "…and Acme's assistant"
+
+    ownerless = SupportDesk.desk
+    assert_nil ownerless.owner, "0.6 never takes an owned row for a request with no owner"
+    assert_nil SupportDesk.assistant(:rose).owner
+    assert_equal 2, SupportDesk::Desk.where(key: "default").count, "the key alone no longer names one row"
   end
 
   # --- Sweeps run for everybody --------------------------------------------------------

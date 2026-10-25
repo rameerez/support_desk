@@ -140,6 +140,12 @@ module SupportDesk
     }
 
     scope :for_desk, ->(key) { where(desk: SupportDesk.desk(key)) }
+    # Cases on +owner+'s desks (nil: the desks with no owner) — and, as
+    # `on_current_desks`, on SupportDesk::Current.owner's. Every screen and
+    # count a requester sees reads through the second: one person can be a
+    # customer of two owners, and neither may show the other's cases.
+    scope :owned_by, ->(owner) { where(desk_id: Desk.owned_by(owner).select(:id)) }
+    scope :on_current_desks, -> { owned_by(SupportDesk::Current.owner) }
     scope :opened_via, ->(channel) { where(opened_via: channel.to_s) }
     scope :opened_between, ->(range) { where(opened_at: range) }
     scope :closed_between, ->(range) { where(closed_at: range) }
@@ -194,7 +200,8 @@ module SupportDesk
         find_by(conversation_id: conversation.id)
       end
 
-      # The conversations behind +requester+'s own cases, while they still
+      # The conversations behind +requester+'s own cases on the current
+      # owner's desks (SupportDesk::Current.owner), while they still
       # hold its seat: chats' participation and block rules (`inbox_for`),
       # without the host's `inbox_scope`. Participation is what makes a
       # conversation theirs to read; the inbox is only where it is listed.
@@ -210,7 +217,8 @@ module SupportDesk
 
         tickets = arel_table
         conversations = Chats::Conversation.arel_table
-        own_cases = requester.support_tickets.where(tickets[:id].eq(conversations[:subject_id])).select(:conversation_id)
+        own_cases = requester.support_tickets.on_current_desks
+                             .where(tickets[:id].eq(conversations[:subject_id])).select(:conversation_id)
         Chats::Conversation.inbox_for(requester).direct
                            .where(subject_type: polymorphic_name)
                            .where(id: own_cases)
@@ -942,6 +950,15 @@ module SupportDesk
 
       assistant = nil
       event = write_transition!(:note, actor: actor, request: request) do
+        if machine || turn
+          # Ticket, then conversation, then fold in what chats committed and
+          # the gem has not registered yet — exactly as a reply does — so a
+          # turn is compared against the case as it really is, not against
+          # one whose next question is a lost callback away. A stale turn
+          # rolls the folding back with everything else.
+          lock_conversation!
+          reconcile_unregistered_messages!
+        end
         if machine
           # Under the lock, from the row: a kill switch that commits while
           # this call waits for the case is a kill switch that stops it (R9).

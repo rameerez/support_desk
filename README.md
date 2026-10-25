@@ -222,7 +222,11 @@ Now `SupportDesk.desk` is **that workspace's** `:default` desk, created the
 first time it is asked for, and everything that names a desk by key follows:
 `ask_support!`, `Ticket.for_desk`, `overdue` and `at_risk`, the console's desk
 list, `find_topic`. Keys are still declared in code, so `:billing` means the
-same thing for every owner; owners multiply rows, not keys. Anything reached
+same thing for every owner; owners multiply rows, not keys. Everything a
+**requester** sees is that owner's too — their list, a case by reference,
+chats' lookup of their support conversations, `unread_support_count`, the
+launcher's badge (on its own stream per owner) — so one person who is a
+customer of two owners never sees one owner's case from the other's app. Anything reached
 from a ticket ignores `Current.owner` — a case knows its desk, a desk knows
 its owner, and its assistant is that owner's assistant. One owner's assistant
 asking to answer another owner's case is a `NotAnAssistant`.
@@ -248,13 +252,27 @@ yesterday's name. `SupportDesk.desk(:default, owner: acme)` and
 (`release_silent_assistants!`, `redispatch_assistant_turns!`) run once for
 everybody.
 
-**Upgrading to 0.6.** `rails g support_desk:upgrade && rails db:migrate`. The
-owners migration is additive: a nullable polymorphic `owner` on desks and
-assistants, keys unique per owner, and the existing unique key kept for rows
-with no owner (a partial index; MySQL has none, so there an ownerless key is
-kept unique by the lookup only). `owner_id` follows your generator's primary
-key type. The replay migration (PostgreSQL only) rewrites the events table:
-run it in a quiet window.
+**Upgrading to 0.6 — in three stages.** The owners migration adds a nullable
+polymorphic `owner` to desks and assistants, makes keys unique per owner, and
+keeps the old unique key for rows with no owner (a partial index; MySQL has
+none, so there an ownerless key is kept unique by the lookup only). `owner_id`
+follows your generator's primary key type.
+
+1. **Migrate** (`rails g support_desk:upgrade && rails db:migrate`). 0.5
+   processes keep working: nothing has an owner yet.
+2. **Deploy 0.6 to every process** — web, jobs, consoles, anything that loads
+   the gem — and retire the last 0.5 one.
+3. **Only then turn owners on**: set `SupportDesk::Current.owner`, and with it
+   create the first owned desk or assistant.
+
+The order is not a formality. 0.5 finds a desk with `find_by(key:)`, which
+knew nothing of owners, and from the first owned row on a key no longer names
+one row: a 0.5 process still running could hand a case to another owner's
+desk, or act as another owner's assistant. Until stage 3 there is nothing for
+it to pick wrongly; 0.6 never picks an owned row for a request with no owner.
+
+The replay migration (PostgreSQL only) rewrites the events table: run it in a
+quiet window.
 
 ## Topics
 
@@ -1803,7 +1821,9 @@ row is **inserted**, and transactions commit in any order:
 The horizon reader polls at step 3 too, but stops below A's transaction,
 which is still open; it reads position 1 on the next poll. The cost is that
 one long-running transaction holds the horizon back for as long as it lives,
-so keep transactions short and watch their age.
+so keep transactions short and watch their age. Transaction ids belong to
+the whole PostgreSQL **server**, so that means any transaction on it — in
+another database too, another app's, a console left in `BEGIN`.
 
 A raise returns nothing and the range is read again, so readers deduplicate
 — `position` identifies a row across both tables. A long range can be

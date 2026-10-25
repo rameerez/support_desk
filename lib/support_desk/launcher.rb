@@ -39,7 +39,14 @@ module SupportDesk
         return unless conversation&.subject_type == SupportDesk::Ticket.polymorphic_name
         return unless messager.respond_to?(:unread_support_count)
 
-        broadcast_badge_of(messager)
+        broadcast_badge_of(messager, owner: conversation.subject&.desk&.owner)
+      end
+
+      # The stream a requester's badge listens on: one per owner, because a
+      # person who is a customer of two owners has two launchers, and each
+      # counts only its own owner's cases.
+      def stream(requester, owner = SupportDesk::Current.owner)
+        [ requester, :support_desk, owner ].compact
       end
 
       # Replace +requester+'s launcher badge, wherever it is on screen: one
@@ -51,12 +58,15 @@ module SupportDesk
       # telling, from a job, whether anybody is listening, and a switch for it
       # would let a launcher's badge silently never move. Support is
       # human-paced, so this is one small job per message in a case.
-      def broadcast_badge_of(requester)
+      #
+      # The job knows nothing of the request that wrote the message, so the
+      # owner travels with it and the badge counts under it.
+      def broadcast_badge_of(requester, owner: nil)
         Turbo::StreamsChannel.broadcast_replace_later_to(
-          requester, :support_desk,
+          *stream(requester, owner),
           target: BADGE_ID,
           partial: BADGE_PARTIAL,
-          locals: { requester: requester }
+          locals: { requester: requester, owner: owner }.compact
         )
       end
     end

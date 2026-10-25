@@ -179,7 +179,7 @@ module SupportDesk
       {
         name: Chats.display_name_for(requester),
         since: requester.try(:created_at),
-        open_cases: Ticket.not_closed.where(requester: requester).count,
+        open_cases: Ticket.owned_by(ticket.desk&.owner).not_closed.where(requester: requester).count,
         context: requester.try(:support_context) || {}
       }
     end

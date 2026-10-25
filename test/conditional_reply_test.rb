@@ -37,6 +37,20 @@ class ConditionalReplyTest < ActiveSupport::TestCase
     end
   end
 
+  # The customer's message committed, but the callback that folds it in was
+  # lost: the row still holds the turn Lucía read. The note folds it in under
+  # the lock first, and only then compares — so it is stale, and the refusal
+  # rolls the folding back with it.
+  test "a note is stale against a message whose registration was lost" do
+    seen = @ticket.assistant_turn
+    SupportDesk::Ticket.stub(:for_conversation, nil) { ask_again(@ticket, "¿hay novedades?") }
+    assert_equal seen, @ticket.reload.assistant_turn, "the callback really was lost"
+
+    assert_raises(SupportDesk::StaleTurn) { @ticket.note!("ojo", by: @lucia, turn: seen) }
+    assert_empty @ticket.notes
+    assert_equal seen, @ticket.reload.assistant_turn, "the refusal rolled the folding back"
+  end
+
   test "a note honours the turn the same way" do
     seen = @ticket.assistant_turn
     @ticket.reply!("Ya lo vemos", by: @lucia)

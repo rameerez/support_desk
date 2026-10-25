@@ -185,7 +185,7 @@ module SupportDesk
       key = viewer.class.try(:support_desk_key) || :default
       return false unless support_desk_config(key).inbox_entry == :always
 
-      !viewer.support_tickets.exists?
+      !viewer.support_tickets.on_current_desks.exists?
     end
 
     # The desk RECORD for +desk_key+, resolved WITHOUT ever creating one.
@@ -288,7 +288,7 @@ module SupportDesk
     # Memoised on the view instance, which is the render's own scope — the
     # same place chats caches its slot lookups.
     def open_support_ticket_about(record, requester)
-      @support_open_tickets ||= SupportDesk::Ticket.not_closed
+      @support_open_tickets ||= SupportDesk::Ticket.on_current_desks.not_closed
                                                    .where(requester: requester)
                                                    .where.not(subject_id: nil)
                                                    .index_by { |t| [ t.subject_type, t.subject_id.to_s ] }

@@ -29,6 +29,10 @@ module SupportDesk
 
     belongs_to :owner, polymorphic: true, optional: true
 
+    # nil, rather than a MissingAttributeError, until the 0.6 migration has
+    # added the column: an unmigrated install has no owners.
+    def owner = has_attribute?(:owner_id) ? super : nil
+
     acts_as_messager notifications: false,
                      blockable: false,
                      inbox: :grouped,

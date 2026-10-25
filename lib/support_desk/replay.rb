@@ -27,8 +27,18 @@ module SupportDesk
     # Yield every row of the range, oldest first, then return the range's
     # end — the next horizon. Nothing is returned for a range that did not
     # drain: a raise leaves the caller's checkpoint where it was.
-    def each_row
+    #
+    # Uncached, always: the snapshot is the same SQL on every poll, and a
+    # query cache — on in every request and job — would hand back the first
+    # answer and pin the horizon for as long as the executor lives.
+    def each_row(&block)
       ensure_supported!
+      Event.uncached { read_range(&block) }
+    end
+
+    private
+
+    def read_range
       upper, after = start
 
       loop do
@@ -43,8 +53,6 @@ module SupportDesk
 
       upper
     end
-
-    private
 
     attr_reader :horizon, :resume, :batch_size
 

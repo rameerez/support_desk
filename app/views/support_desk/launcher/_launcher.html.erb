@@ -19,7 +19,7 @@
       label: t("support_desk.launcher.label"),
       title: safe_join([ tag.span(desk.name, class: "support-desk-launcher__name"), support_desk_badge(desk_key) ]),
       icon: render("support_desk/launcher/icon"),
-      badge: (safe_join([ turbo_stream_from(requester, :support_desk),
+      badge: (safe_join([ turbo_stream_from(*SupportDesk::Launcher.stream(requester)),
                           render("support_desk/launcher/badge", count: requester.unread_support_count) ]) if requester),
       badge_url: (support_desk_routes.badge_tickets_path if requester) do %>
   <% if requester %>

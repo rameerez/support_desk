@@ -28,6 +28,10 @@ module SupportDesk
     # owner as the desks she works. nil for the single-desk app.
     belongs_to :owner, polymorphic: true, optional: true
 
+    # nil, rather than a MissingAttributeError, until the 0.6 migration has
+    # added the column: an unmigrated install has no owners.
+    def owner = has_attribute?(:owner_id) ? super : nil
+
     # Ruby-side default so settings is always a Hash even on MySQL, where a
     # JSON column can't carry a DB default.
     attribute :settings, default: -> { {} }
