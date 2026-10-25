@@ -16,7 +16,7 @@ module SupportDesk
       include ActiveRecord::Generators::Migration
 
       source_root File.expand_path("templates", __dir__)
-      desc "Add the migrations a support_desk version bump needs (opened_by, assistants, message registration receipts)"
+      desc "Add the migrations a support_desk version bump needs (opened_by, assistants, message registration receipts, owners, replay)"
 
       # Rails' migration numbering, borrowed from ActiveRecord's generators.
       def self.next_migration_number(dir)
@@ -36,6 +36,18 @@ module SupportDesk
       def create_message_registrations_migration
         migration_template "create_support_desk_message_registrations.rb.erb",
                            File.join(db_migrate_path, "create_support_desk_message_registrations.rb")
+      end
+
+      # 0.6: owners on desks and assistants, and the replay columns. The same
+      # files on a fresh install and an upgrade.
+      def create_owners_migration
+        migration_template "add_owners_to_support_desk.rb.erb",
+                           File.join(db_migrate_path, "add_owners_to_support_desk.rb")
+      end
+
+      def create_replay_migration
+        migration_template "add_replay_to_support_desk.rb.erb",
+                           File.join(db_migrate_path, "add_replay_to_support_desk.rb")
       end
 
 
@@ -61,7 +73,12 @@ module SupportDesk
         say "     old web/jobs, migrate, then start only the new version. Review historical"
         say "     suspect callbacks before resuming; old clocks cannot prove delivery."
         say "     Do not roll code back to a writer that cannot record receipts."
-        say "  6. See the CHANGELOG for the full list.\n", :green
+        say "  6. 0.6.0 is additive and rolling-safe. Desks and assistants gain an optional"
+        say "     owner (one desk per customer: SupportDesk::Current.owner = current_account);"
+        say "     on PostgreSQL 13+, events and message registrations gain xact_id and"
+        say "     position for SupportDesk::Events.replay. That one rewrites the events"
+        say "     table: run it in a quiet window."
+        say "  7. See the CHANGELOG for the full list.\n", :green
       end
 
       private

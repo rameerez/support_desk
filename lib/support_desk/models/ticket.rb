@@ -160,10 +160,12 @@ module SupportDesk
       # Measured per DESK, not against whichever desk happens to be the
       # default: two desks can promise different things, and a billing desk
       # that answers in an hour must not be judged by a 24 hour promise.
-      # Pass a key to ask about one desk, nothing to ask about all of them.
+      # Pass a key to ask about one desk, nothing to ask about all of them —
+      # all of SupportDesk::Current.owner's, each judged by its own settings.
       def past_sla(threshold, desk_key: nil, but_not: nil)
         keys = desk_key ? [ desk_key.to_sym ] : SupportDesk.config.desks.keys
-        clauses = keys.filter_map { |key| sla_clause(key, threshold, but_not) }
+        desks = Desk.owned_by(SupportDesk::Current.owner).where(key: keys.map(&:to_s))
+        clauses = desks.filter_map { |desk| sla_clause(desk, threshold, but_not) }
         return none if clauses.empty?
 
         awaiting_reply.not_closed.where.not(waiting_since: nil).where(clauses.reduce(:or))
@@ -279,7 +281,7 @@ module SupportDesk
         # and lose only the message that was supposed to justify them.
         transaction(requires_new: true) do
           next reply_into!(existing, message, files: files, by: opener, by_support: by_support,
-                           request: request, authorize_reuse: authorize_reuse) if existing
+                           request: request, authorize_reuse: authorize_reuse, via: via) if existing
 
           created, inserted = insert_ticket!(
             requester: requester, desk: desk, node: node, about: about, via: via, opened_by: opener,
@@ -298,7 +300,7 @@ module SupportDesk
             # Somebody else's INSERT won by a millisecond. Theirs is the case
             # that exists, so this is a reply into it, policy and all.
             reply_into!(created, message, files: files, by: opener, by_support: by_support,
-                        request: request, authorize_reuse: authorize_reuse)
+                        request: request, authorize_reuse: authorize_reuse, via: via)
           end
         end
       end
@@ -455,13 +457,12 @@ module SupportDesk
       # "on this desk, and waiting longer than its own threshold" — with an
       # upper bound when the caller wants the band between two thresholds
       # (at risk, but not yet breached).
-      def sla_clause(key, threshold, but_not)
-        config = SupportDesk.config.desk(key)
+      def sla_clause(desk, threshold, but_not)
+        config = desk.config
         duration = config.public_send(threshold)
         return nil if duration.nil?
 
-        clause = arel_table[:desk_id].in(Desk.where(key: key.to_s).select(:id).arel)
-                                     .and(arel_table[:waiting_since].lteq(duration.ago))
+        clause = arel_table[:desk_id].eq(desk.id).and(arel_table[:waiting_since].lteq(duration.ago))
         ceiling = but_not && config.public_send(but_not)
         ceiling ? clause.and(arel_table[:waiting_since].gt(ceiling.ago)) : clause
       end
@@ -644,7 +645,7 @@ module SupportDesk
           # error, and this whole transaction goes with it.
           ticket.post_agent_message!(message, files: files, by: by)
         elsif message.present? || files.present?
-          ticket.post_requester_message!(message, files: files)
+          ticket.post_requester_message!(message, files: files, via: ticket.opened_via)
         end
 
         ticket.send(:record_registration!, posted) if posted
@@ -727,7 +728,7 @@ module SupportDesk
       # through here, so an existing case is answered under its row lock,
       # under the desk's reply policy, with the console's authorization hook
       # running before any of it.
-      def reply_into!(ticket, message, files:, by:, by_support:, request:, authorize_reuse:)
+      def reply_into!(ticket, message, files:, by:, by_support:, request:, authorize_reuse:, via:)
         if by_support
           # Only this private outreach path supplies the current turn internally.
           # Public replies must present the token their harness observed.
@@ -740,7 +741,7 @@ module SupportDesk
             # the old API's "hand it back": supported, and it writes nothing.
             next if message.blank? && files.blank?
 
-            posted = ticket.post_requester_message!(message, files: files)
+            posted = ticket.post_requester_message!(message, files: files, via: via)
             ticket.send(:record_registration!, posted)
           end
         end
@@ -914,9 +915,12 @@ module SupportDesk
     # it raises SupportDesk::NotAllowed. Returns the Chats::Message.
     #
     # `by:` the assistant needs `turn:` and her policy's permission — see
-    # SupportDesk::Ticket::Assistance. `metadata:` rides on the message
-    # (provenance for a draft a human sent; hosts nest their own under
-    # "host").
+    # SupportDesk::Ticket::Assistance. A PERSON may pass `turn:` too, and
+    # then the reply is conditional: it is posted only if the case is still
+    # at the turn they read, and raises SupportDesk::StaleTurn otherwise —
+    # the `If-Match` of a reply sent through an API or a review screen.
+    # `metadata:` rides on the message (provenance for a draft a human sent;
+    # hosts nest their own under "host").
     def reply!(body = nil, by: nil, files: [], request: nil, metadata: {}, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
@@ -927,6 +931,9 @@ module SupportDesk
 
     # An internal note: in the timeline and the console, never in the
     # conversation, never mirrored to any channel. Returns the Event.
+    #
+    # `turn:` makes it conditional, for a person exactly as for the
+    # assistant: a note about a case that has moved on raises StaleTurn.
     def note!(body, by: nil, request: nil, turn: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
@@ -942,6 +949,8 @@ module SupportDesk
           ensure_current_turn!(turn)
           policy = assistant_policy(assistant)
           raise AssistantNotAllowed.new(policy, verb: :note) unless policy.may_observe?
+        elsif turn
+          ensure_current_turn!(turn)
         end
         { "note" => body.to_s }
       end
@@ -965,7 +974,7 @@ module SupportDesk
       handing_back = SupportDesk.ai_actor?(to) && !SupportDesk.ai_actor?(actor)
       assignment = nil
 
-      event = write_transition!(:assigned, actor: actor, request: request) do
+      event = write_transition!(:assigned, actor: actor, request: request, offers_turn: handing_back) do
         raise InvalidTransition, "can't assign a closed ticket — reopen it first" if closed?
         # Every mutable question about a seat is asked HERE, under the row
         # lock, from the reloaded row: who holds the case, what her policy
@@ -990,7 +999,7 @@ module SupportDesk
 
       announce_assignment!(to, first: assignments.count <= 1)
       SupportDesk.emit_after_commit(:ticket_assigned, self, assignment)
-      emit_assistant_turn if handing_back && awaiting_reply?
+      emit_assistant_turn(record: false) if handing_back && awaiting_reply?
       self
     end
 
@@ -1008,7 +1017,7 @@ module SupportDesk
       handing_back = SupportDesk.ai_actor?(to)
       from = nil
       assignment = nil
-      event = write_transition!(:handed_off, actor: actor, request: request) do
+      event = write_transition!(:handed_off, actor: actor, request: request, offers_turn: handing_back) do
         unless assigned_to?(actor)
           raise NotTheAssignee, "#{describe_actor(actor)} doesn't hold ticket #{reference} " \
                                 "(#{assignee ? describe_actor(assignee) : "nobody"} does) — use assign! to override"
@@ -1033,7 +1042,7 @@ module SupportDesk
 
       announce_assignment!(to, first: false)
       SupportDesk.emit_after_commit(:ticket_handed_off, self, assignment, from: from, note: note)
-      emit_assistant_turn if handing_back && awaiting_reply?
+      emit_assistant_turn(record: false) if handing_back && awaiting_reply?
       self
     end
 
@@ -1352,9 +1361,27 @@ module SupportDesk
     # --- Internals -----------------------------------------------------------------
 
     # Post a message as the requester — what `ask_support!` says first, and
-    # what an inbound channel replays.
-    def post_requester_message!(body, files: []) # :nodoc:
-      requester.message!(conversation, body, files: files)
+    # what an inbound channel, an importer or a connector replays:
+    #
+    #   ticket.post_requester_message!("Sigue sin llegar", via: :email, external_id: "<CAF…@mail.gmail.com>")
+    #
+    # `via:` and `external_id:` are provenance. They ride on the message as
+    # `metadata["support_desk"]`, so a transcript can say which channel each
+    # line came in through, and an importer can tell the message it already
+    # brought over from the one it has not. `:in_app` is where every message
+    # comes from unless somebody says otherwise, so it is never stamped.
+    #
+    # Folded into the clocks like any other requester message — by the chats
+    # subscriber, after commit. Returns the Chats::Message.
+    def post_requester_message!(body, files: [], via: nil, external_id: nil)
+      provenance = { "via" => (via.to_s unless via.nil? || via.to_sym == :in_app),
+                     "external_id" => external_id&.to_s }.compact
+      return requester.message!(conversation, body, files: files) if provenance.empty?
+
+      # chats' `message!` takes no metadata; the validations are the same.
+      attributes = { sender: requester, body: body, metadata: { "support_desk" => provenance } }
+      attributes[:files] = files if files.present?
+      conversation.messages.create!(**attributes)
     end
 
     # Post a message as the DESK, signed by the agent who wrote it — every
@@ -1498,6 +1525,10 @@ module SupportDesk
         # must not later turn an already-answered question back into work.
         lock_conversation!
         reconcile_unregistered_messages!
+        # Optional for a person, and checked only once the case is folded in:
+        # a customer message that landed after they read the case is exactly
+        # what makes their answer stale.
+        ensure_current_turn!(turn) if turn
         ensure_writable!
         apply_reply_policy!(by, request: request)
         posted = post_agent_message!(body, files: files, by: by, metadata: metadata)
@@ -1580,9 +1611,16 @@ module SupportDesk
     # Run a transition under the row lock: yield, write exactly one event
     # row, and (once everything has committed) broadcast and emit. The block
     # returns the event payload, or false when there is nothing to do.
-    def write_transition!(kind, actor:, request: nil, &block)
+    #
+    # `offers_turn:` is for the transitions that hand the case (back) to the
+    # assistant: the `assistant_turn` row they owe is written under the same
+    # lock, so it commits with them or not at all.
+    def write_transition!(kind, actor:, request: nil, offers_turn: false, &block)
       event = nil
-      with_lock { event = record_transition!(kind, actor: actor, &block) }
+      with_lock do
+        event = record_transition!(kind, actor: actor, &block)
+        record_assistant_turn! if event && offers_turn
+      end
       publish_transition(event, kind, actor, request) if event
       event
     end

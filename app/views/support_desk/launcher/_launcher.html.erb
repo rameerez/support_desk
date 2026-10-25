@@ -13,7 +13,7 @@
 
     Locals: requester (nil when signed out), help_url. %>
 <% desk_key = requester ? requester.class.support_desk_key : :default %>
-<% desk = SupportDesk.config.desk(desk_key) %>
+<% desk = support_desk_config(desk_key) %>
 <%= stylesheet_link_tag "support_desk" %>
 <%= chats_tray_item :support,
       label: t("support_desk.launcher.label"),

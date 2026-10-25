@@ -24,6 +24,10 @@ module SupportDesk
 
     acts_as_support_agent kind: :ai, if: :active?
 
+    # Whose assistant she is, in an app with a desk per customer — the same
+    # owner as the desks she works. nil for the single-desk app.
+    belongs_to :owner, polymorphic: true, optional: true
+
     # Ruby-side default so settings is always a Hash even on MySQL, where a
     # JSON column can't carry a DB default.
     attribute :settings, default: -> { {} }
@@ -34,18 +38,36 @@ module SupportDesk
 
     # The assistant for +key+, found or created. Never INSERT-first, exactly
     # like Desk.for: read on every transition, written once.
-    def self.for(key)
+    def self.for(key, owner: nil)
       key = key.to_s
-      find_by(key: key) || create_or_find_by!(key: key)
+      scope = owned_by(owner)
+      scope.find_by(key: key) || scope.create_or_find_by!(key: key)
+    end
+
+    # Hers, for +owner+ — see Desk.owned_by.
+    def self.owned_by(owner)
+      return all if owner.nil? && !column_names.include?("owner_id")
+
+      where(owner: owner)
     end
 
     # --- Configuration ----------------------------------------------------------
 
-    # Her slice of the configuration. Raises ConfigurationError when nothing
-    # declares her any more — which is why everything below reads through
-    # #settings_config and falls back to the safest answer instead.
+    # Her slice of the configuration: the initializer's, overlaid with what
+    # `config.assistant_settings` says about this row. Raises
+    # ConfigurationError when nothing declares her any more — which is why
+    # everything below reads through #settings_config and falls back to the
+    # safest answer instead.
     def config
-      SupportDesk.config.assistant(key)
+      return SupportDesk.config.assistant(key) if SupportDesk.config.assistant_settings.nil?
+
+      @config ||= SupportDesk.config.assistant_configuration_for(self)
+    end
+
+    # A reloaded assistant reads her settings again.
+    def reload(*)
+      @config = nil
+      super
     end
 
     # Whether this row still has configuration behind it. False for an
@@ -158,10 +180,11 @@ module SupportDesk
 
     # --- Where she works --------------------------------------------------------
 
-    # The desks whose configuration points at her.
+    # The desks whose configuration points at her — her owner's.
     def desks
       SupportDesk.config.desks.each_key.filter_map do |desk_key|
-        SupportDesk.desk(desk_key) if SupportDesk.config.desk(desk_key).assistant_key == key.to_sym
+        desk = SupportDesk.desk(desk_key, owner: owner)
+        desk if desk.config.assistant_key == key.to_sym
       end
     end
 
@@ -172,7 +195,8 @@ module SupportDesk
 
     # The assistant, in one line.
     def inspect
-      "#<SupportDesk::Assistant #{key} #{name.inspect} #{autonomy} #{active? ? "active" : "inactive"}>"
+      "#<SupportDesk::Assistant #{key} #{name.inspect} #{autonomy} #{active? ? "active" : "inactive"}" \
+        "#{" #{owner_type}##{owner_id}" if try(:owner_id)}>"
     end
 
     private

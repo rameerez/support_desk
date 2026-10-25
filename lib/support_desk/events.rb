@@ -19,7 +19,48 @@ module SupportDesk
   # 3. **Mirrored.** Every event is also published on ActiveSupport
   #    ::Notifications as `"<event>.support_desk"` for APM and hosts that
   #    prefer that bus.
+  #
+  # In-memory events are lost with the process that was going to fire them.
+  # What is NOT lost is what the transitions wrote down, and
+  # `SupportDesk::Events.replay` reads that back — see below.
   module Events
+    # Read the desk's durable record — every event row (transitions, plus the
+    # `assistant_turn` and `draft_proposed` signals) and every message
+    # registration — from +horizon+, oldest first. PostgreSQL 13+.
+    #
+    #   horizon = SupportDesk::Events.replay(horizon: checkpoint.horizon) do |row|
+    #     Bridge.ingest(row)          # idempotent: row.position is unique across both tables
+    #   end
+    #   checkpoint.update!(horizon: horizon)
+    #
+    # The horizon is a TRANSACTION id, never a row position: positions are
+    # handed out at insert and transactions commit in any order, so a reader
+    # that checkpoints "the last position I saw" skips the row a slower
+    # transaction committed behind it. Each call captures the oldest
+    # transaction still running (`pg_snapshot_xmin(pg_current_snapshot())`),
+    # yields every row with `horizon <= xact_id < that`, in `(xact_id,
+    # position)` order and in pages of +batch_size+, and only then returns
+    # it as the next horizon. A raise returns nothing, and the range is read
+    # again next time — so readers deduplicate.
+    #
+    # A long range can be resumed. The block's second argument is a cursor
+    # into the range; save it once a row's effects are durable, and pass it
+    # back as `resume:` to continue where that left off, the range's end
+    # unchanged:
+    #
+    #   SupportDesk::Events.replay(horizon: c.horizon, resume: c.resume) do |row, resume|
+    #     Bridge.ingest(row)
+    #     c.update!(resume: resume)
+    #   end
+    #
+    # Call it outside a transaction: a reader holding a transaction id holds
+    # the horizon back with it.
+    def self.replay(horizon:, resume: nil, batch_size: 500, &block)
+      raise ArgumentError, "SupportDesk::Events.replay needs a block" unless block
+
+      Replay.new(horizon: horizon, resume: resume, batch_size: batch_size).each_row(&block)
+    end
+
     # The catalogue. Keys are event names; values document the arguments
     # subscribers receive (see 09-events-and-notifications).
     CATALOGUE = {

@@ -19,8 +19,15 @@ module SupportDesk
   #
   # Rows are created lazily and never INSERT-first: a desk is read on every
   # page and written once in its life.
+  #
+  # An app that runs a desk per customer gives each one an OWNER (any
+  # record: an account, a workspace, a product). The key stays the same —
+  # every owner has a `:default` desk — and SupportDesk::Current.owner says
+  # whose is meant. A desk with no owner is the single-desk app.
   class Desk < ApplicationRecord
     self.table_name = "support_desk_desks"
+
+    belongs_to :owner, polymorphic: true, optional: true
 
     acts_as_messager notifications: false,
                      blockable: false,
@@ -50,14 +57,35 @@ module SupportDesk
     # written once in its life — and it is why configuration, not
     # `settings`, is the place to put anything that has to change together
     # everywhere.
-    def self.for(key)
+    def self.for(key, owner: nil)
       key = key.to_s
-      find_by(key: key) || create_or_find_by!(key: key)
+      scope = owned_by(owner)
+      scope.find_by(key: key) || scope.create_or_find_by!(key: key)
     end
 
-    # This desk's slice of the configuration.
+    # The desks that belong to +owner+; nil means the desks that belong to
+    # nobody. Before the 0.6 migration there is no owner to ask about, and
+    # every desk belongs to nobody.
+    def self.owned_by(owner)
+      return all if owner.nil? && !column_names.include?("owner_id")
+
+      where(owner: owner)
+    end
+
+    # This desk's slice of the configuration: the initializer's, overlaid
+    # with what `config.desk_settings` says about this row when the host
+    # set one. Read once per record — see SupportDesk.desk for how long a
+    # record lives.
     def config
-      SupportDesk.config.desk(key)
+      return SupportDesk.config.desk(key) if SupportDesk.config.desk_settings.nil?
+
+      @config ||= SupportDesk.config.desk_configuration_for(self)
+    end
+
+    # A reloaded desk reads its settings again.
+    def reload(*)
+      @config = nil
+      super
     end
 
     # What requesters see as the counterpart. Configuration wins; the
@@ -79,13 +107,14 @@ module SupportDesk
       config.read(:email) || settings["email"].presence
     end
 
-    # The assistant who works this desk, or nil. Resolved through
+    # The assistant who works this desk, or nil: the one with this desk's
+    # owner, whatever SupportDesk::Current.owner says. Resolved through
     # `SupportDesk.assistant`, so it is the same memoised record everywhere.
     def assistant
       key = config.assistant_key
       return nil if key.nil?
 
-      SupportDesk.assistant(key)
+      SupportDesk.assistant(key, owner: owner)
     end
 
     # Whether this desk has one at all.
@@ -124,7 +153,7 @@ module SupportDesk
 
     # The desk, in one line.
     def inspect
-      "#<SupportDesk::Desk #{key} #{name.inspect}>"
+      "#<SupportDesk::Desk #{key} #{name.inspect}#{" #{owner_type}##{owner_id}" if try(:owner_id)}>"
     end
   end
 end

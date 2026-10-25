@@ -99,6 +99,17 @@ class InstallGeneratorTest < Rails::Generators::TestCase
                     "the tables have to exist before anything can point at them"
   end
 
+  test "a fresh install gets the owners and replay migrations, after the tables they change" do
+    run_generator
+
+    assert_migration "db/migrate/add_owners_to_support_desk.rb", /add_reference table, :owner, polymorphic: true/
+    assert_migration "db/migrate/add_replay_to_support_desk.rb", /pg_current_xact_id/
+    assistants = File.basename(migration_file_name("db/migrate/add_assistants_to_support_desk.rb"))
+    owners = File.basename(migration_file_name("db/migrate/add_owners_to_support_desk.rb"))
+
+    assert_operator assistants, :<, owners, "the assistants table has to exist before it gets an owner"
+  end
+
   test "the initializer documents the assistant, disclosure and all" do
     run_generator
 

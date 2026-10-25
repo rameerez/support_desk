@@ -4,6 +4,60 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - Unreleased
+
+A desk per customer, a record you can replay, and two kinds of provenance.
+Two additive migrations (`rails g support_desk:upgrade`); without an owner,
+nothing about an existing install changes.
+
+### Added
+
+- **Owners.** Desks and assistants gain an optional polymorphic `owner`
+  (migration `add_owners_to_support_desk`): keys are unique per owner, and
+  the old unique key stays, as a partial index, for rows with no owner.
+  `SupportDesk::Current.owner` says whose desks a request or job means;
+  `SupportDesk.desk`, `SupportDesk.assistant`, `Ticket.for_desk`, the SLA
+  scopes (`overdue`, `at_risk`, `past_sla`), `find_topic` and the console's
+  default desk list read that owner's rows. Both readers take `owner:` to
+  name one explicitly. A desk's assistant is its owner's assistant, whatever
+  `Current.owner` says, so another owner's assistant is a `NotAnAssistant`.
+  Owned records are cached per request or job (in `Current`); ownerless ones
+  stay memoised per process, as before.
+- **Settings from rows.** `config.desk_settings = ->(desk) { … }` and
+  `config.assistant_settings = ->(assistant) { … }` return a Hash overlaid on
+  the initializer, through the same validating setters (`topics:` takes a
+  block). `Desk#config` and `Assistant#config` are the overlaid settings.
+- **Durable replay** (PostgreSQL 13+, migration `add_replay_to_support_desk`).
+  `support_desk_events` and `support_desk_message_registrations` gain
+  `xact_id` (the writing transaction, `pg_current_xact_id()`, stored as
+  bigint so `schema.rb` can dump it) and `position` (one sequence for both
+  tables). `SupportDesk::Events.replay(horizon:, resume: nil, batch_size: 500)`
+  yields every row below the oldest running transaction in `(xact_id,
+  position)` order and returns the next horizon once the range is drained; a
+  cursor yielded with each row resumes a range that raised. See "Replaying
+  what was written down" in the README for the schedule a position
+  checkpoint loses.
+- **`assistant_turn` and `draft_proposed` event rows.** Both signals are now
+  written down in the transaction that produced them (new `Event::KINDS`,
+  internal, and `Event::SIGNAL_KINDS`, kept out of the timeline by the new
+  `Event.history` scope). `redispatch_assistant_turns!` re-emits without
+  writing another row.
+- **Conditional human replies.** `reply!(…, turn:)` and `note!(…, turn:)` by
+  a person raise `StaleTurn` and write nothing when the case moved on since
+  the turn was read. Without `turn:` they are unchanged.
+- **Message provenance.** `post_requester_message!(body, files:, via:,
+  external_id:)` is public and stamps `metadata["support_desk"]` with `via`
+  (never for `:in_app`) and `external_id`; `open!(via:)` stamps the opening
+  message.
+
+### Changed
+
+- `release_silent_assistants!` and `redispatch_assistant_turns!` iterate
+  assistant and desk rows rather than configured keys, so one run covers
+  every owner.
+- The requester views' desk name, promise and inbox door read the current
+  owner's desk (`support_desk_config`), still without creating it.
+
 ## [0.5.0] - 2026-10-19
 
 Intended as **0.5.0**: "Need help?" in the corner. **Requires chats >= 0.7.1**

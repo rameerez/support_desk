@@ -374,7 +374,7 @@ module SupportDesk
         end
         ensure_agent!(actor)
 
-        event = write_transition!(:assistant_resumed, actor: actor, request: request) do
+        event = write_transition!(:assistant_resumed, actor: actor, request: request, offers_turn: true) do
           next false unless assistant_paused?
 
           update!(assistant_paused_at: nil, assistant_paused_reason: nil)
@@ -383,7 +383,7 @@ module SupportDesk
         return self unless event
 
         SupportDesk.emit_after_commit(:assistant_resumed, self, by: actor)
-        emit_assistant_turn if awaiting_reply?
+        emit_assistant_turn(record: false) if awaiting_reply?
         self
       end
 
@@ -710,6 +710,8 @@ module SupportDesk
         # would make every draft stale the moment it was written.
         candidate.proposed_turn = assistant_turn
         candidate.save!
+        Event.record!(ticket: self, kind: :draft_proposed, actor: assistant,
+                      payload: { "draft" => candidate.id.to_s, "turn" => candidate.proposed_turn })
         reset_draft_associations!
         stamp_assistant_action!
         broadcast_change
@@ -841,16 +843,43 @@ module SupportDesk
       # It carries the turn, so a job can check `ticket.assistant_turn ==
       # turn` before spending money. A hook that raises is reported: a
       # broken subscriber must not roll back the message that triggered it.
-      def emit_assistant_turn(message = nil)
-        return unless open? && awaiting_reply?
+      #
+      # It also writes the turn down — an `assistant_turn` event row, in the
+      # transaction that produced the turn — so a durable reader
+      # (SupportDesk::Events.replay) hears about it even when this process
+      # dies before the in-memory event fires. `record: false` is the
+      # re-emission sweep, which repeats an old turn and owes no new row.
+      def emit_assistant_turn(message = nil, record: true)
+        assistant = assistant_owed_turn
+        return if assistant.nil?
+
+        record_assistant_turn!(assistant, message) if record
+        SupportDesk.emit_after_commit(:assistant_turn, self, assistant, message, turn: assistant_turn)
+      end
+
+      # The `assistant_turn` row, on its own: for a transition that hands the
+      # case to her, which writes it under its lock and announces it after.
+      def record_assistant_turn!(assistant = assistant_owed_turn, message = nil) # :nodoc:
+        return if assistant.nil?
+
+        Event.record!(ticket: self, kind: :assistant_turn, actor: :system,
+                      payload: { "turn" => assistant_turn, "assistant" => assistant.key,
+                                 "message" => message&.id&.to_s }.compact)
+      end
+
+      # Whom the case owes a turn right now, or nil. A hook that raises (a
+      # host's `cap`) is reported and owes nothing: a broken subscriber or
+      # policy must not roll back the message that triggered it.
+      def assistant_owed_turn
+        return nil unless open? && awaiting_reply?
 
         assistant = self.assistant
-        return if assistant.nil?
-        return unless assistant_policy(assistant).may_observe?
+        return nil if assistant.nil?
 
-        SupportDesk.emit_after_commit(:assistant_turn, self, assistant, message, turn: assistant_turn)
+        assistant if assistant_policy(assistant).may_observe?
       rescue StandardError => e
         SupportDesk.report_error(e, context: { hook: :assistant_turn, ticket: id })
+        nil
       end
 
       # A human transition that lowers the effective level below :reply while

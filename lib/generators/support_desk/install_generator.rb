@@ -49,6 +49,18 @@ module SupportDesk
                            File.join(db_migrate_path, "create_support_desk_message_registrations.rb")
       end
 
+      # 0.6: owners on desks and assistants, and the replay columns. The same
+      # files on a fresh install and an upgrade.
+      def create_owners_migration
+        migration_template "add_owners_to_support_desk.rb.erb",
+                           File.join(db_migrate_path, "add_owners_to_support_desk.rb")
+      end
+
+      def create_replay_migration
+        migration_template "add_replay_to_support_desk.rb.erb",
+                           File.join(db_migrate_path, "add_replay_to_support_desk.rb")
+      end
+
 
       # The annotated initializer — every setting the gem has, with what it
       # means and what it defaults to.

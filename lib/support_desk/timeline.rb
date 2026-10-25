@@ -118,7 +118,7 @@ module SupportDesk
     end
 
     def event_entries
-      ticket.events.chronological.map { |event| Entry.new(at: event.created_at, event: event) }
+      ticket.events.history.chronological.map { |event| Entry.new(at: event.created_at, event: event) }
     end
 
     # Proposals somebody decided about — sent, discarded, or overtaken.

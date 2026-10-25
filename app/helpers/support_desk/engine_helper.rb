@@ -152,7 +152,7 @@ module SupportDesk
     # the desk promises nothing. The same `config.reply_within` the SLA
     # breaches on — one setting, one truth.
     def support_reply_promise(desk_key = :default)
-      SupportDesk.config.desk(desk_key).reply_promise
+      support_desk_config(desk_key).reply_promise
     end
 
     # The status line under a case in the requester's list: who owes the next
@@ -183,7 +183,7 @@ module SupportDesk
       return false unless viewer.respond_to?(:ask_support!)
 
       key = viewer.class.try(:support_desk_key) || :default
-      return false unless SupportDesk.config.desk(key).inbox_entry == :always
+      return false unless support_desk_config(key).inbox_entry == :always
 
       !viewer.support_tickets.exists?
     end
@@ -205,11 +205,21 @@ module SupportDesk
     # never a Class.
     #
     # Memoised per view instance, so the door's avatar and its badge cost ONE
-    # query between them rather than one each.
+    # query between them rather than one each. SupportDesk::Current.owner's
+    # desk, like everything else that names a desk by key.
     def support_desk_record(desk_key = :default)
       key = desk_key.to_s
       @support_desk_records ||= {}
-      @support_desk_records[key] ||= SupportDesk::Desk.find_by(key: key) || SupportDesk::Desk.new(key: key)
+      @support_desk_records[key] ||= begin
+        desks = SupportDesk::Desk.owned_by(SupportDesk::Current.owner)
+        desks.find_by(key: key) || desks.new(key: key)
+      end
+    end
+
+    # The settings that desk works under — its own, when
+    # `config.desk_settings` gives it some — without creating it either.
+    def support_desk_config(desk_key = :default)
+      support_desk_record(desk_key).config
     end
 
     # The desk's face. Once the desk has a row it is just another chats
@@ -221,7 +231,7 @@ module SupportDesk
       desk = support_desk_record(desk_key)
       return chats_messager_avatar(desk, css_class: css_class) if desk.persisted?
 
-      name = SupportDesk.config.desk(desk_key).name
+      name = support_desk_config(desk_key).name
       initials = name.to_s.split.first(2).filter_map { |word| word[0] }.join.upcase
       tag.span(initials.presence || "?", class: "#{css_class} chats-avatar--initials", "aria-hidden": true)
     end
