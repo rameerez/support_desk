@@ -246,11 +246,14 @@ module SupportDesk
       # Returns the existing open ticket when one already covers the same
       # subject (or, for free-form tickets, the same topic) — posting the
       # message into it as an ordinary reply, because somebody just typed it.
+      #
+      # `disclosure:` (the assistant opening only) is how her first message
+      # discloses her, as on `respond!`.
       def open!(requester:, message: nil, about: nil, topic: nil, files: [], via: :in_app,
-                desk: nil, requester_role: nil, title: nil, metadata: {}, by: nil, request: nil)
+                desk: nil, requester_role: nil, title: nil, metadata: {}, by: nil, request: nil, disclosure: nil)
         open_or_reply!(requester: requester, message: message, about: about, topic: topic, files: files,
                        via: via, desk: desk, requester_role: requester_role, title: title,
-                       metadata: metadata, by: by, request: request)
+                       metadata: metadata, by: by, request: request, disclosure: disclosure)
       end
 
       # `open!`, plus the console's authorization seam. `authorize_reuse` is
@@ -262,10 +265,11 @@ module SupportDesk
       # call.
       def open_or_reply!(requester:, message: nil, about: nil, topic: nil, files: [], via: :in_app,
                          desk: nil, requester_role: nil, title: nil, metadata: {}, by: nil, request: nil,
-                         authorize_reuse: nil) # :nodoc:
+                         authorize_reuse: nil, disclosure: nil) # :nodoc:
         ensure_requester!(requester)
         desk ||= SupportDesk.desk
         opener = by.nil? ? requester : by
+        ensure_disclosure_is_hers!(opener, disclosure)
         # By persisted identity, never by ambient state: who asked is not
         # something to infer from Current.actor, and an agent passed as their
         # own requester is asking for help, not writing to themselves.
@@ -289,7 +293,7 @@ module SupportDesk
         # and lose only the message that was supposed to justify them.
         transaction(requires_new: true) do
           next reply_into!(existing, message, files: files, by: opener, by_support: by_support,
-                           request: request, authorize_reuse: authorize_reuse, via: via) if existing
+                           request: request, authorize_reuse: authorize_reuse, via: via, disclosure: disclosure) if existing
 
           created, inserted = insert_ticket!(
             requester: requester, desk: desk, node: node, about: about, via: via, opened_by: opener,
@@ -301,14 +305,14 @@ module SupportDesk
           # the case. Not the assignment, not the message count, not
           # `previously_new_record?` — the update two lines down resets it.
           if inserted
-            post_opening!(created, message, files: files, by: opener, by_support: by_support)
+            post_opening!(created, message, files: files, by: opener, by_support: by_support, disclosure: disclosure)
             SupportDesk.emit_after_commit(:ticket_opened, created)
             created
           else
             # Somebody else's INSERT won by a millisecond. Theirs is the case
             # that exists, so this is a reply into it, policy and all.
             reply_into!(created, message, files: files, by: opener, by_support: by_support,
-                        request: request, authorize_reuse: authorize_reuse, via: via)
+                        request: request, authorize_reuse: authorize_reuse, via: via, disclosure: disclosure)
           end
         end
       end
@@ -353,6 +357,14 @@ module SupportDesk
         scope = not_closed.where(requester: requester, desk: desk, subject: subject)
         scope = scope.where(topic: topic.to_s) unless subject
         scope.newest_first.first
+      end
+
+      # `disclosure:` says how the ASSISTANT is disclosed on a message: a
+      # person's words carry none, so passing one for them is a mistake, said.
+      def ensure_disclosure_is_hers!(actor, disclosure) # :nodoc:
+        return if disclosure.nil? || SupportDesk.ai_actor?(actor)
+
+        raise ArgumentError, "disclosure: is how the assistant is disclosed; #{describe_record(actor)} is not the assistant"
       end
 
       # The record on the requester side of every operation: saved, declared
@@ -641,12 +653,13 @@ module SupportDesk
       # already true and the caller needs no reload. chats' after-commit
       # subscriber then finds the message already registered and does
       # nothing.
-      def post_opening!(ticket, message, files:, by:, by_support:)
+      def post_opening!(ticket, message, files:, by:, by_support:, disclosure: nil)
         notices = [ post_opening_line!(ticket) ]
 
         posted = if by_support && SupportDesk.ai_actor?(by)
-          notices << ticket.send(:post_disclosure_notice!, by) if by.notice?
-          ticket.send(:post_assistant_opening!, message, files: files, assistant: by)
+          shown = by.disclosure_as(disclosure)
+          notices << ticket.send(:post_disclosure_notice!, by, shown) if shown.notice?
+          ticket.send(:post_assistant_opening!, message, files: files, assistant: by, disclosure: shown)
         elsif by_support
           # Never the inbound "no message, hand the ticket back" shortcut: a
           # desk that writes first with nothing to say is a chats validation
@@ -736,12 +749,12 @@ module SupportDesk
       # through here, so an existing case is answered under its row lock,
       # under the desk's reply policy, with the console's authorization hook
       # running before any of it.
-      def reply_into!(ticket, message, files:, by:, by_support:, request:, authorize_reuse:, via:)
+      def reply_into!(ticket, message, files:, by:, by_support:, request:, authorize_reuse:, via:, disclosure: nil)
         if by_support
           # Only this private outreach path supplies the current turn internally.
           # Public replies must present the token their harness observed.
           ticket.send(:reply_under_lock!, message, by: by, files: files, request: request,
-                                                   authorize: authorize_reuse, outreach: true)
+                                                   authorize: authorize_reuse, outreach: true, disclosure: disclosure)
         else
           ticket.with_lock(requires_new: true) do
             authorize_reuse&.call(ticket)
@@ -928,13 +941,15 @@ module SupportDesk
     # at the turn they read, and raises SupportDesk::StaleTurn otherwise —
     # the `If-Match` of a reply sent through an API or a review screen.
     # `metadata:` rides on the message (provenance for a draft a human sent;
-    # hosts nest their own under "host").
-    def reply!(body = nil, by: nil, files: [], request: nil, metadata: {}, turn: nil)
+    # hosts nest their own under "host"). `disclosure:` (the assistant only)
+    # is how this message discloses her, as on `respond!`.
+    def reply!(body = nil, by: nil, files: [], request: nil, metadata: {}, turn: nil, disclosure: nil)
       actor = resolve_actor(by)
       ensure_agent!(actor)
+      self.class.ensure_disclosure_is_hers!(actor, disclosure)
       reconcile_and_commit! if SupportDesk.ai_actor?(actor)
 
-      reply_under_lock!(body, by: actor, files: files, request: request, metadata: metadata, turn: turn)
+      reply_under_lock!(body, by: actor, files: files, request: request, metadata: metadata, turn: turn, disclosure: disclosure)
     end
 
     # An internal note: in the timeline and the console, never in the
@@ -1532,11 +1547,11 @@ module SupportDesk
     # `authorize:` is the console's hook (see Ticket.open_or_reply!): it runs
     # under this lock, before any policy side effect, and a raise there rolls
     # the whole thing back.
-    def reply_under_lock!(body, by:, files:, request:, authorize: nil, metadata: {}, turn: nil, outreach: false)
+    def reply_under_lock!(body, by:, files:, request:, authorize: nil, metadata: {}, turn: nil, outreach: false, disclosure: nil)
       with_lock(requires_new: true) do
         authorize&.call(self)
-        next assistant_reply_under_lock!(body, assistant: by, files: files, request: request,
-                                               metadata: metadata, turn: turn, outreach: outreach) if SupportDesk.ai_actor?(by)
+        next assistant_reply_under_lock!(body, assistant: by, files: files, request: request, metadata: metadata,
+                                               turn: turn, outreach: outreach, disclosure: disclosure) if SupportDesk.ai_actor?(by)
 
         # Fold committed inputs before a human answer too. A delayed callback
         # must not later turn an already-answered question back into work.
@@ -1561,8 +1576,9 @@ module SupportDesk
     # `reply!` by the assistant: her full rules, under the lock the caller
     # already holds. Everything here is also what `respond!` runs — this is
     # the path for a host that decided to answer rather than ask policy.
-    def assistant_reply_under_lock!(body, assistant:, files:, request:, metadata:, turn:, outreach: false)
+    def assistant_reply_under_lock!(body, assistant:, files:, request:, metadata:, turn:, outreach: false, disclosure: nil)
       assistant = resolve_assistant!(assistant)
+      shown = assistant.disclosure_as(disclosure)
       # Private outreach supplies a token only after acquiring both locks;
       # public replies compare the caller's actual observed token.
       lock_conversation!
@@ -1579,7 +1595,7 @@ module SupportDesk
       raise AssistantNotAllowed.new(policy, verb: :max_turns) if left&.zero?
 
       speak!(body, assistant, policy: policy, turn: turn, files: files, confidence: nil, sources: [],
-                              metadata: metadata, request: request)
+                              metadata: metadata, request: request, disclosure: shown)
     end
 
     def apply_reply_policy!(actor, request: nil)

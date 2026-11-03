@@ -103,6 +103,33 @@ module SupportDesk
     def signs? = %i[signature_and_notice signature].include?(disclosure)
     def notice? = %i[signature_and_notice notice].include?(disclosure)
 
+    # How she is disclosed on ONE message: the mode a host decided for it
+    # (`disclosure:` on respond!, reply! and open!), or, without one, her
+    # configured mode. Everything the requester is shown for that message
+    # (the notice, the signature, the name in the metadata) reads this, so
+    # what a host recorded as decided is what was rendered.
+    Disclosure = Data.define(:mode, :name) do
+      def disclosed? = mode.present? && mode != :none
+      def signs? = %i[signature_and_notice signature].include?(mode)
+      def notice? = %i[signature_and_notice notice].include?(mode)
+      def display_name = disclosed? ? I18n.t("support_desk.assistant.disclosed_name", name: name) : name
+    end
+
+    #   rose.disclosure_as(:signature)   # => Disclosure for one message
+    #   rose.disclosure_as(nil)          # => her configured mode
+    #
+    # Raises ArgumentError for a mode that is none of DISCLOSURE_MODES.
+    def disclosure_as(mode = nil)
+      return Disclosure.new(mode: disclosure, name: name) if mode.nil?
+
+      modes = SupportDesk::Configuration::AssistantConfiguration::DISCLOSURE_MODES
+      unless modes.include?(mode.to_s.to_sym)
+        raise ArgumentError, "disclosure: #{mode.inspect} is not a disclosure mode — one of #{modes.map(&:inspect).join(", ")}"
+      end
+
+      Disclosure.new(mode: mode.to_s.to_sym, name: name)
+    end
+
     # Remember what she is called and what is disclosed about her, on her own
     # row. Written whenever configuration resolves her and the two disagree —
     # one UPDATE in the life of a setting, and none on the usual read.

@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-03
+
+### Added
+
+- **Per-message disclosure.** `respond!`, `reply!` (by the assistant),
+  `Ticket.open!`, `Ticket.open_or_reply!` and
+  `open_support_conversation_with!` take `disclosure:` (one of
+  `AssistantConfiguration::DISCLOSURE_MODES`). The notice, the signature and
+  the message's `metadata["support_desk"]` (`disclosure`, `signed`,
+  `display_name`) follow that mode for that message, so a host that records
+  the disclosure it decided has exactly that rendered. Without it, the
+  assistant's configured mode, as before. An unknown mode, or `disclosure:`
+  on a person's reply, raises `ArgumentError` before anything is written.
+  `Assistant#disclosure_as(mode)` returns the `Assistant::Disclosure` used.
+
 ## [0.6.0] - 2026-10-25
 
 A desk per customer, a record you can replay, and two kinds of provenance.

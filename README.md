@@ -1299,6 +1299,20 @@ the turn and the whole policy that allowed it, `ticket.export` labels it
 marks it for staff. What a customer is told is a product decision; what your
 records say a machine wrote is not.
 
+**A host may decide the mode per message.** `respond!`, `reply!` (by the
+assistant), `Ticket.open!` and `open_support_conversation_with!` take
+`disclosure:`, one of the four modes, for a host whose own records decide
+disclosure message by message (a compliance ledger, a channel rule). That
+message is then rendered and stamped exactly as that mode says: the notice
+(once per mode, before the message it introduces), the signature, and
+`metadata["support_desk"]["disclosure"]`. Without it, her configured mode.
+A mode that is none of the four raises `ArgumentError` before anything is
+written, and so does `disclosure:` on a person's reply.
+
+```ruby
+ticket.respond!(answer, by: rose, turn: turn, disclosure: :signature)   # whatever rose.disclosure says
+```
+
 **Historical disclosure is captured per message.** The default Chats signature
 renderer uses the assistant name and disclosure stored when the message was
 sent. Renaming, changing mode or removing configuration does not rewrite old
