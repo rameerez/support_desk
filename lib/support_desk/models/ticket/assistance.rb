@@ -210,7 +210,11 @@ module SupportDesk
       # Returns a SupportDesk::Outcome. Raises StaleTurn when the case moved
       # on, Locked when there is nobody to write to, NotAnAssistant when
       # `by:` isn't this desk's assistant.
-      def respond!(body = nil, by:, turn:, files: [], confidence: nil, sources: [], metadata: {}, request: nil)
+      #
+      # `disclosure:` is how THIS message discloses her (a mode of
+      # AssistantConfiguration::DISCLOSURE_MODES), for a host that decides it
+      # per message; without it, her configured mode.
+      def respond!(body = nil, by:, turn:, files: [], confidence: nil, sources: [], metadata: {}, request: nil, disclosure: nil)
         raise ArgumentError, "respond! needs something to say" if body.blank? && files.blank?
 
         # Durable repair first, in a transaction of its own: what it folds in
@@ -219,6 +223,7 @@ module SupportDesk
 
         with_lock(requires_new: true) do
           assistant = resolve_assistant!(by)
+          shown = assistant.disclosure_as(disclosure)
           lock_conversation!
           reconcile_unregistered_messages!
           ensure_current_turn!(turn)
@@ -230,7 +235,7 @@ module SupportDesk
           left = assistant_turns_left
           if policy.may_reply? && (left.nil? || left.positive?)
             message = speak!(body, assistant, policy: policy, turn: turn, files: files, confidence: confidence,
-                                              sources: sources, metadata: metadata, request: request)
+                                              sources: sources, metadata: metadata, request: request, disclosure: shown)
             Outcome.new(action: :sent, message: message, policy: policy, turn: assistant_turn)
           else
             draft = propose_draft!(body, assistant, policy: policy, files: files, confidence: confidence,
@@ -639,17 +644,18 @@ module SupportDesk
 
       # Say it to the requester. The caller holds the lock and has already
       # decided she may.
-      def speak!(body, assistant, policy:, turn:, files:, confidence:, sources:, metadata:, request:)
-        notice = (post_disclosure_notice!(assistant) if assistant.notice? && !disclosure_posted?(assistant))
+      def speak!(body, assistant, policy:, turn:, files:, confidence:, sources:, metadata:, request:,
+                 disclosure: assistant.disclosure_as)
+        notice = (post_disclosure_notice!(assistant, disclosure) if disclosure.notice? && !disclosure_posted?(assistant, disclosure))
         apply_reply_policy!(assistant, request: request)
 
         stamped = assistant_message_metadata(assistant, policy: policy, turn: turn, confidence: confidence,
-                                                        sources: sources, host: metadata)
+                                                        sources: sources, host: metadata, disclosure: disclosure)
 
         # `author: nil` in the nameless modes, so chats prints no signature
         # and the requester sees the desk — while the metadata above still
         # says exactly what wrote it, for staff, for export and for audit.
-        posted = post_agent_message!(body, files: files, by: (assistant if assistant.signs?), metadata: stamped)
+        posted = post_agent_message!(body, files: files, by: (assistant if disclosure.signs?), metadata: stamped)
         pin_before!(notice, posted) if notice
         record_registration!(posted)
         update_columns(assistant_turns_count: assistant_turns_count.to_i + 1)
@@ -663,14 +669,15 @@ module SupportDesk
       # The host's own metadata is NESTED under "host" rather than merged:
       # the "support_desk" key is the gem's evidence, and a host writing
       # `policy` into it would be rewriting it.
-      def assistant_message_metadata(assistant, policy:, turn:, confidence: nil, sources: [], host: {})
+      def assistant_message_metadata(assistant, policy:, turn:, confidence: nil, sources: [], host: {},
+                                     disclosure: assistant.disclosure_as)
         stamped = { "support_desk" => {
           "assistant" => assistant.key,
           "kind" => "ai",
           "name" => assistant.name,
-          "display_name" => assistant.disclosed_name,
-          "disclosure" => assistant.disclosure.to_s,
-          "signed" => assistant.signs?,
+          "display_name" => disclosure.display_name,
+          "disclosure" => disclosure.mode.to_s,
+          "signed" => disclosure.signs?,
           "turn" => turn.to_s,
           "confidence" => confidence,
           "sources" => sources.presence,
@@ -684,10 +691,10 @@ module SupportDesk
       # transaction that created the case (see Ticket.post_opening!), where
       # she is already seated and there is no earlier turn for anybody to
       # have held — so the first turn is the one this message consumes.
-      def post_assistant_opening!(body, files:, assistant:)
+      def post_assistant_opening!(body, files:, assistant:, disclosure: assistant.disclosure_as)
         policy = assistant_policy(assistant)
-        stamped = assistant_message_metadata(assistant, policy: policy, turn: assistant_turn)
-        posted = post_agent_message!(body, files: files, by: (assistant if assistant.signs?), metadata: stamped)
+        stamped = assistant_message_metadata(assistant, policy: policy, turn: assistant_turn, disclosure: disclosure)
+        posted = post_agent_message!(body, files: files, by: (assistant if disclosure.signs?), metadata: stamped)
         update_columns(assistant_turns_count: 1)
         posted
       end
@@ -722,7 +729,7 @@ module SupportDesk
       # The notice a `:notice` mode opens with, posted once per disclosure
       # MODE: a host that changes mode discloses again, and one that doesn't
       # never repeats itself.
-      def post_disclosure_notice!(assistant)
+      def post_disclosure_notice!(assistant, disclosure = assistant.disclosure_as)
         line = assistant.config.line_for(:disclosure_line, self)
         if line.blank?
           raise ConfigurationError,
@@ -731,13 +738,13 @@ module SupportDesk
         end
 
         notice = conversation.post_system_message!(line)
-        disclosed = (metadata["assistant_disclosed"] || {}).merge(assistant.key.to_s => assistant.disclosure.to_s)
+        disclosed = (metadata["assistant_disclosed"] || {}).merge(assistant.key.to_s => disclosure.mode.to_s)
         update!(metadata: metadata.merge("assistant_disclosed" => disclosed))
         notice
       end
 
-      def disclosure_posted?(assistant)
-        metadata.dig("assistant_disclosed", assistant.key.to_s) == assistant.disclosure.to_s
+      def disclosure_posted?(assistant, disclosure = assistant.disclosure_as)
+        metadata.dig("assistant_disclosed", assistant.key.to_s) == disclosure.mode.to_s
       end
 
       # chats orders a transcript by (created_at, id), and two inserts in one

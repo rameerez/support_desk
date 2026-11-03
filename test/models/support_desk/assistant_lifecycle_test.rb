@@ -445,6 +445,22 @@ module SupportDesk
       end
     end
 
+    test "her opening message is disclosed as the host decided for it" do
+      bob = create_user(name: "Bob")
+
+      with_assistant_config(may_open_conversations: true, disclosure: :signature) do
+        ticket = @rose.open_support_conversation_with!(bob, "Hola, tu reembolso ya está", topic: :order, disclosure: :notice)
+
+        messages = ticket.conversation.messages.order(:created_at, :id).to_a
+        notice = messages.index { |message| message.kind == "system" && message.body.match?(/virtual/) }
+        hers = messages.index { |message| message.kind == "text" }
+
+        assert notice && notice < hers, "the notice the host chose comes before her first word"
+        assert_nil messages[hers].author
+        assert_equal "notice", messages[hers].metadata.dig("support_desk", "disclosure")
+      end
+    end
+
     test "writing into a case that already exists is an ordinary reply, with her full rules" do
       with_assistant_config(may_open_conversations: true) do
         reused = @rose.open_support_conversation_with!(@alice, "¿Sigues teniendo el problema?", topic: :other)

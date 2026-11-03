@@ -307,6 +307,43 @@ module SupportDesk
       assert_equal "Rose · virtual assistant", SupportDesk::Assistant.find_by(key: "rose").disclosed_name
     end
 
+    test "a host's per-message disclosure is what the requester is shown, whatever her configured mode" do
+      with_assistant_config(disclosure: :notice) do
+        outcome = respond(disclosure: :signature)
+        stamp = outcome.message.metadata["support_desk"]
+
+        assert_equal [ "signature", true, "Rose · virtual assistant" ], stamp.values_at("disclosure", "signed", "display_name")
+        assert_equal @rose, outcome.message.author, "signed: the bubble carries her disclosed name"
+        assert_empty @ticket.conversation.messages.where(kind: "system").select { _1.body.include?("virtual") },
+                     "a signature mode posts no notice, even where her configuration would"
+      end
+    end
+
+    test "a per-message notice is posted before the message even when her configuration signs instead" do
+      outcome = respond(disclosure: :notice)
+      notice = @ticket.conversation.messages.where(kind: "system").select { _1.body.include?("virtual") }.sole
+
+      assert_operator notice.created_at, :<, outcome.message.created_at
+      assert_nil outcome.message.author, "a notice mode does not sign"
+      assert_equal [ "notice", false ], outcome.message.metadata["support_desk"].values_at("disclosure", "signed")
+      assert_equal({ "rose" => "notice" }, @ticket.reload.metadata["assistant_disclosed"])
+
+      ask_again(@ticket, "otra")
+      respond("otra respuesta", disclosure: :notice)
+      assert_equal 1, @ticket.conversation.messages.where(kind: "system").count { _1.body.include?("virtual") }, "once per mode"
+    end
+
+    test "a disclosure that is no mode is refused before anything is written" do
+      assert_raises(ArgumentError) { respond(disclosure: :whisper) }
+      refute_assistant_spoke @ticket
+    end
+
+    test "a person's reply carries no assistant disclosure" do
+      error = assert_raises(ArgumentError) { @ticket.reply!("Soy Lucía", by: @lucia, disclosure: :signature) }
+
+      assert_match(/not the assistant/, error.message)
+    end
+
     test "the export names her whatever the mode" do
       with_assistant_config(disclosure: :none) do
         respond

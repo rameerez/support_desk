@@ -57,7 +57,7 @@ module SupportDesk
     # agent aiming at themselves: an agent who needs help asks for it),
     # NotSupportable, UnknownTopic.
     def open_support_conversation_with!(requester, message, about: nil, topic: nil, files: [], via: :in_app,
-                                        desk: nil, request: nil)
+                                        desk: nil, request: nil, disclosure: nil)
       SupportDesk::Ticket.ensure_requester!(requester)
 
       if SupportDesk::Ticket.same_actor?(requester, self)
@@ -76,7 +76,8 @@ module SupportDesk
         via: via,
         desk: desk || requester.support_desk,
         requester_role: requester.class.support_desk_requester_options[:as],
-        request: request
+        request: request,
+        disclosure: disclosure
       )
     end
 
