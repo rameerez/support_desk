@@ -114,9 +114,9 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     run_generator
 
     assert_file "config/initializers/support_desk.rb" do |initializer|
-      assert_match(/config\.assistant :rose do \|rose\|/, initializer)
-      assert_match(/rose\.disclosure\s+= :signature_and_notice/, initializer)
-      assert_match(/config\.default_assistant = :rose/, initializer)
+      assert_match(/config\.assistant :assistant do \|assistant\|/, initializer)
+      assert_match(/assistant\.disclosure\s+= :signature_and_notice/, initializer)
+      assert_match(/config\.default_assistant = :assistant/, initializer)
       assert_match(/SupportDesk\.on\(:assistant_turn/, initializer)
     end
   end

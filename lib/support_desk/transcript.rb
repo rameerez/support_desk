@@ -6,7 +6,7 @@ module SupportDesk
   #
   #   ticket.transcript.to_text
   #   # [2026-09-18 10:02] Alice: No me han pagado
-  #   # [2026-09-18 10:03] Rose: Lo estoy mirando ahora mismo
+  #   # [2026-09-18 10:03] Assistant: Lo estoy mirando ahora mismo
   #   # [2026-09-18 10:07] Lucía: Ya está resuelto [justificante.pdf]
   #
   #   ticket.transcript(limit: 20).last(5)

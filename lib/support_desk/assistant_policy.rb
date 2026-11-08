@@ -5,7 +5,7 @@ module SupportDesk
   #
   #   policy = ticket.assistant_policy
   #   policy.level       # => :draft
-  #   policy.because     # => "topic payments caps rose at draft"
+  #   policy.because     # => "topic payments caps assistant at draft"
   #   policy.may_reply?  # => false
   #
   # == Ceilings and floors
@@ -193,7 +193,7 @@ module SupportDesk
       }
     end
 
-    # "draft — topic payments caps rose at draft"
+    # "draft — topic payments caps assistant at draft"
     def to_s = "#{level} — #{because}"
 
     def inspect

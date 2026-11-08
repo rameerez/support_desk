@@ -23,7 +23,7 @@ class ConsoleOfferedActionsTest < ActionDispatch::IntegrationTest
     "Lucía is handling this case.",
     "Pedro is handling this case.",
     # A machine holds it, by the name the customer is reading.
-    "Rose · virtual assistant is handling this case.",
+    "Assistant · virtual assistant is handling this case.",
     "You can't do that on this case right now.",
     "There is no proposal waiting on this case.",
     # One per status a decided proposal can be in: pressing Enviar on a

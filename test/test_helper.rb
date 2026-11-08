@@ -70,10 +70,10 @@ module ActiveSupport
     # The dummy's own initializer declares NONE on purpose: "no assistant
     # configured" is the state every existing host is in, so it is the state
     # this suite is in unless an example asks for one.
-    def configure_assistant!(key = :rose, **overrides)
+    def configure_assistant!(key = :assistant, **overrides)
       SupportDesk.configure do |config|
         config.assistant(key) do |assistant|
-          assistant.name = overrides.fetch(:name, "Rose")
+          assistant.name = overrides.fetch(:name, "Assistant")
           assistant.disclosure = overrides.fetch(:disclosure, :signature)
           assistant.autonomy = overrides.fetch(:autonomy, :draft)
           overrides.except(:name, :disclosure, :autonomy).each do |setting, value|

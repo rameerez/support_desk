@@ -71,7 +71,7 @@ class AssistantDoctorTest < ActiveSupport::TestCase
     Chats.config.messager_display_name = ->(_messager) { "" }
 
     assert_not_predicate SupportDesk.doctor, :ok?
-    assert_match(/no display name for rose/, check("assistant authorship").message)
+    assert_match(/no display name for assistant/, check("assistant authorship").message)
   end
 
   test "a host's own kind: :ai model is a warning, because it is refused everywhere" do
@@ -116,24 +116,24 @@ class AssistantDoctorTest < ActiveSupport::TestCase
   end
 
   test "a case that has waited longer than her promise turns the doctor red" do
-    rose = configure_assistant!(autonomy: :reply, responds_within: 60)
+    assistant = configure_assistant!(autonomy: :reply, responds_within: 60)
     ticket = ticket_for(@alice)
-    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
+    ticket.assign!(to: assistant, by: assistant, turn: ticket.assistant_turn)
 
     assert_predicate SupportDesk.doctor, :ok?
 
     travel 2.minutes
 
     assert_not_predicate SupportDesk.doctor, :ok?
-    assert_match(/waited longer than/, check("assistant silence (rose)").message)
-    assert_match(/release_silent_assistants/, check("assistant silence (rose)").message,
+    assert_match(/waited longer than/, check("assistant silence (assistant)").message)
+    assert_match(/release_silent_assistants/, check("assistant silence (assistant)").message,
                  "a failure that doesn't name the way out is a failure nobody can act on")
   end
 
   test "an assistant sitting on a case she may not work turns the doctor red" do
-    rose = configure_assistant!(autonomy: :reply)
+    assistant = configure_assistant!(autonomy: :reply)
     ticket = ticket_for(@alice)
-    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
+    ticket.assign!(to: assistant, by: assistant, turn: ticket.assistant_turn)
     # Straight to the column: this is exactly the state a bug would leave,
     # and the check has to see it however it got there.
     ticket.update_columns(assistant_paused_at: Time.current)
@@ -144,9 +144,9 @@ class AssistantDoctorTest < ActiveSupport::TestCase
   end
 
   test "the seats check survives the configuration being taken away" do
-    rose = configure_assistant!(autonomy: :reply)
+    assistant = configure_assistant!(autonomy: :reply)
     ticket = ticket_for(@alice)
-    ticket.assign!(to: rose, by: rose, turn: ticket.assistant_turn)
+    ticket.assign!(to: assistant, by: assistant, turn: ticket.assistant_turn)
     # The documented kill switch: she is not declared any more. The seat she
     # is holding is still a seat, and the check that finds it is the one that
     # used to return early here (R6).
@@ -171,12 +171,12 @@ class AssistantDoctorTest < ActiveSupport::TestCase
   end
 
   test "two pending proposals on one case is a failure" do
-    rose = configure_assistant!
+    assistant = configure_assistant!
     ticket = ticket_for(@alice)
-    ticket.draft!("una", by: rose, turn: ticket.assistant_turn)
+    ticket.draft!("una", by: assistant, turn: ticket.assistant_turn)
     # Bypassing the model, because the model is what the check is there to
     # back up on an adapter with no partial index.
-    SupportDesk::Draft.new(ticket: ticket, author: rose, proposed_turn: "t1-r1", body: "otra",
+    SupportDesk::Draft.new(ticket: ticket, author: assistant, proposed_turn: "t1-r1", body: "otra",
                            status: "pending").save!(validate: false)
 
     assert_not_predicate SupportDesk.doctor, :ok?
@@ -188,9 +188,9 @@ class AssistantDoctorTest < ActiveSupport::TestCase
   end
 
   test "a proposal left pending on a closed case is a warning" do
-    rose = configure_assistant!
+    assistant = configure_assistant!
     ticket = ticket_for(@alice)
-    draft = ticket.draft!("una", by: rose, turn: ticket.assistant_turn)
+    draft = ticket.draft!("una", by: assistant, turn: ticket.assistant_turn)
     ticket.close!(by: @lucia)
     draft.update_columns(status: "pending")
 

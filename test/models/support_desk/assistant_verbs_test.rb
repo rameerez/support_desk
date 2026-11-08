@@ -19,7 +19,7 @@ module SupportDesk
     setup do
       @alice = create_user(name: "Alice")
       @lucia = create_agent(name: "Lucía")
-      @rose = configure_assistant!(autonomy: :resolve)
+      @assistant = configure_assistant!(autonomy: :resolve)
       @ticket = ticket_for(@alice, message: "Hola")
     end
 
@@ -29,78 +29,78 @@ module SupportDesk
 
     test "note is hers from :observe up, and refused below" do
       with_assistant_config(autonomy: :observe) do
-        assert @ticket.note!("mirando", by: @rose, turn: turn)
+        assert @ticket.note!("mirando", by: @assistant, turn: turn)
       end
 
       with_assistant_config(autonomy: :off) do
-        error = assert_raises(AssistantNotAllowed) { @ticket.note!("mirando", by: @rose, turn: turn) }
+        error = assert_raises(AssistantNotAllowed) { @ticket.note!("mirando", by: @assistant, turn: turn) }
 
         assert_equal :note, error.verb
-        assert_match(/rose may not note on #{@ticket.reference}/, error.message)
+        assert_match(/assistant may not note on #{@ticket.reference}/, error.message)
         assert_match(/autonomy is off/, error.message)
       end
     end
 
     test "draft! is hers from :draft up" do
       with_assistant_config(autonomy: :observe) do
-        assert_raises(AssistantNotAllowed) { @ticket.draft!("propuesta", by: @rose, turn: turn) }
+        assert_raises(AssistantNotAllowed) { @ticket.draft!("propuesta", by: @assistant, turn: turn) }
       end
 
       with_assistant_config(autonomy: :draft) do
-        assert_kind_of Draft, @ticket.draft!("propuesta", by: @rose, turn: turn)
+        assert_kind_of Draft, @ticket.draft!("propuesta", by: @assistant, turn: turn)
       end
     end
 
     test "reply! is hers from :reply up" do
       with_assistant_config(autonomy: :draft) do
-        error = assert_raises(AssistantNotAllowed) { @ticket.reply!("hola", by: @rose, turn: turn) }
+        error = assert_raises(AssistantNotAllowed) { @ticket.reply!("hola", by: @assistant, turn: turn) }
 
         assert_equal :reply, error.verb
       end
 
       with_assistant_config(autonomy: :reply) do
-        assert_kind_of Chats::Message, @ticket.reply!("hola", by: @rose, turn: turn)
+        assert_kind_of Chats::Message, @ticket.reply!("hola", by: @assistant, turn: turn)
       end
     end
 
     test "close! is hers only at :resolve, and only on a case she holds" do
       with_assistant_config(autonomy: :reply) do
-        @ticket.reply!("hola", by: @rose, turn: turn)
+        @ticket.reply!("hola", by: @assistant, turn: turn)
 
-        assert_raises(AssistantNotAllowed) { @ticket.close!(by: @rose, turn: turn) }
+        assert_raises(AssistantNotAllowed) { @ticket.close!(by: @assistant, turn: turn) }
       end
 
       with_assistant_config(autonomy: :resolve) do
-        @ticket.close!(by: @rose, turn: turn)
+        @ticket.close!(by: @assistant, turn: turn)
 
         assert_ticket_closed @ticket
       end
     end
 
     test "close! is refused while the customer is still owed an answer" do
-      @ticket.assign!(to: @rose, by: @lucia)
+      @ticket.assign!(to: @assistant, by: @lucia)
 
       assert_predicate @ticket, :awaiting_reply?
-      assert_raises(AssistantNotAllowed) { @ticket.close!(by: @rose, turn: turn) }
+      assert_raises(AssistantNotAllowed) { @ticket.close!(by: @assistant, turn: turn) }
     end
 
     test "close! is refused once somebody has asked for a person" do
-      @ticket.reply!("hola", by: @rose, turn: turn)
+      @ticket.reply!("hola", by: @assistant, turn: turn)
       @ticket.request_human!(by: @alice)
 
-      assert_raises(AssistantNotAllowed) { @ticket.close!(by: @rose, turn: turn) }
+      assert_raises(AssistantNotAllowed) { @ticket.close!(by: @assistant, turn: turn) }
       assert_ticket_open @ticket
     end
 
     test "release! is her own seat and nobody else's" do
       @ticket.assign!(to: @lucia, by: @lucia)
 
-      assert_raises(AssistantNotAllowed) { @ticket.release!(by: @rose, turn: turn) }
+      assert_raises(AssistantNotAllowed) { @ticket.release!(by: @assistant, turn: turn) }
       assert_assigned_to @ticket, @lucia
 
       @ticket.release!(by: @lucia)
-      @ticket.assign!(to: @rose, by: @lucia)
-      @ticket.release!(by: @rose, turn: turn)
+      @ticket.assign!(to: @assistant, by: @lucia)
+      @ticket.release!(by: @assistant, turn: turn)
 
       assert_unassigned @ticket
     end
@@ -108,18 +108,18 @@ module SupportDesk
     # --- What she may never do ---------------------------------------------------
 
     test "she may not refile a case — triage is where authority comes from" do
-      error = assert_raises(AssistantNotAllowed) { @ticket.change_topic!(to: :order, by: @rose) }
+      error = assert_raises(AssistantNotAllowed) { @ticket.change_topic!(to: :order, by: @assistant) }
 
       assert_equal :triage, error.verb
 
       order = create_order(user: @alice)
 
-      assert_raises(AssistantNotAllowed) { @ticket.attach_subject!(order, by: @rose) }
+      assert_raises(AssistantNotAllowed) { @ticket.attach_subject!(order, by: @assistant) }
     end
 
     test "she may not hand a case to somebody — she escalates" do
-      @ticket.assign!(to: @rose, by: @lucia)
-      error = assert_raises(AssistantNotAllowed) { @ticket.hand_off!(to: @lucia, by: @rose) }
+      @ticket.assign!(to: @assistant, by: @lucia)
+      error = assert_raises(AssistantNotAllowed) { @ticket.hand_off!(to: @lucia, by: @assistant) }
 
       assert_equal :hand_off, error.verb
     end
@@ -128,46 +128,46 @@ module SupportDesk
       @ticket.reply!("hola", by: @lucia)
       @ticket.close!(by: @lucia)
 
-      assert_raises(AssistantNotAllowed) { @ticket.reopen!(by: @rose) }
+      assert_raises(AssistantNotAllowed) { @ticket.reopen!(by: @assistant) }
       assert_ticket_closed @ticket
     end
 
     test "she may not assign anybody, including herself onto somebody else's case" do
-      error = assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @lucia, by: @rose, turn: turn) }
+      error = assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @lucia, by: @assistant, turn: turn) }
 
       assert_match(/can only take a case herself/, error.message)
 
       @ticket.assign!(to: @lucia, by: @lucia)
 
-      assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn) }
+      assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @assistant, by: @assistant, turn: @ticket.reload.assistant_turn) }
       assert_assigned_to @ticket, @lucia
     end
 
     test "she may take an unheld case at :reply and not below" do
       with_assistant_config(autonomy: :draft) do
-        assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn) }
+        assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @assistant, by: @assistant, turn: @ticket.reload.assistant_turn) }
       end
 
       with_assistant_config(autonomy: :reply) do
-        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
+        @ticket.assign!(to: @assistant, by: @assistant, turn: @ticket.reload.assistant_turn)
 
-        assert_held_by_assistant @ticket, @rose
+        assert_held_by_assistant @ticket, @assistant
       end
     end
 
     test "she may not approve or reject a proposal, even her own" do
-      draft = @ticket.draft!("propuesta", by: @rose, turn: turn)
+      draft = @ticket.draft!("propuesta", by: @assistant, turn: turn)
 
-      assert_raises(NotAllowed) { draft.send!(by: @rose, seen_turn: turn) }
-      assert_raises(NotAllowed) { draft.reject!(by: @rose) }
+      assert_raises(NotAllowed) { draft.send!(by: @assistant, seen_turn: turn) }
+      assert_raises(NotAllowed) { draft.reject!(by: @assistant) }
       assert_predicate draft.reload, :pending?
     end
 
     test "she may not resume herself" do
       @ticket.pause_assistant!(by: @lucia)
 
-      assert_raises(NotAllowed) { @ticket.resume_assistant!(by: @rose) }
-      assert_raises(NotAllowed) { @ticket.pause_assistant!(by: @rose) }
+      assert_raises(NotAllowed) { @ticket.resume_assistant!(by: @assistant) }
+      assert_raises(NotAllowed) { @ticket.pause_assistant!(by: @assistant) }
     end
 
     # --- The seat is decided under the lock (R2) ---------------------------------
@@ -180,7 +180,7 @@ module SupportDesk
       held = stale.assistant_turn
       @ticket.assign!(to: @lucia, by: @lucia)
 
-      assert_raises(AssistantNotAllowed, StaleTurn) { stale.assign!(to: @rose, by: @rose, turn: held) }
+      assert_raises(AssistantNotAllowed, StaleTurn) { stale.assign!(to: @assistant, by: @assistant, turn: held) }
       assert_assigned_to @ticket, @lucia
     end
 
@@ -192,32 +192,32 @@ module SupportDesk
       @ticket.define_singleton_method(:with_lock) do |*args, **options, &block|
         unless capped
           capped = true
-          SupportDesk.config.assistant(:rose).autonomy = :draft
+          SupportDesk.config.assistant(:assistant).autonomy = :draft
         end
         super(*args, **options, &block)
       end
 
-      assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @rose, turn: held) }
+      assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @assistant, by: @assistant, turn: held) }
       assert_unassigned @ticket
     end
 
     test "a late run can't release the seat a newer one took" do
-      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      @ticket.assign!(to: @assistant, by: @assistant, turn: turn)
       held = turn
       ask_again(@ticket, "y otra cosa")
 
-      assert_raises(StaleTurn) { @ticket.release!(by: @rose, turn: held) }
-      assert_held_by_assistant @ticket, @rose
+      assert_raises(StaleTurn) { @ticket.release!(by: @assistant, turn: held) }
+      assert_held_by_assistant @ticket, @assistant
     end
 
     test "taking and releasing without a turn is refused, like every other verb of hers" do
-      assert_raises(ArgumentError) { @ticket.assign!(to: @rose, by: @rose) }
+      assert_raises(ArgumentError) { @ticket.assign!(to: @assistant, by: @assistant) }
       assert_unassigned @ticket
 
-      @ticket.assign!(to: @rose, by: @rose, turn: turn)
+      @ticket.assign!(to: @assistant, by: @assistant, turn: turn)
 
-      assert_raises(ArgumentError) { @ticket.release!(by: @rose) }
-      assert_held_by_assistant @ticket, @rose
+      assert_raises(ArgumentError) { @ticket.release!(by: @assistant) }
+      assert_held_by_assistant @ticket, @assistant
       # A PERSON'S calls are unchanged: the turn is hers alone.
       @ticket.release!(by: @lucia)
 
@@ -242,7 +242,7 @@ module SupportDesk
 
     test "a host's own kind: :ai model can't approve a proposal either" do
       bot = HostBot.create!(name: "Botty", admin: true)
-      draft = @ticket.draft!("propuesta", by: @rose, turn: turn)
+      draft = @ticket.draft!("propuesta", by: @assistant, turn: turn)
 
       assert_raises(NotAllowed) { draft.send!(by: bot, seen_turn: turn) }
     end
@@ -250,7 +250,7 @@ module SupportDesk
     test "another desk's assistant is not this desk's" do
       SupportDesk.configure do |config|
         config.assistant(:max) { |assistant| assistant.disclosure = :none }
-        config.default_assistant = :rose
+        config.default_assistant = :assistant
         config.desk(:billing) { |desk| desk.assistant = :max }
       end
       max = SupportDesk.assistant(:max)
@@ -260,10 +260,10 @@ module SupportDesk
     end
 
     test "a deactivated assistant may do nothing" do
-      @rose.deactivate!(by: @lucia)
+      @assistant.deactivate!(by: @lucia)
 
-      assert_raises(NotAnAgent) { @ticket.respond!("hola", by: @rose, turn: turn) }
-      assert_raises(NotAnAgent) { @ticket.note!("hola", by: @rose, turn: turn) }
+      assert_raises(NotAnAgent) { @ticket.respond!("hola", by: @assistant, turn: turn) }
+      assert_raises(NotAnAgent) { @ticket.note!("hola", by: @assistant, turn: turn) }
     end
 
     # --- actions_for -------------------------------------------------------------
@@ -271,31 +271,31 @@ module SupportDesk
     test "actions_for offers her exactly what the policy allows, state by state" do
       # Unheld, awaiting her, at :resolve.
       assert_equal %i[note escalate release draft reply take close].sort - %i[release close],
-                   @ticket.actions_for(@rose).sort
+                   @ticket.actions_for(@assistant).sort
 
-      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
+      @ticket.assign!(to: @assistant, by: @assistant, turn: @ticket.reload.assistant_turn)
 
-      assert_includes @ticket.actions_for(@rose), :release
-      assert_not_includes @ticket.actions_for(@rose), :take, "she already has it"
+      assert_includes @ticket.actions_for(@assistant), :release
+      assert_not_includes @ticket.actions_for(@assistant), :take, "she already has it"
 
-      @ticket.reply!("hola", by: @rose, turn: turn)
+      @ticket.reply!("hola", by: @assistant, turn: turn)
 
-      assert_includes @ticket.actions_for(@rose), :close, "held, and the customer has the last word"
-      assert_not_includes @ticket.actions_for(@rose), :reply, "it isn't her turn"
+      assert_includes @ticket.actions_for(@assistant), :close, "held, and the customer has the last word"
+      assert_not_includes @ticket.actions_for(@assistant), :reply, "it isn't her turn"
     end
 
     test "actions_for drops everything that speaks when there is nobody to speak to" do
-      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
+      @ticket.assign!(to: @assistant, by: @assistant, turn: @ticket.reload.assistant_turn)
       @alice.update!(support_blocked: true)
 
-      assert_equal %i[note escalate release], @ticket.reload.actions_for(@rose)
+      assert_equal %i[note escalate release], @ticket.reload.actions_for(@assistant)
     end
 
     test "actions_for on a closed case is looking, and not even escalating" do
       @ticket.reply!("hola", by: @lucia)
       @ticket.close!(by: @lucia)
 
-      assert_equal %i[note], @ticket.actions_for(@rose)
+      assert_equal %i[note], @ticket.actions_for(@assistant)
     end
 
     test "actions_for is empty for a machine that isn't this desk's assistant" do
@@ -305,7 +305,7 @@ module SupportDesk
     end
 
     test "actions_for offers a person the draft verbs and the pause switch" do
-      @ticket.draft!("propuesta", by: @rose, turn: turn)
+      @ticket.draft!("propuesta", by: @assistant, turn: turn)
 
       actions = @ticket.reload.actions_for(@lucia)
 

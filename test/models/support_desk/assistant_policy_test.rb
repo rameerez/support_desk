@@ -13,7 +13,7 @@ module SupportDesk
     setup do
       @alice = create_user(name: "Alice")
       @lucia = create_agent(name: "Lucía")
-      @rose = configure_assistant!(autonomy: :resolve)
+      @assistant = configure_assistant!(autonomy: :resolve)
       @ticket = ticket_for(@alice, message: "Hola")
     end
 
@@ -25,7 +25,7 @@ module SupportDesk
           policy = @ticket.assistant_policy
 
           assert_equal level, policy.level
-          assert_equal "rose's autonomy is #{level}", policy.because
+          assert_equal "assistant's autonomy is #{level}", policy.because
           assert_equal({ assistant: level }, policy.ceilings)
           assert_empty policy.floors
         end
@@ -48,14 +48,14 @@ module SupportDesk
     test "the deciding ceiling is the one named" do
       with_topic_assistant_cap("other", :draft) do
         with_assistant_config(autonomy: :resolve) do
-          assert_assistant_policy @ticket, :draft, because: "topic other caps rose at draft"
+          assert_assistant_policy @ticket, :draft, because: "topic other caps assistant at draft"
         end
       end
     end
 
     test "the host's cap block caps her, and garbage from it is a configuration error" do
       with_assistant_config(autonomy: :resolve, cap: ->(_ticket) { :observe }) do
-        assert_assistant_policy @ticket, :observe, because: "cap block caps rose at observe"
+        assert_assistant_policy @ticket, :observe, because: "cap block caps assistant at observe"
       end
 
       with_assistant_config(autonomy: :resolve, cap: ->(_ticket) { nil }) do
@@ -73,16 +73,16 @@ module SupportDesk
     test "the case's own cap survives everything but a hand-back" do
       @ticket.update!(assistant_cap: "draft")
 
-      assert_assistant_policy @ticket, :draft, because: "this case caps rose at draft"
-      assert_equal :resolve, @ticket.assistant_policy(@rose, hand_back: true).level
+      assert_assistant_policy @ticket, :draft, because: "this case caps assistant at draft"
+      assert_equal :resolve, @ticket.assistant_policy(@assistant, hand_back: true).level
     end
 
     test "a pause floors her at :off, and says so" do
       @ticket.pause_assistant!(by: @lucia, reason: "delicado")
 
-      assert_assistant_policy @ticket, :off, because: "rose is paused on this case"
+      assert_assistant_policy @ticket, :off, because: "assistant is paused on this case"
       refute_predicate @ticket.assistant_policy, :may_observe?
-      assert_predicate @ticket.assistant_policy(@rose, hand_back: true), :may_hold?
+      assert_predicate @ticket.assistant_policy(@assistant, hand_back: true), :may_hold?
     end
 
     test "the lowest ceiling wins whichever one it is" do
@@ -101,12 +101,12 @@ module SupportDesk
     # --- Floors ------------------------------------------------------------------
 
     test "an inactive assistant may do nothing at all" do
-      @rose.deactivate!(by: @lucia)
+      @assistant.deactivate!(by: @lucia)
 
-      assert_assistant_policy @ticket, :off, because: "rose is inactive"
+      assert_assistant_policy @ticket, :off, because: "assistant is inactive"
       assert_includes @ticket.assistant_policy.floors, :inactive
       # Not even a hand-back can seat somebody who is switched off.
-      refute_predicate @ticket.assistant_policy(@rose, hand_back: true), :may_hold?
+      refute_predicate @ticket.assistant_policy(@assistant, hand_back: true), :may_hold?
     end
 
     test "a closed case floors her at :observe" do
@@ -115,7 +115,7 @@ module SupportDesk
 
       assert_assistant_policy @ticket, :observe, because: "the case is closed"
       assert_includes @ticket.assistant_policy.floors, :closed
-      assert_equal :observe, @ticket.assistant_policy(@rose, hand_back: true).level
+      assert_equal :observe, @ticket.assistant_policy(@assistant, hand_back: true).level
     end
 
     test "a person having been asked for floors her at :observe" do
@@ -123,7 +123,7 @@ module SupportDesk
 
       assert_assistant_policy @ticket, :observe, because: "a person was requested (requester_request)"
       assert_includes @ticket.assistant_policy.floors, :human_required
-      assert_equal :resolve, @ticket.assistant_policy(@rose, hand_back: true).level,
+      assert_equal :resolve, @ticket.assistant_policy(@assistant, hand_back: true).level,
                    "a hand-back is exactly the decision to lift it"
     end
 
@@ -137,7 +137,7 @@ module SupportDesk
     end
 
     test "her own seat is not a floor" do
-      @ticket.assign!(to: @rose, by: @lucia)
+      @ticket.assign!(to: @assistant, by: @lucia)
 
       assert_equal :resolve, @ticket.assistant_policy.level
       assert_empty @ticket.assistant_policy.floors
@@ -171,7 +171,7 @@ module SupportDesk
     test "somebody else's assistant is a Null policy too" do
       SupportDesk.configure do |config|
         config.assistant(:max) { |assistant| assistant.disclosure = :none }
-        config.default_assistant = :rose
+        config.default_assistant = :assistant
       end
       max = SupportDesk.assistant(:max)
       policy = @ticket.assistant_policy(max)
@@ -221,19 +221,19 @@ module SupportDesk
         @ticket.assign!(to: @lucia, by: @lucia)
         hash = @ticket.assistant_policy.to_h
 
-        assert_equal "rose", hash[:assistant]
+        assert_equal "assistant", hash[:assistant]
         assert_equal :draft, hash[:level]
         assert_equal %i[assistant topic cap case pause], hash[:ceilings].keys
         assert_equal :draft, hash[:ceilings][:topic]
         assert_nil hash[:ceilings][:pause]
         assert_equal [], hash[:floors], "a floor that changed nothing is not a floor"
-        assert_match(/caps rose at draft/, hash[:because])
+        assert_match(/caps assistant at draft/, hash[:because])
       end
     end
 
     test "to_s reads like the sentence it is" do
       with_assistant_config(autonomy: :draft) do
-        assert_equal "draft — rose's autonomy is draft", @ticket.assistant_policy.to_s
+        assert_equal "draft — assistant's autonomy is draft", @ticket.assistant_policy.to_s
       end
     end
 

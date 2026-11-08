@@ -20,7 +20,7 @@ module SupportDesk
     setup do
       @alice = create_user(name: "Alice")
       @lucia = create_agent(name: "Lucía")
-      @rose = configure_assistant!(autonomy: :reply)
+      @assistant = configure_assistant!(autonomy: :reply)
       @ticket = ticket_for(@alice, message: "No me llega el pedido")
     end
 
@@ -50,9 +50,9 @@ module SupportDesk
     test "the same turn twice is one answer and one refusal" do
       held = @ticket.assistant_turn
 
-      @ticket.respond!("Ya lo miramos", by: @rose, turn: held)
+      @ticket.respond!("Ya lo miramos", by: @assistant, turn: held)
 
-      assert_raises(StaleTurn) { Ticket.find(@ticket.id).respond!("Ya lo miramos", by: @rose, turn: held) }
+      assert_raises(StaleTurn) { Ticket.find(@ticket.id).respond!("Ya lo miramos", by: @assistant, turn: held) }
       assert_equal 1, assistant_messages.size
     end
 
@@ -60,9 +60,9 @@ module SupportDesk
       with_assistant_config(autonomy: :draft) do
         held = @ticket.assistant_turn
 
-        @ticket.draft!("propuesta", by: @rose, turn: held)
+        @ticket.draft!("propuesta", by: @assistant, turn: held)
 
-        assert_raises(StaleTurn) { Ticket.find(@ticket.id).draft!("otra", by: @rose, turn: held) }
+        assert_raises(StaleTurn) { Ticket.find(@ticket.id).draft!("otra", by: @assistant, turn: held) }
         assert_equal 1, Draft.pending.count
       end
     end
@@ -71,7 +71,7 @@ module SupportDesk
       held = @ticket.assistant_turn
       ask_again(@ticket, "¿hay novedades?")
 
-      assert_raises(StaleTurn) { Ticket.find(@ticket.id).respond!("Ya lo miramos", by: @rose, turn: held) }
+      assert_raises(StaleTurn) { Ticket.find(@ticket.id).respond!("Ya lo miramos", by: @assistant, turn: held) }
       assert_empty assistant_messages
       assert_awaiting_reply @ticket
     end
@@ -82,7 +82,7 @@ module SupportDesk
       test "two answers on one turn leave one message" do
         held = @ticket.assistant_turn
         results = run_together(2) do
-          Ticket.find(@ticket.id).respond!("Ya lo miramos", by: SupportDesk.assistant(:rose), turn: held)
+          Ticket.find(@ticket.id).respond!("Ya lo miramos", by: SupportDesk.assistant(:assistant), turn: held)
         end
 
         assert_equal 1, results.count { |result| result.is_a?(Outcome) && result.sent? }
@@ -92,10 +92,10 @@ module SupportDesk
       end
 
       test "two proposals on one turn leave one pending" do
-        SupportDesk.config.assistant(:rose).autonomy = :draft
+        SupportDesk.config.assistant(:assistant).autonomy = :draft
         held = @ticket.assistant_turn
         results = run_together(2) do
-          Ticket.find(@ticket.id).draft!("propuesta", by: SupportDesk.assistant(:rose), turn: held)
+          Ticket.find(@ticket.id).draft!("propuesta", by: SupportDesk.assistant(:assistant), turn: held)
         end
 
         assert_equal 1, results.count { |result| result.is_a?(Draft) }
@@ -107,7 +107,7 @@ module SupportDesk
         held = @ticket.assistant_turn
         results = run_together(2) do |index|
           if index.zero?
-            Ticket.find(@ticket.id).respond!("Ya lo miramos", by: SupportDesk.assistant(:rose), turn: held)
+            Ticket.find(@ticket.id).respond!("Ya lo miramos", by: SupportDesk.assistant(:assistant), turn: held)
           else
             User.find(@alice.id).message!(Chats::Conversation.find(@ticket.conversation_id), "¿hay novedades?")
           end
@@ -142,7 +142,7 @@ module SupportDesk
 
         with_requester_writing_behind_the_lock("¿Y el reembolso?") do
           result = begin
-            @ticket.respond!("Le respondo a la primera pregunta", by: @rose, turn: held)
+            @ticket.respond!("Le respondo a la primera pregunta", by: @assistant, turn: held)
           rescue StaleTurn => e
             e
           end
@@ -156,7 +156,7 @@ module SupportDesk
 
       test "a proposal is refused when the customer's next question commits behind the approval" do
         with_assistant_config(autonomy: :draft) do
-          draft = @ticket.draft!("propuesta", by: @rose, turn: @ticket.assistant_turn)
+          draft = @ticket.draft!("propuesta", by: @assistant, turn: @ticket.assistant_turn)
           @ticket.reload
           held = @ticket.assistant_turn
           result = nil
@@ -177,8 +177,8 @@ module SupportDesk
       end
 
       test "the sweep racing a takeover never moves a person's seat" do
-        SupportDesk.config.assistant(:rose).responds_within = 1
-        @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
+        SupportDesk.config.assistant(:assistant).responds_within = 1
+        @ticket.assign!(to: @assistant, by: @assistant, turn: @ticket.reload.assistant_turn)
         Ticket.where(id: @ticket.id).update_all(waiting_since: 1.hour.ago)
 
         results = run_together(2) do |index|

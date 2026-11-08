@@ -168,14 +168,14 @@ class QueueTest < ActiveSupport::TestCase
   # --- The "needs a person" tab -------------------------------------------------
 
   test "needs_human is the cases somebody asked a person for, most urgent first" do
-    rose = configure_assistant!
+    assistant = configure_assistant!
     flagged = ticket_for(create_user, topic: :account, message: "Para una persona")
     flagged.escalate!(by: @lucia, reason: "lo lleva alguien")
 
     assert_equal [ flagged ], @queue.needs_human.to_a
     assert_equal 1, @queue.counts[:needs_human]
     assert_equal @queue.needs_human.to_a, @queue.scope(:needs_human).to_a
-    assert_not_nil rose
+    assert_not_nil assistant
   end
 
   test "the tab shows up where a machine answers, and where a case is flagged" do

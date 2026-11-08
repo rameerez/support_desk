@@ -125,7 +125,7 @@ module SupportDesk
         key: assistant.key,
         # Her own name, not the disclosed one: what the requester is shown
         # is `disclosure`, one line down, and a model told it is called
-        # "Rose · asistente virtual" starts signing itself that way.
+        # "Assistant · asistente virtual" starts signing itself that way.
         name: assistant.name,
         disclosure: assistant.disclosure,
         level: decision.level,

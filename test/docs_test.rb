@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
 require "test_helper"
-require "generators/support_desk/assistant_generator"
 
 # The README's assistant snippets are a promise, and a promise nobody runs is
 # a promise that rots. This file pulls them OUT OF THE FILE and executes
-# them: the configuration stanza, the harness job, the `respond!` outcomes,
-# `Draft#send!` and the brief. A rename the README misses fails here rather
-# than in somebody's app.
-#
-# It also runs the GENERATED harness end to end, because the template and the
-# README teach the same nine lines and nothing else tests the template.
+# them: the configuration stanza, the drafting contract, the `respond!`
+# outcomes, `Draft#send!` and the brief. A rename the README misses fails here
+# rather than in somebody's app.
 class DocsTest < ActiveSupport::TestCase
   README = File.expand_path("../README.md", __dir__)
 
@@ -20,26 +16,21 @@ class DocsTest < ActiveSupport::TestCase
     @order = create_order(user: @alice, number: "SO1")
   end
 
-  teardown do
-    Object.send(:remove_const, :Support) if Object.const_defined?(:Support, false)
-    FileUtils.rm_rf(generator_root)
-  end
-
   # --- The configuration stanza ----------------------------------------------------
 
   test "the README's assistant stanza configures exactly what it says it does" do
-    stanza = snippet("config.assistant :rose do |rose|")
+    stanza = snippet("config.assistant :assistant do |assistant|")
 
     SupportDesk.configure { |config| eval(stanza, binding, README) } # rubocop:disable Security/Eval
 
-    rose = SupportDesk.assistant
+    assistant = SupportDesk.assistant
 
-    assert_equal "rose", rose.key
-    assert_equal "Rose", rose.name
-    assert_equal :draft, rose.autonomy
-    assert_equal :signature, rose.disclosure
-    assert_equal 6, rose.max_turns
-    assert_equal 3.minutes, rose.responds_within
+    assert_equal "assistant", assistant.key
+    assert_equal "Assistant", assistant.name
+    assert_equal :draft, assistant.autonomy
+    assert_equal :signature, assistant.disclosure
+    assert_equal 6, assistant.max_turns
+    assert_equal 3.minutes, assistant.responds_within
   end
 
   test "the README's subscription names an event the gem actually emits, with its own arity" do
@@ -47,49 +38,47 @@ class DocsTest < ActiveSupport::TestCase
 
     assert_equal "ticket, assistant, message, turn:", SupportDesk::Events::CATALOGUE[:assistant_turn]
     assert_match(/\|ticket, assistant, _message, turn:\|/, subscription)
-    assert_match(/perform_later\(ticket\.id, assistant\.key, turn\)/, subscription)
   end
 
-  # --- The harness job --------------------------------------------------------------
+  # --- The drafting contract -------------------------------------------------------
 
-  test "the README's job body proposes an answer, and spends nothing on a stale turn" do
-    configure_assistant!(:rose)
+  test "the README's drafting contract proposes an answer, and nothing where it may not draft" do
+    configure_assistant!(:assistant)
+    contract = snippet("ticket.respond!(answer, by: assistant, turn: turn, confidence: 0.8)")
+    drafter = Class.new { class_eval("def call(ticket, answer)\n#{contract}\nend", README) }
     ticket = ticket_for(@alice, about: @order)
-    calls = define_support_rose("Lo estoy mirando")
-    body = snippet("def perform(ticket_id, assistant_key, turn)")
-    job = Class.new { class_eval(body, README) }
 
-    job.new.perform(ticket.id, "rose", ticket.assistant_turn)
+    outcome = drafter.new.call(ticket, "Lo estoy mirando")
 
+    assert_predicate outcome, :drafted?
     assert_pending_draft ticket, body: "mirando"
-    assert_equal 1, calls.size
 
-    # The turn moved: the job returns before it costs anything.
-    stale = ticket.assistant_turn
-    ask_again(ticket, "¿hola?")
-    job.new.perform(ticket.id, "rose", stale)
+    with_topic_assistant_cap("order", :observe) do
+      buyer = create_user
+      other = ticket_for(buyer, about: create_order(user: buyer))
 
-    assert_equal 1, calls.size, "the job called the model on a turn that was no longer the case's"
-    assert_equal 1, ticket.reload.drafts.count
+      assert_nil drafter.new.call(other, "no"), "the contract drafted where policy said it may not"
+      refute_pending_draft other
+    end
   end
 
   # --- Levels, ceilings and floors ----------------------------------------------------
 
   test "the README's policy readers print what the README says they print" do
-    configure_assistant!(:rose, autonomy: :reply)
+    configure_assistant!(:assistant, autonomy: :reply)
     ticket = ticket_for(@alice, about: @order)
     readers = snippet("ticket.assistant_policy.level")
 
     with_topic_assistant_cap("order", :draft) do
       values = readers.lines.grep(/\Aticket\./).map { |line| eval(line, binding, README) } # rubocop:disable Security/Eval
 
-      assert_equal [ :draft, "topic order caps rose at draft", false,
+      assert_equal [ :draft, "topic order caps assistant at draft", false,
                      %i[note escalate release draft] ], values
     end
   end
 
   test "the ceilings the README prints are the ones that apply, and to_h spells all five" do
-    rose = configure_assistant!(:rose, autonomy: :reply)
+    assistant = configure_assistant!(:assistant, autonomy: :reply)
     ticket = ticket_for(@alice, about: @order)
     ticket.assign!(to: @lucia, by: @lucia)
     policy = ticket.reload.assistant_policy
@@ -100,13 +89,13 @@ class DocsTest < ActiveSupport::TestCase
     assert_equal [ :held_by_human ], policy.floors
     assert_equal :draft, policy.level
     assert_equal %i[assistant topic cap case pause], policy.to_h[:ceilings].keys
-    assert_equal rose.key, policy.to_h[:assistant]
+    assert_equal assistant.key, policy.to_h[:assistant]
   end
 
   # --- respond! ----------------------------------------------------------------------
 
   test "the README's respond! line answers every reader it advertises" do
-    rose = configure_assistant!(:rose, autonomy: :reply)
+    assistant = configure_assistant!(:assistant, autonomy: :reply)
     ticket = ticket_for(@alice, about: @order)
     text = "Lo estamos revisando"
     turn = ticket.assistant_turn
@@ -125,13 +114,13 @@ class DocsTest < ActiveSupport::TestCase
   end
 
   test "the three outcomes the README names are the three respond! can return" do
-    rose = configure_assistant!(:rose, autonomy: :draft)
+    assistant = configure_assistant!(:assistant, autonomy: :draft)
     ticket = ticket_for(@alice, about: @order)
 
-    assert_predicate ticket.respond!("Una propuesta", by: rose, turn: ticket.assistant_turn), :drafted?
+    assert_predicate ticket.respond!("Una propuesta", by: assistant, turn: ticket.assistant_turn), :drafted?
 
     reply_as @lucia, ticket, "ya está"     # the desk answered: it is not her turn
-    withheld = ticket.reload.respond!("otra vez", by: rose, turn: ticket.assistant_turn)
+    withheld = ticket.reload.respond!("otra vez", by: assistant, turn: ticket.assistant_turn)
 
     assert_predicate withheld, :withheld?
     assert_equal :not_your_turn, withheld.reason
@@ -140,22 +129,22 @@ class DocsTest < ActiveSupport::TestCase
     # her at :draft whatever her autonomy says — so the seat comes off first.
     ticket.release!(by: @lucia)
     ask_again(ticket, "una cosa más")
-    with_assistant_config(:rose, autonomy: :reply) do
-      assert_predicate ticket.reload.respond!("claro", by: rose, turn: ticket.assistant_turn), :sent?
+    with_assistant_config(:assistant, autonomy: :reply) do
+      assert_predicate ticket.reload.respond!("claro", by: assistant, turn: ticket.assistant_turn), :sent?
     end
   end
 
   # --- Draft#send! ---------------------------------------------------------------------
 
   test "every Draft line the README prints works on a fresh proposal" do
-    rose = configure_assistant!(:rose)
+    assistant = configure_assistant!(:assistant)
     lines = snippet("draft = ticket.pending_draft").lines.grep(/\Adraft\.(send|reject)!/)
 
     assert_equal 3, lines.size, "the README's Draft block changed shape"
 
     lines.each do |line|
       ticket = ticket_for(create_user, topic: :account)
-      ticket.draft!("Te devolvemos el importe", by: rose, turn: ticket.assistant_turn)
+      ticket.draft!("Te devolvemos el importe", by: assistant, turn: ticket.assistant_turn)
       draft = ticket.reload.pending_draft
       lucia = @lucia
 
@@ -166,9 +155,9 @@ class DocsTest < ActiveSupport::TestCase
   end
 
   test "a stale seen_turn is refused, and there is no bypass" do
-    rose = configure_assistant!(:rose)
+    assistant = configure_assistant!(:assistant)
     ticket = ticket_for(@alice, about: @order)
-    ticket.draft!("Te devolvemos el importe", by: rose, turn: ticket.assistant_turn)
+    ticket.draft!("Te devolvemos el importe", by: assistant, turn: ticket.assistant_turn)
     draft = ticket.reload.pending_draft
     stale = ticket.assistant_turn
     ask_again(ticket, "una cosa más")
@@ -184,8 +173,8 @@ class DocsTest < ActiveSupport::TestCase
   # --- The two exits -----------------------------------------------------------------------
 
   test "both of the README's exits reach a person, from either side" do
-    rose = configure_assistant!(:rose)
-    exits = snippet("ticket.escalate!(by: rose, turn: turn").lines.grep(/\Aticket\./)
+    assistant = configure_assistant!(:assistant)
+    exits = snippet("ticket.escalate!(by: assistant, turn: turn").lines.grep(/\Aticket\./)
 
     assert_equal 2, exits.size, "the README's exits block changed shape"
 
@@ -204,7 +193,7 @@ class DocsTest < ActiveSupport::TestCase
   # --- What the model sees ---------------------------------------------------------------
 
   test "the README's brief snippet answers" do
-    configure_assistant!(:rose)
+    configure_assistant!(:assistant)
     ticket = ticket_for(@alice, about: @order)
     brief = nil
 
@@ -215,52 +204,20 @@ class DocsTest < ActiveSupport::TestCase
     assert_kind_of SupportDesk::AssistantPolicy, brief.policy
   end
 
-  # --- The generated harness ---------------------------------------------------------------
-
-  test "the generated job and service run against a real case" do
-    configure_assistant!(:rose)
-    ticket = ticket_for(@alice, about: @order)
-    generate_rose!
-
-    # Out of the box it refuses to guess, and says where the contract is.
-    error = assert_raises(NotImplementedError) { Support::Rose.answer(ticket.brief, ticket.transcript) }
-    assert_match(/README/, error.message)
-
-    answer = Support::Rose::Answer.new(kind: :answer, text: "Lo estamos revisando", confidence: 0.8)
-
-    assert_equal [], answer.sources    # the Struct's defaults
-    assert_equal({}, answer.metadata)
-
-    Support::Rose.stub(:answer, ->(*) { answer }) do
-      Support::RoseTurnJob.perform_now(ticket.id, "rose", ticket.assistant_turn)
-    end
-
-    assert_pending_draft ticket, body: "revisando"
-
-    stale = ticket.assistant_turn
-    ask_again(ticket, "¿hola?")
-    called = false
-    Support::Rose.stub(:answer, ->(*) { called = true }) do
-      Support::RoseTurnJob.perform_now(ticket.id, "rose", stale)
-    end
-
-    assert_not called, "the generated job called the model on a stale turn"
-  end
-
   test "the README signature override preserves assistant snapshots and human signatures" do
-    rose = configure_assistant!(:rose, autonomy: :reply)
+    assistant = configure_assistant!(:assistant, autonomy: :reply)
     ticket = ticket_for(@alice)
-    assistant_message = ticket.respond!("Answer", by: rose, turn: ticket.assistant_turn).message
+    assistant_message = ticket.respond!("Answer", by: assistant, turn: ticket.assistant_turn).message
     assistant_signature = Chats.message_signature_for(assistant_message)
     human_message = ticket.reply!("Human answer", by: @lucia)
     human_signature = Chats.message_signature_for(human_message)
     ask_again(ticket, "Another question")
-    draft = ticket.draft!("Proposal", by: rose, turn: ticket.reload.assistant_turn)
+    draft = ticket.draft!("Proposal", by: assistant, turn: ticket.reload.assistant_turn)
     approved = draft.send!(by: @lucia, seen_turn: ticket.reload.assistant_turn)
 
     eval(snippet("config.message_signature = lambda"), binding, README) # rubocop:disable Security/Eval
-    SupportDesk.config.assistant(:rose).name = "Renamed"
-    SupportDesk.config.assistant(:rose).disclosure = :none
+    SupportDesk.config.assistant(:assistant).name = "Renamed"
+    SupportDesk.config.assistant(:assistant).disclosure = :none
 
     assert_equal assistant_signature, Chats.message_signature_for(assistant_message.reload)
     assert_equal human_signature, Chats.message_signature_for(human_message)
@@ -269,8 +226,6 @@ class DocsTest < ActiveSupport::TestCase
 
   private
 
-  def generator_root = Rails.root.join("tmp/docs_generator").to_s
-
   # The first fenced ruby block in the README that contains +marker+.
   def snippet(marker)
     blocks = File.read(README).scan(/```ruby\n(.*?)```/m).flatten
@@ -278,36 +233,5 @@ class DocsTest < ActiveSupport::TestCase
 
     refute_nil found, "the README has no ruby block containing #{marker.inspect} any more"
     found
-  end
-
-  # A stand-in for the host's own service, recording what it was asked. The
-  # constant is real (the snippets name `Support::Rose`) and is removed in
-  # teardown.
-  def define_support_rose(text)
-    calls = []
-    answer = Struct.new(:kind, :text, :confidence, :sources, :metadata, keyword_init: true)
-                   .new(kind: :answer, text: text, confidence: 0.9, sources: [], metadata: {})
-    service = Class.new do
-      define_singleton_method(:answer) do |brief, transcript|
-        calls << [ brief, transcript ]
-        answer
-      end
-    end
-
-    Object.const_set(:Support, Module.new)
-    Support.const_set(:Rose, service)
-    calls
-  end
-
-  def generate_rose!
-    FileUtils.rm_rf(generator_root)
-    capture_io do
-      SupportDesk::Generators::AssistantGenerator.start(%w[Rose --disclosure signature],
-                                                        destination_root: generator_root)
-    end
-
-    Object.const_set(:ApplicationJob, Class.new(ActiveJob::Base)) unless Object.const_defined?(:ApplicationJob)
-    load File.join(generator_root, "app/services/support/rose.rb")
-    load File.join(generator_root, "app/jobs/support/rose_turn_job.rb")
   end
 end

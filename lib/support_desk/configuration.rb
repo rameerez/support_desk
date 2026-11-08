@@ -482,7 +482,7 @@ module SupportDesk
       # not this, is what everything reads.
       def assistant = read(:assistant)
 
-      # `desk.assistant = :rose` binds one; `desk.assistant = nil` states
+      # `desk.assistant = :assistant` binds one; `desk.assistant = nil` states
       # that THIS desk has none, which is a different thing from inheriting
       # the installation's default.
       def assistant=(value)
@@ -649,10 +649,10 @@ module SupportDesk
     # she works under is here, in code, so a policy change is a deploy and a
     # diff rather than a row somebody edited.
     #
-    #   config.assistant :rose do |rose|
-    #     rose.name       = "Rose"
-    #     rose.autonomy   = :draft
-    #     rose.disclosure = :signature_and_notice
+    #   config.assistant :assistant do |assistant|
+    #     assistant.name       = "Assistant"
+    #     assistant.autonomy   = :draft
+    #     assistant.disclosure = :signature_and_notice
     #   end
     #
     # Every setter validates on assignment, like the rest of the gem. One
@@ -1286,9 +1286,9 @@ module SupportDesk
 
     # Declare or reconfigure an assistant:
     #
-    #   config.assistant :rose do |rose|
-    #     rose.autonomy   = :draft
-    #     rose.disclosure = :signature
+    #   config.assistant :assistant do |assistant|
+    #     assistant.autonomy   = :draft
+    #     assistant.disclosure = :signature
     #   end
     #
     # Without a block it READS one, and an unknown key is a ConfigurationError
@@ -1297,7 +1297,7 @@ module SupportDesk
     # getter: `default_assistant` is its own setting.
     #
     # (The `assistant` in DESK_SETTINGS delegates the SETTER to the default
-    # desk, so `config.assistant = :rose` binds the default desk; this reader
+    # desk, so `config.assistant = :assistant` binds the default desk; this reader
     # is defined afterwards and wins, which is the intent.)
     def assistant(key, &block)
       key = key.to_sym

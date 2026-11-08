@@ -5,7 +5,7 @@ require "test_helper"
 # §12.2 — every setter, every refusal, and the four rules that can only be
 # checked once the whole block has run.
 class AssistantConfigurationTest < ActiveSupport::TestCase
-  def declare(key = :rose, &block)
+  def declare(key = :assistant, &block)
     SupportDesk.configure do |config|
       config.assistant(key) do |assistant|
         assistant.disclosure = :signature
@@ -21,7 +21,7 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
   test "a name defaults to the humanized key and can't be set blank" do
     assistant = declare
 
-    assert_equal "Rose", assistant.name
+    assert_equal "Assistant", assistant.name
 
     assistant.name = "Rosa"
 
@@ -29,15 +29,15 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
 
     assistant.name = nil
 
-    assert_equal "Rose", assistant.name, "nil goes back to the humanized key"
+    assert_equal "Assistant", assistant.name, "nil goes back to the humanized key"
     assert_raises(SupportDesk::ConfigurationError) { assistant.name = "  " }
   end
 
   test "an avatar is a string, a callable or nothing" do
     assistant = declare
-    assistant.avatar = "rose.png"
+    assistant.avatar = "assistant.png"
 
-    assert_equal "rose.png", assistant.avatar
+    assert_equal "assistant.png", assistant.avatar
 
     assistant.avatar = ->(record) { "#{record.key}.png" }
 
@@ -220,29 +220,29 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
   test "config.assistant reads, declares and refuses an unknown key" do
     declare
 
-    assert SupportDesk.config.assistant?(:rose)
+    assert SupportDesk.config.assistant?(:assistant)
     refute SupportDesk.config.assistant?(:nope)
-    assert_equal %i[rose], SupportDesk.config.assistants.keys
+    assert_equal %i[assistant], SupportDesk.config.assistants.keys
 
     error = assert_raises(SupportDesk::ConfigurationError) { SupportDesk.config.assistant(:nope) }
 
     assert_match(/no assistant :nope/, error.message)
-    assert_match(/known: :rose/, error.message)
+    assert_match(/known: :assistant/, error.message)
   end
 
   test "the module reads the record, memoises it, and refuses an unknown key" do
     declare
 
-    rose = SupportDesk.assistant(:rose)
+    assistant = SupportDesk.assistant(:assistant)
 
-    assert_equal "rose", rose.key
-    assert_same rose, SupportDesk.assistant(:rose), "memoised per process"
-    assert_same rose, SupportDesk.assistant, "and the default is hers"
+    assert_equal "assistant", assistant.key
+    assert_same assistant, SupportDesk.assistant(:assistant), "memoised per process"
+    assert_same assistant, SupportDesk.assistant, "and the default is hers"
     assert_raises(SupportDesk::ConfigurationError) { SupportDesk.assistant(:nope) }
 
     SupportDesk.reset_assistants!
 
-    assert_equal rose.id, SupportDesk.assistant(:rose).id, "the row is found, not created twice"
+    assert_equal assistant.id, SupportDesk.assistant(:assistant).id, "the row is found, not created twice"
     assert_equal 1, SupportDesk::Assistant.count
   end
 
@@ -273,7 +273,7 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
   test "two assistants and a desk that states nothing is a refusal, not a coin flip" do
     error = assert_raises(SupportDesk::ConfigurationError) do
       SupportDesk.configure do |config|
-        config.assistant(:rose) { |assistant| assistant.disclosure = :none }
+        config.assistant(:assistant) { |assistant| assistant.disclosure = :none }
         config.assistant(:max) { |assistant| assistant.disclosure = :none }
       end
     end
@@ -285,15 +285,15 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
 
   test "two assistants are fine when every desk says which one it gets" do
     SupportDesk.configure do |config|
-      config.assistant(:rose) { |assistant| assistant.disclosure = :none }
+      config.assistant(:assistant) { |assistant| assistant.disclosure = :none }
       config.assistant(:max) { |assistant| assistant.disclosure = :none }
-      config.desk(:default) { |desk| desk.assistant = :rose }
+      config.desk(:default) { |desk| desk.assistant = :assistant }
       config.desk(:billing) { |desk| desk.assistant = :max }
       # An explicit "nobody here" is an answer too.
       config.desk(:legal) { |desk| desk.assistant = nil }
     end
 
-    assert_equal :rose, SupportDesk.config.desk(:default).assistant_key
+    assert_equal :assistant, SupportDesk.config.desk(:default).assistant_key
     assert_equal :max, SupportDesk.config.desk(:billing).assistant_key
     assert_nil SupportDesk.config.desk(:legal).assistant_key
   end
@@ -301,9 +301,9 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
   test "one desk left unbound is still a refusal, and it is named" do
     error = assert_raises(SupportDesk::ConfigurationError) do
       SupportDesk.configure do |config|
-        config.assistant(:rose) { |assistant| assistant.disclosure = :none }
+        config.assistant(:assistant) { |assistant| assistant.disclosure = :none }
         config.assistant(:max) { |assistant| assistant.disclosure = :none }
-        config.desk(:default) { |desk| desk.assistant = :rose }
+        config.desk(:default) { |desk| desk.assistant = :assistant }
         config.desk(:billing) { |desk| desk.name = "Facturación" }
       end
     end
@@ -314,24 +314,24 @@ class AssistantConfigurationTest < ActiveSupport::TestCase
 
   test "one assistant is the default without saying so" do
     SupportDesk.configure do |config|
-      config.assistant(:rose) { |assistant| assistant.disclosure = :none }
+      config.assistant(:assistant) { |assistant| assistant.disclosure = :none }
     end
 
-    assert_equal :rose, SupportDesk.config.default_assistant_key
+    assert_equal :assistant, SupportDesk.config.default_assistant_key
     assert_nil SupportDesk.config.default_assistant, "implicit, not stated"
-    assert_equal :rose, SupportDesk.config.desk(:default).assistant_key
+    assert_equal :assistant, SupportDesk.config.desk(:default).assistant_key
   end
 
   test "an explicit nil disables a desk while the default desk keeps hers" do
     SupportDesk.configure do |config|
-      config.assistant(:rose) { |assistant| assistant.disclosure = :none }
+      config.assistant(:assistant) { |assistant| assistant.disclosure = :none }
       config.desk(:billing) { |desk| desk.assistant = nil }
       config.desk(:support) { |desk| desk.name = "Support" }
     end
 
-    assert_equal :rose, SupportDesk.config.desk(:default).assistant_key
+    assert_equal :assistant, SupportDesk.config.desk(:default).assistant_key
     assert_nil SupportDesk.config.desk(:billing).assistant_key, "explicitly nobody"
-    assert_equal :rose, SupportDesk.config.desk(:support).assistant_key, "inherits the default"
+    assert_equal :assistant, SupportDesk.config.desk(:support).assistant_key, "inherits the default"
   end
 
   # --- Topic caps --------------------------------------------------------------

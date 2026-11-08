@@ -14,7 +14,7 @@ module SupportDesk
     # opaque string, and EVERY assistant action requires it and consumes it:
     #
     #   turn = ticket.assistant_turn          # "t7-r12"
-    #   ticket.respond!(answer, by: rose, turn: turn)
+    #   ticket.respond!(answer, by: assistant, turn: turn)
     #
     # A model takes seconds to answer, and a customer can write again while
     # it does. The turn is what makes that safe: the action is compared

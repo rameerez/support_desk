@@ -10,14 +10,14 @@ module SupportDesk
     setup do
       @alice = create_user(name: "Alice")
       @lucia = create_agent(name: "Lucía")
-      @rose = configure_assistant!(autonomy: :reply, disclosure: :signature)
+      @assistant = configure_assistant!(autonomy: :reply, disclosure: :signature)
       @ticket = ticket_for(@alice, message: "No me llega el pedido")
     end
 
     def turn = @ticket.reload.assistant_turn
 
     def respond(body = "Lo miramos ahora", **options)
-      @ticket.respond!(body, by: @rose, turn: options.delete(:turn) || turn, **options)
+      @ticket.respond!(body, by: @assistant, turn: options.delete(:turn) || turn, **options)
     end
 
     # --- Sent --------------------------------------------------------------------
@@ -28,7 +28,7 @@ module SupportDesk
       assert_predicate outcome, :sent?
       assert_equal "Lo miramos ahora", outcome.message.body
       assert_awaiting_requester @ticket
-      assert_held_by_assistant @ticket, @rose
+      assert_held_by_assistant @ticket, @assistant
       assert_equal 1, @ticket.reload.assistant_turns_count
       assert_not_nil @ticket.first_agent_reply_at
       assert_not_nil @ticket.assistant_acted_at
@@ -39,7 +39,7 @@ module SupportDesk
                         metadata: { "model" => "test-1" })
       stamp = outcome.message.metadata["support_desk"]
 
-      assert_equal "rose", stamp["assistant"]
+      assert_equal "assistant", stamp["assistant"]
       assert_equal "ai", stamp["kind"]
       assert_equal "signature", stamp["disclosure"]
       assert_equal true, stamp["signed"]
@@ -117,7 +117,7 @@ module SupportDesk
 
     test "attachments alone are a whole answer" do
       with_assistant_config(autonomy: :draft) do
-        outcome = @ticket.respond!(nil, by: @rose, turn: turn, files: [ fixture_file ])
+        outcome = @ticket.respond!(nil, by: @assistant, turn: turn, files: [ fixture_file ])
 
         assert_predicate outcome, :drafted?
         assert_predicate outcome.draft.files, :attached?
@@ -138,7 +138,7 @@ module SupportDesk
         event = assert_ticket_event(@ticket, :assistant_withheld)
 
         assert_equal "policy", event.payload["reason"]
-        assert_equal "rose", event.payload["assistant"]
+        assert_equal "assistant", event.payload["assistant"]
         assert_equal "observe", event.payload.dig("policy", "level")
       end
     end
@@ -228,7 +228,7 @@ module SupportDesk
     end
 
     test "respond! without a turn is a bug in the harness, and says so" do
-      error = assert_raises(ArgumentError) { @ticket.respond!("hola", by: @rose, turn: nil) }
+      error = assert_raises(ArgumentError) { @ticket.respond!("hola", by: @assistant, turn: nil) }
 
       assert_match(/turn: is required/, error.message)
     end
@@ -245,9 +245,9 @@ module SupportDesk
     test "a signed mode signs the bubble with the disclosed name" do
       outcome = respond
 
-      assert_equal @rose, outcome.message.author
-      assert_equal "Rose · virtual assistant", @rose.disclosed_name
-      assert_match(/Rose/, Chats.message_signature_for(outcome.message).to_s)
+      assert_equal @assistant, outcome.message.author
+      assert_equal "Assistant · virtual assistant", @assistant.disclosed_name
+      assert_match(/Assistant/, Chats.message_signature_for(outcome.message).to_s)
     end
 
     test "a nameless mode posts no author, and the truth stays in the metadata" do
@@ -257,9 +257,9 @@ module SupportDesk
         assert_nil outcome.message.author, "the requester sees the desk"
         refute_predicate outcome.message, :signed?
         assert_nil Chats.message_signature_for(outcome.message)
-        assert_equal "rose", outcome.message.metadata.dig("support_desk", "assistant")
+        assert_equal "assistant", outcome.message.metadata.dig("support_desk", "assistant")
         assert @ticket.assistant_message?(outcome.message), "staff still see what wrote it"
-        assert_equal "Rose", @rose.disclosed_name, "and an undisclosed name is not decorated"
+        assert_equal "Assistant", @assistant.disclosed_name, "and an undisclosed name is not decorated"
       end
     end
 
@@ -292,8 +292,8 @@ module SupportDesk
     test "taking her configuration away does not rewrite what she already signed" do
       # The kill switch removes her from the initializer. Her old bubbles are
       # already in somebody's transcript, and the requester-facing signature
-      # resolved live configuration — so "— Rose · virtual assistant" quietly
-      # became "— Rose" on a message nobody touched (R8).
+      # resolved live configuration — so "— Assistant · virtual assistant" quietly
+      # became "— Assistant" on a message nobody touched (R8).
       outcome = respond
       signed = Chats.message_signature_for(outcome.message)
 
@@ -304,7 +304,7 @@ module SupportDesk
       SupportDesk.subscribe_to_chats!
 
       assert_equal signed, Chats.message_signature_for(outcome.message.reload)
-      assert_equal "Rose · virtual assistant", SupportDesk::Assistant.find_by(key: "rose").disclosed_name
+      assert_equal "Assistant · virtual assistant", SupportDesk::Assistant.find_by(key: "assistant").disclosed_name
     end
 
     test "a host's per-message disclosure is what the requester is shown, whatever her configured mode" do
@@ -312,8 +312,8 @@ module SupportDesk
         outcome = respond(disclosure: :signature)
         stamp = outcome.message.metadata["support_desk"]
 
-        assert_equal [ "signature", true, "Rose · virtual assistant" ], stamp.values_at("disclosure", "signed", "display_name")
-        assert_equal @rose, outcome.message.author, "signed: the bubble carries her disclosed name"
+        assert_equal [ "signature", true, "Assistant · virtual assistant" ], stamp.values_at("disclosure", "signed", "display_name")
+        assert_equal @assistant, outcome.message.author, "signed: the bubble carries her disclosed name"
         assert_empty @ticket.conversation.messages.where(kind: "system").select { _1.body.include?("virtual") },
                      "a signature mode posts no notice, even where her configuration would"
       end
@@ -326,7 +326,7 @@ module SupportDesk
       assert_operator notice.created_at, :<, outcome.message.created_at
       assert_nil outcome.message.author, "a notice mode does not sign"
       assert_equal [ "notice", false ], outcome.message.metadata["support_desk"].values_at("disclosure", "signed")
-      assert_equal({ "rose" => "notice" }, @ticket.reload.metadata["assistant_disclosed"])
+      assert_equal({ "assistant" => "notice" }, @ticket.reload.metadata["assistant_disclosed"])
 
       ask_again(@ticket, "otra")
       respond("otra respuesta", disclosure: :notice)

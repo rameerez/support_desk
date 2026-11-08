@@ -17,7 +17,7 @@ class ConsoleDraftReviewTest < ApplicationSystemTestCase
   setup do
     @alice = create_user(name: "Alice")
     @lucia = create_agent(name: "Lucía")
-    @rose = configure_assistant!
+    @assistant = configure_assistant!
     @ticket = ticket_for(@alice, message: "¿Dónde está mi pedido?")
 
     login_as @lucia
@@ -29,7 +29,7 @@ class ConsoleDraftReviewTest < ApplicationSystemTestCase
     open_case
 
     within(card_for(draft)) do
-      assert_text "Rose · virtual assistant's proposal"
+      assert_text "Assistant · virtual assistant's proposal"
       assert_text "Tu pedido sale mañana."
       assert_text "declared confidence 82 %"
       assert_link "Política de envíos", href: "https://example.com/envios"
@@ -50,7 +50,7 @@ class ConsoleDraftReviewTest < ApplicationSystemTestCase
     assert_text "Tu pedido sale mañana."
     assert_text "Lucía"
     # Staff-side provenance: a person sent this, and a machine wrote it.
-    assert_text "Rose · virtual assistant's proposal"
+    assert_text "Assistant · virtual assistant's proposal"
 
     assert_predicate draft.reload, :sent?
     assert_equal @lucia, draft.reviewed_by
@@ -117,7 +117,7 @@ class ConsoleDraftReviewTest < ApplicationSystemTestCase
 
   private
 
-  def propose(body, **options) = draft_as(@rose, @ticket, body, **options)
+  def propose(body, **options) = draft_as(@assistant, @ticket, body, **options)
 
   # The card's own element, as a selector that outlives the proposal: once
   # it is sent there is no pending draft to ask for an id.

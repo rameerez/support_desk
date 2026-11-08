@@ -207,7 +207,7 @@ module SupportDesk
     # Run a block with different assistant settings, then put them back:
     #
     #   with_assistant_config(autonomy: :reply) { … }
-    #   with_assistant_config(:rose, max_turns: 1) { … }
+    #   with_assistant_config(:assistant, max_turns: 1) { … }
     def with_assistant_config(key = nil, **overrides)
       key ||= SupportDesk.config.default_assistant_key
       configuration = SupportDesk.config.assistant(key)

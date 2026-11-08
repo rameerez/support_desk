@@ -57,7 +57,7 @@ class OwnersTest < ActiveSupport::TestCase
   end
 
   test "an owner's desk is worked by that owner's assistant" do
-    configure_assistant!(:rose)
+    configure_assistant!(:assistant)
     acme = as(@acme) { SupportDesk.desk }
     globex = as(@globex) { SupportDesk.desk }
 
@@ -68,12 +68,12 @@ class OwnersTest < ActiveSupport::TestCase
   end
 
   test "one owner's assistant cannot act on another owner's case" do
-    configure_assistant!(:rose, autonomy: :reply)
+    configure_assistant!(:assistant, autonomy: :reply)
     ticket = as(@acme) { ticket_for(@alice, message: "Hola") }
-    globex_rose = as(@globex) { SupportDesk.assistant(:rose) }
+    globex_assistant = as(@globex) { SupportDesk.assistant(:assistant) }
 
     error = assert_raises(SupportDesk::NotAnAssistant) do
-      ticket.respond!("hola", by: globex_rose, turn: ticket.assistant_turn)
+      ticket.respond!("hola", by: globex_assistant, turn: ticket.assistant_turn)
     end
     assert_match(/not desk default's assistant/, error.message)
   end
@@ -225,12 +225,12 @@ class OwnersTest < ActiveSupport::TestCase
   end
 
   test "assistant_settings gives each owner's assistant her own level" do
-    configure_assistant!(:rose, autonomy: :draft)
+    configure_assistant!(:assistant, autonomy: :draft)
     SupportDesk.config.assistant_settings = ->(assistant) { { autonomy: :reply } if assistant.owner == @acme }
 
-    assert_equal :reply, as(@acme) { SupportDesk.assistant(:rose) }.autonomy
-    assert_equal :draft, as(@globex) { SupportDesk.assistant(:rose) }.autonomy
-    assert_equal :signature, as(@acme) { SupportDesk.assistant(:rose) }.disclosure
+    assert_equal :reply, as(@acme) { SupportDesk.assistant(:assistant) }.autonomy
+    assert_equal :draft, as(@globex) { SupportDesk.assistant(:assistant) }.autonomy
+    assert_equal :signature, as(@acme) { SupportDesk.assistant(:assistant) }.disclosure
   end
 
   test "the hooks validate on assignment" do
@@ -246,36 +246,36 @@ class OwnersTest < ActiveSupport::TestCase
   def legacy_assistant(key) = SupportDesk::Assistant.find_by(key: key.to_s) || SupportDesk::Assistant.create_or_find_by!(key: key.to_s)
 
   test "migrated, nobody owned yet: a 0.5 process and a 0.6 one resolve the same rows" do
-    configure_assistant!(:rose)
+    configure_assistant!(:assistant)
 
     assert_equal SupportDesk.desk, legacy_desk(:default)
-    assert_equal SupportDesk.assistant(:rose), legacy_assistant(:rose)
+    assert_equal SupportDesk.assistant(:assistant), legacy_assistant(:assistant)
   end
 
   test "from the first owned row a 0.5 process can take another owner's desk and assistant — why 0.5 must be gone first" do
-    configure_assistant!(:rose)
-    SupportDesk::Assistant.delete_all # the owners are turned on before anybody resolved an ownerless Rose
+    configure_assistant!(:assistant)
+    SupportDesk::Assistant.delete_all # the owners are turned on before anybody resolved an ownerless Assistant
     SupportDesk.reset_assistants!
     acme_desk = as(@acme) { SupportDesk.desk }
-    acme_rose = as(@acme) { SupportDesk.assistant(:rose) }
+    acme_assistant = as(@acme) { SupportDesk.assistant(:assistant) }
 
     assert_equal acme_desk, legacy_desk(:default), "0.5, serving a request with no owner, picked Acme's desk"
-    assert_equal acme_rose, legacy_assistant(:rose), "…and Acme's assistant"
+    assert_equal acme_assistant, legacy_assistant(:assistant), "…and Acme's assistant"
 
     ownerless = SupportDesk.desk
     assert_nil ownerless.owner, "0.6 never takes an owned row for a request with no owner"
-    assert_nil SupportDesk.assistant(:rose).owner
+    assert_nil SupportDesk.assistant(:assistant).owner
     assert_equal 2, SupportDesk::Desk.where(key: "default").count, "the key alone no longer names one row"
   end
 
   # --- Sweeps run for everybody --------------------------------------------------------
 
   test "the silence sweep hands back every owner's silent cases" do
-    configure_assistant!(:rose, autonomy: :reply, responds_within: 1.minute)
+    configure_assistant!(:assistant, autonomy: :reply, responds_within: 1.minute)
     tickets = [ @acme, @globex ].map do |owner|
       as(owner) do
         ticket = ticket_for(@alice, message: "Hola")
-        ticket.assign!(to: SupportDesk.assistant(:rose), by: @lucia)
+        ticket.assign!(to: SupportDesk.assistant(:assistant), by: @lucia)
         ticket
       end
     end

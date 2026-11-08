@@ -16,14 +16,14 @@ class TranscriptTest < ActiveSupport::TestCase
   # --- Roles ---------------------------------------------------------------------
 
   test "the four roles, and none of them is role_of's" do
-    rose = configure_assistant!(:rose, autonomy: :reply)
+    assistant = configure_assistant!(:assistant, autonomy: :reply)
     ticket = ticket_for(@alice, about: @order)
-    ticket.respond!("Lo estoy mirando", by: rose, turn: ticket.assistant_turn)
+    ticket.respond!("Lo estoy mirando", by: assistant, turn: ticket.assistant_turn)
     ask_again(ticket, "gracias")
     reply_as @lucia, ticket, "Resuelto"
 
     assert_equal %i[requester assistant requester human], ticket.transcript.map(&:role)
-    assert_equal [ "Alice", "Rose", "Alice", "Lucía" ], ticket.transcript.map(&:name)
+    assert_equal [ "Alice", "Assistant", "Alice", "Lucía" ], ticket.transcript.map(&:name)
 
     # The clocks still speak their own three-word language, untouched.
     messages = ticket.conversation.messages.oldest_first.to_a
@@ -31,9 +31,9 @@ class TranscriptTest < ActiveSupport::TestCase
   end
 
   test "a system line is a system turn, whoever caused it" do
-    rose = configure_assistant!(:rose, autonomy: :reply, disclosure: :notice)
+    assistant = configure_assistant!(:assistant, autonomy: :reply, disclosure: :notice)
     ticket = ticket_for(@alice, about: @order)
-    ticket.respond!("Lo miro", by: rose, turn: ticket.assistant_turn)
+    ticket.respond!("Lo miro", by: assistant, turn: ticket.assistant_turn)
 
     # The disclosure notice rides one tick above her first message.
     assert_equal %i[requester system assistant], ticket.transcript.map(&:role)
@@ -41,13 +41,13 @@ class TranscriptTest < ActiveSupport::TestCase
     # on the row at all — the transcript reads her key out of the provenance
     # stamp and resolves it through the configuration.
     assert_nil ticket.conversation.messages.oldest_first.last.author
-    assert_equal "Rose", ticket.transcript.to_a.last.name
+    assert_equal "Assistant", ticket.transcript.to_a.last.name
   end
 
   test "a nameless assistant is still the assistant, by her provenance stamp" do
-    rose = configure_assistant!(:rose, autonomy: :reply, disclosure: :none)
+    assistant = configure_assistant!(:assistant, autonomy: :reply, disclosure: :none)
     ticket = ticket_for(@alice, about: @order)
-    ticket.respond!("Lo miro", by: rose, turn: ticket.assistant_turn)
+    ticket.respond!("Lo miro", by: assistant, turn: ticket.assistant_turn)
 
     spoken = ticket.transcript.to_a.last
 
@@ -56,9 +56,9 @@ class TranscriptTest < ActiveSupport::TestCase
   end
 
   test "a draft a human sent is the human's turn, marked assisted" do
-    rose = configure_assistant!(:rose)
+    assistant = configure_assistant!(:assistant)
     ticket = ticket_for(@alice, about: @order)
-    ticket.draft!("Te devolvemos el importe", by: rose, turn: ticket.assistant_turn)
+    ticket.draft!("Te devolvemos el importe", by: assistant, turn: ticket.assistant_turn)
     ticket.pending_draft.send!(by: @lucia, seen_turn: ticket.assistant_turn)
 
     sent = ticket.reload.transcript.to_a.last
@@ -71,12 +71,12 @@ class TranscriptTest < ActiveSupport::TestCase
   # --- Names ---------------------------------------------------------------------
 
   test "her name stays the name stored when she spoke" do
-    rose = configure_assistant!(:rose, autonomy: :reply, name: "Rose")
+    assistant = configure_assistant!(:assistant, autonomy: :reply, name: "Assistant")
     ticket = ticket_for(@alice, about: @order)
-    ticket.respond!("Hola", by: rose, turn: ticket.assistant_turn)
+    ticket.respond!("Hola", by: assistant, turn: ticket.assistant_turn)
 
-    with_assistant_config(:rose, name: "Rosa") do
-      assert_equal "Rose", ticket.transcript.to_a.last.name
+    with_assistant_config(:assistant, name: "Rosa") do
+      assert_equal "Assistant", ticket.transcript.to_a.last.name
     end
 
     # Nobody declares her any more, so there is no configured name left to
@@ -85,7 +85,7 @@ class TranscriptTest < ActiveSupport::TestCase
     # thing still true about a message nobody's initializer explains.
     SupportDesk.reset!
     configure_support_desk!
-    assert_equal "Rose", ticket.reload.transcript.to_a.last.name
+    assert_equal "Assistant", ticket.reload.transcript.to_a.last.name
   end
 
   test "a human with no support_agent_name falls back to the desk" do
