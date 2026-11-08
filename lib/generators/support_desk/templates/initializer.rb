@@ -196,24 +196,28 @@ SupportDesk.configure do |config|
   # config.auto_close_after = nil                 # e.g. 7.days
 
   # ==========================================================================
-  # AN ASSISTANT (0.3)
+  # AN ASSISTANT SEAT (0.3)
   # ==========================================================================
   #
-  # An AI agent, with the guardrails in code. `autonomy` is the most she may
-  # ever produce; topics only cap it DOWN. `disclosure` is REQUIRED — whether
-  # a customer is told they are talking to a machine is your decision, and
-  # `:none` is how you say "nothing", on purpose.
+  # A non-human participant on the desk, with the guardrails in code. The gem
+  # calls no model: an external system (ReplyBrain, or one of your own)
+  # drafts into this seat with `ticket.respond!(text, by:
+  # SupportDesk.assistant(:assistant), turn:)`, and a person sends what it
+  # proposes. `autonomy` is the most the seat may ever produce; topics only
+  # cap it DOWN. `disclosure` is REQUIRED — whether a customer is told they
+  # are talking to a machine is your decision, and `:none` is how you say
+  # "nothing", on purpose.
   #
-  # config.assistant :rose do |rose|
-  #   rose.name            = "Rose"
-  #   rose.autonomy        = :draft                # :off :observe :draft :reply :resolve
-  #   rose.disclosure      = :signature_and_notice # :signature | :notice | :none
-  #   rose.max_turns       = 6
-  #   rose.responds_within = 3.minutes
-  #   rose.hand_off_when { |_ticket, message| message.body.to_s.match?(/\bpersona\b/i) }
-  #   rose.cap { |ticket| :draft if ticket.requester.try(:vip?) }
+  # config.assistant :assistant do |assistant|
+  #   assistant.name            = "Assistant"
+  #   assistant.autonomy        = :draft                # :off :observe :draft :reply :resolve
+  #   assistant.disclosure      = :signature_and_notice # :signature | :notice | :none
+  #   assistant.max_turns       = 6
+  #   assistant.responds_within = 3.minutes
+  #   assistant.hand_off_when { |_ticket, message| message.body.to_s.match?(/\bpersona\b/i) }
+  #   assistant.cap { |ticket| :draft if ticket.requester.try(:vip?) }
   # end
-  # config.default_assistant = :rose
+  # config.default_assistant = :assistant
   #
   # The desk-level binding, for installations with more than one desk. An
   # explicit nil means "no assistant HERE", which is not the same as
@@ -221,11 +225,12 @@ SupportDesk.configure do |config|
   #
   # config.desk(:billing) { |desk| desk.assistant = nil }
   #
-  # Then subscribe your harness to the one event it needs — see the README's
-  # assistants section for the whole contract.
+  # The signal a drafting system can listen to: a case is waiting on the
+  # seat, with the turn its answer must carry. See the README's assistants
+  # section for the whole contract, and schedule its two sweeps.
   #
-  # SupportDesk.on(:assistant_turn, key: "support.rose.turn") do |ticket, assistant, _message, turn:|
-  #   Support::RoseTurnJob.set(wait: 20.seconds).perform_later(ticket.id, assistant.key, turn)
+  # SupportDesk.on(:assistant_turn, key: "support.assistant.turn") do |ticket, assistant, _message, turn:|
+  #   # hand ticket.id, assistant.key and turn to whatever drafts the answer
   # end
 
   # ==========================================================================

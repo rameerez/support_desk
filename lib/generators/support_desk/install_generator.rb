@@ -112,9 +112,10 @@ module SupportDesk
         say "  nothing you own. Follow the README drained cutover: pause support writes,"
         say "  drain old web/workers, migrate, then start only the new version."
 
-        say "\n  Assistants (0.3): when a machine should answer first, 'rails g support_desk:assistant"
-        say "  Rose --disclosure signature' writes the harness and prints the stanza. Read the"
-        say "  README's Assistants section before you flip it on — disclosure is a required choice."
+        say "\n  Assistants: an external system (ReplyBrain, or your own) drafts into the desk"
+        say "  through an assistant seat. Declare it with `config.assistant` (the commented"
+        say "  stanza in the initializer) after reading the README's Assistants section —"
+        say "  disclosure is a required choice."
 
         say "\nCheck your work any time with SupportDesk.doctor.print"
         say "You now have support tickets that are real conversations. 🚀\n", :green
