@@ -16,7 +16,7 @@ class BriefTest < ActiveSupport::TestCase
   # --- Shape ---------------------------------------------------------------------
 
   test "the documented keys, and nothing else at the top level" do
-    configure_assistant!(:rose)
+    configure_assistant!(:assistant)
     ticket = ticket_for(@alice, about: @order)
 
     assert_equal %i[schema_version desk assistant case requester transcript], ticket.brief.to_h.keys
@@ -72,7 +72,7 @@ class BriefTest < ActiveSupport::TestCase
   end
 
   test "a case that asked for a person says when and why" do
-    configure_assistant!(:rose)
+    configure_assistant!(:assistant)
     ticket = ticket_for(@alice, about: @order)
     ticket.request_human!(by: @alice)
 
@@ -92,14 +92,14 @@ class BriefTest < ActiveSupport::TestCase
   end
 
   test "may and may_not come straight off the policy" do
-    configure_assistant!(:rose, autonomy: :draft)
+    configure_assistant!(:assistant, autonomy: :draft)
     ticket = ticket_for(@alice, about: @order)
 
     facts = ticket.brief.to_h[:assistant]
     policy = ticket.assistant_policy
 
-    assert_equal "rose", facts[:key]
-    assert_equal "Rose", facts[:name]
+    assert_equal "assistant", facts[:key]
+    assert_equal "Assistant", facts[:name]
     assert_equal :signature, facts[:disclosure]
     assert_equal policy.level, facts[:level]
     assert_equal policy.because, facts[:because]
@@ -110,20 +110,20 @@ class BriefTest < ActiveSupport::TestCase
   end
 
   test "her name is her own, never the disclosed one" do
-    configure_assistant!(:rose, disclosure: :signature_and_notice)
+    configure_assistant!(:assistant, disclosure: :signature_and_notice)
     ticket = ticket_for(@alice, about: @order)
 
-    assert_equal "Rose", ticket.brief.to_h[:assistant][:name]
+    assert_equal "Assistant", ticket.brief.to_h[:assistant][:name]
   end
 
   test "the turn budget is used over max, and unlimited is nil" do
-    rose = configure_assistant!(:rose, autonomy: :reply, max_turns: 2)
+    assistant = configure_assistant!(:assistant, autonomy: :reply, max_turns: 2)
     ticket = ticket_for(@alice, about: @order)
-    ticket.respond!("Una", by: rose, turn: ticket.assistant_turn)
+    ticket.respond!("Una", by: assistant, turn: ticket.assistant_turn)
 
     assert_equal({ used: 1, max: 2 }, ticket.reload.brief.to_h[:assistant][:turns])
 
-    with_assistant_config(:rose, max_turns: nil) do
+    with_assistant_config(:assistant, max_turns: nil) do
       assert_nil ticket.brief.to_h[:assistant][:turns][:max]
       assert_includes ticket.brief.to_text, "Turns: 1/unlimited"
     end
@@ -162,10 +162,10 @@ class BriefTest < ActiveSupport::TestCase
   # --- Internal ---------------------------------------------------------------------
 
   test "the desk's own reasoning is opt-in, per call" do
-    rose = configure_assistant!(:rose)
+    assistant = configure_assistant!(:assistant)
     ticket = ticket_for(@alice, about: @order)
     ticket.note!("Ojo: ya reclamó en julio", by: @lucia)
-    ticket.draft!("Te devolvemos el importe", by: rose, turn: ticket.assistant_turn)
+    ticket.draft!("Te devolvemos el importe", by: assistant, turn: ticket.assistant_turn)
     ticket.reload.pending_draft.reject!(by: @lucia, reason: "no es eso")
 
     assert_nil ticket.brief.to_h[:internal]
@@ -194,7 +194,7 @@ class BriefTest < ActiveSupport::TestCase
   # --- to_text -------------------------------------------------------------------------
 
   test "to_text is sectioned facts, with no instruction in it" do
-    configure_assistant!(:rose)
+    configure_assistant!(:assistant)
     ticket = ticket_for(@alice, about: @order)
 
     text = ticket.brief.to_text
@@ -208,7 +208,7 @@ class BriefTest < ActiveSupport::TestCase
   end
 
   test "policy is the same object every verb asks" do
-    configure_assistant!(:rose)
+    configure_assistant!(:assistant)
     ticket = ticket_for(@alice, about: @order)
 
     assert_equal ticket.assistant_policy.level, ticket.brief.policy.level

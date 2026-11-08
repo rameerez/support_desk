@@ -12,9 +12,9 @@ module SupportDesk
     setup do
       @alice = create_user(name: "Alice")
       @lucia = create_agent(name: "Lucía")
-      @rose = configure_assistant!(autonomy: :draft)
+      @assistant = configure_assistant!(autonomy: :draft)
       @ticket = ticket_for(@alice, message: "No me llega el pedido")
-      @draft = @ticket.draft!("Ya lo estamos mirando", by: @rose, turn: @ticket.assistant_turn,
+      @draft = @ticket.draft!("Ya lo estamos mirando", by: @assistant, turn: @ticket.assistant_turn,
                                                        confidence: 0.9)
     end
 
@@ -24,8 +24,8 @@ module SupportDesk
 
     test "a fresh proposal is pending, hers, and stamped with the turn it answered" do
       assert_predicate @draft, :pending?
-      assert_equal @rose, @draft.author
-      assert_equal SupportDesk.actor_key(@rose), @draft.author_key
+      assert_equal @assistant, @draft.author
+      assert_equal SupportDesk.actor_key(@assistant), @draft.author_key
       assert_equal 90, @draft.confidence_percent
       assert_equal "Ya lo estamos mirando", @draft.final_body
       refute_predicate @draft, :edited?
@@ -34,7 +34,7 @@ module SupportDesk
 
     test "the scopes partition by what a person decided" do
       assert_includes Draft.pending, @draft
-      assert_includes Draft.by(@rose), @draft
+      assert_includes Draft.by(@assistant), @draft
       assert_empty Draft.reviewed
 
       @draft.send!(by: @lucia, seen_turn: turn)
@@ -69,7 +69,7 @@ module SupportDesk
 
       assert_equal "Ya lo estamos mirando", message.body
       assert_equal @lucia, message.author, "the person who sent it signs it"
-      assert_equal SupportDesk.actor_key(@rose), message.metadata.dig("support_desk", "drafted_by")
+      assert_equal SupportDesk.actor_key(@assistant), message.metadata.dig("support_desk", "drafted_by")
       assert_equal @draft.id.to_s, message.metadata.dig("support_desk", "draft_id")
       assert_equal false, message.metadata.dig("support_desk", "edited")
       refute @ticket.assistant_message?(message), "a person sent this one"
@@ -102,7 +102,7 @@ module SupportDesk
       event = assert_ticket_event(@ticket, :draft_sent, by: @lucia)
 
       assert_equal @draft.id.to_s, event.payload["draft"]
-      assert_equal SupportDesk.actor_key(@rose), event.payload["assistant"]
+      assert_equal SupportDesk.actor_key(@assistant), event.payload["assistant"]
       assert_equal true, event.payload["edited"]
       assert_equal false, event.payload["was_stale"]
       assert_equal message.id.to_s, event.payload["message"]
@@ -119,7 +119,7 @@ module SupportDesk
     end
 
     test "the person who sends it takes the case over from her" do
-      with_assistant_config(autonomy: :reply) { @ticket.assign!(to: @rose, by: @lucia) }
+      with_assistant_config(autonomy: :reply) { @ticket.assign!(to: @assistant, by: @lucia) }
       @draft.send!(by: @lucia, seen_turn: turn)
 
       assert_assigned_to @ticket, @lucia
@@ -127,7 +127,7 @@ module SupportDesk
     end
 
     test "attachments ride along to the message" do
-      draft = @ticket.draft!(nil, by: @rose, turn: turn, files: [ blob("captura.png") ])
+      draft = @ticket.draft!(nil, by: @assistant, turn: turn, files: [ blob("captura.png") ])
       message = draft.send!(by: @lucia, seen_turn: turn)
 
       assert_equal [ "captura.png" ], message.files.map { |file| file.filename.to_s }
@@ -179,7 +179,7 @@ module SupportDesk
     end
 
     test "a machine never approves anything, its own work included" do
-      assert_raises(NotAllowed) { @draft.send!(by: @rose, seen_turn: turn) }
+      assert_raises(NotAllowed) { @draft.send!(by: @assistant, seen_turn: turn) }
       assert_raises(NotAllowed) { @draft.send!(by: :system, seen_turn: turn) }
       assert_raises(NotAnAgent) { @draft.send!(by: @alice, seen_turn: turn) }
     end
@@ -245,7 +245,7 @@ module SupportDesk
     test "the case sees its own proposal without being reloaded" do
       ticket = ticket_for(@alice, topic: :order, message: "Otra consulta")
 
-      outcome = ticket.respond!("Una propuesta", by: @rose, turn: ticket.assistant_turn)
+      outcome = ticket.respond!("Una propuesta", by: @assistant, turn: ticket.assistant_turn)
 
       # No reload: a console renders from the instance it just wrote with,
       # and a button that only appears after a round trip is a button that
@@ -266,7 +266,7 @@ module SupportDesk
 
       assert_nil @ticket.pending_draft
 
-      other = @ticket.draft!("otra", by: @rose, turn: turn)
+      other = @ticket.draft!("otra", by: @assistant, turn: turn)
 
       assert_equal other, @ticket.pending_draft
 
@@ -284,26 +284,26 @@ module SupportDesk
     # --- Validation --------------------------------------------------------------
 
     test "a proposal needs something in it" do
-      error = assert_raises(ArgumentError) { @ticket.draft!(nil, by: @rose, turn: turn) }
+      error = assert_raises(ArgumentError) { @ticket.draft!(nil, by: @assistant, turn: turn) }
 
       assert_match(/needs something to say/, error.message)
       # And the model says so too, for anything that writes a row directly.
-      refute_predicate Draft.new(ticket: @ticket, author: @rose, proposed_turn: turn), :valid?
+      refute_predicate Draft.new(ticket: @ticket, author: @assistant, proposed_turn: turn), :valid?
     end
 
     test "sources are checked like anything a stranger typed" do
       assert_raises(ActiveRecord::RecordInvalid) do
-        @ticket.draft!("x", by: @rose, turn: turn, sources: [ { "title" => "x", "url" => "javascript:alert(1)" } ])
+        @ticket.draft!("x", by: @assistant, turn: turn, sources: [ { "title" => "x", "url" => "javascript:alert(1)" } ])
       end
       assert_raises(ActiveRecord::RecordInvalid) do
-        @ticket.draft!("x", by: @rose, turn: turn,
+        @ticket.draft!("x", by: @assistant, turn: turn,
                             sources: Array.new(21) { { "title" => "x", "url" => "https://x.test" } })
       end
       assert_raises(ActiveRecord::RecordInvalid) do
-        @ticket.draft!("x", by: @rose, turn: turn, sources: [ { "title" => "y" * 501, "url" => nil } ])
+        @ticket.draft!("x", by: @assistant, turn: turn, sources: [ { "title" => "y" * 501, "url" => nil } ])
       end
 
-      draft = @ticket.draft!("x", by: @rose, turn: turn,
+      draft = @ticket.draft!("x", by: @assistant, turn: turn,
                                   sources: [ { "title" => "Ayuda", "url" => "https://x.test/a" },
                                              { "title" => "Sin enlace", "url" => nil } ])
 
@@ -316,7 +316,7 @@ module SupportDesk
       # on the page that would have shown somebody what went wrong.
       [ [ [ "title", "x" ] ], [ "https://x.test" ], [ 42 ], [ [ [ 1, 2, 3 ] ] ] ].each do |sources|
         error = assert_raises(ActiveRecord::RecordInvalid) do
-          @ticket.draft!("x", by: @rose, turn: turn, sources: sources)
+          @ticket.draft!("x", by: @assistant, turn: turn, sources: sources)
         end
 
         assert_match(/title:, url: /, error.message, "#{sources.inspect} should say what it wanted")
@@ -327,16 +327,16 @@ module SupportDesk
 
     test "a failed proposal never takes the pending one with it" do
       assert_raises(ActiveRecord::RecordInvalid) do
-        @ticket.draft!("x", by: @rose, turn: turn, sources: [ { "title" => "x", "url" => "ftp://x.test" } ])
+        @ticket.draft!("x", by: @assistant, turn: turn, sources: [ { "title" => "x", "url" => "ftp://x.test" } ])
       end
 
       assert_predicate @draft.reload, :pending?, "validated before anything was superseded"
     end
 
     test "confidence is a probability or nothing" do
-      assert_raises(ActiveRecord::RecordInvalid) { @ticket.draft!("x", by: @rose, turn: turn, confidence: 1.5) }
+      assert_raises(ActiveRecord::RecordInvalid) { @ticket.draft!("x", by: @assistant, turn: turn, confidence: 1.5) }
 
-      draft = @ticket.draft!("x", by: @rose, turn: turn)
+      draft = @ticket.draft!("x", by: @assistant, turn: turn)
 
       assert_nil draft.confidence_percent
     end
@@ -345,8 +345,8 @@ module SupportDesk
       skip_unless_partial_indexes
 
       assert_raises(ActiveRecord::RecordNotUnique) do
-        Draft.insert_all!([ { ticket_id: @ticket.id, author_type: @rose.class.polymorphic_name,
-                             author_id: @rose.id, proposed_turn: turn, body: "otra", status: "pending",
+        Draft.insert_all!([ { ticket_id: @ticket.id, author_type: @assistant.class.polymorphic_name,
+                             author_id: @assistant.id, proposed_turn: turn, body: "otra", status: "pending",
                              created_at: Time.current, updated_at: Time.current } ])
       end
     end

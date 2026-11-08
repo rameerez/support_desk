@@ -5,7 +5,7 @@ module SupportDesk
   # so the harness can hand over an answer without first working out what it
   # is allowed to become.
   #
-  #   outcome = ticket.respond!(text, by: rose, turn: turn)
+  #   outcome = ticket.respond!(text, by: assistant, turn: turn)
   #   outcome.sent?       # it went to the requester
   #   outcome.drafted?    # a human will send it
   #   outcome.withheld?   # nothing was written, and #reason says why

@@ -14,7 +14,7 @@ module SupportDesk
     setup do
       @alice = create_user(name: "Alice")
       @lucia = create_agent(name: "Lucía")
-      @rose = configure_assistant!(autonomy: :reply)
+      @assistant = configure_assistant!(autonomy: :reply)
       @ticket = ticket_for(@alice, message: "Hola")
     end
 
@@ -53,7 +53,7 @@ module SupportDesk
     test "a proposal moves the turn — she changed the case" do
       with_assistant_config(autonomy: :draft) do
         before = revision
-        @ticket.draft!("propuesta", by: @rose, turn: turn)
+        @ticket.draft!("propuesta", by: @assistant, turn: turn)
 
         assert_operator revision, :>, before
       end
@@ -73,7 +73,7 @@ module SupportDesk
       stale = turn
       ask_again(@ticket, "otra cosa")
 
-      error = assert_raises(StaleTurn) { @ticket.respond!("Hola", by: @rose, turn: stale) }
+      error = assert_raises(StaleTurn) { @ticket.respond!("Hola", by: @assistant, turn: stale) }
 
       assert_match(/is stale on #{@ticket.reference}/, error.message)
       assert_match(/now #{turn}/, error.message)
@@ -83,20 +83,20 @@ module SupportDesk
 
     test "a redelivered job after a committed action is a no-op" do
       held = turn
-      @ticket.respond!("Ya lo miramos", by: @rose, turn: held)
+      @ticket.respond!("Ya lo miramos", by: @assistant, turn: held)
 
-      assert_raises(StaleTurn) { @ticket.respond!("Ya lo miramos", by: @rose, turn: held) }
+      assert_raises(StaleTurn) { @ticket.respond!("Ya lo miramos", by: @assistant, turn: held) }
       assert_equal 1, @ticket.conversation.messages.where(kind: "text").count { |m| @ticket.assistant_message?(m) }
       assert_equal 1, @ticket.reload.assistant_turns_count
     end
 
     test "every verb consumes it, so a second action needs the successor" do
       held = turn
-      @ticket.note!("mirando", by: @rose, turn: held)
+      @ticket.note!("mirando", by: @assistant, turn: held)
 
-      assert_raises(StaleTurn) { @ticket.note!("otra vez", by: @rose, turn: held) }
+      assert_raises(StaleTurn) { @ticket.note!("otra vez", by: @assistant, turn: held) }
 
-      @ticket.note!("otra vez", by: @rose, turn: turn)
+      @ticket.note!("otra vez", by: @assistant, turn: turn)
 
       assert_equal 2, @ticket.events.of_kind(:note).count
     end
@@ -105,7 +105,7 @@ module SupportDesk
       stale = turn
       ask_again(@ticket, "otra")
 
-      assert_raises(StaleTurn) { @ticket.escalate!(by: @rose, reason: "no sé", turn: stale) }
+      assert_raises(StaleTurn) { @ticket.escalate!(by: @assistant, reason: "no sé", turn: stale) }
       refute_needs_human @ticket
     end
 
@@ -125,7 +125,7 @@ module SupportDesk
 
       # Without the fold this would have been a perfectly current turn, and
       # she would have answered a conversation missing its last question.
-      assert_raises(StaleTurn) { @ticket.respond!("Hola", by: @rose, turn: held) }
+      assert_raises(StaleTurn) { @ticket.respond!("Hola", by: @assistant, turn: held) }
       # The refusal wrote nothing of its own…
       refute_assistant_spoke @ticket
       refute_pending_draft @ticket
@@ -172,7 +172,7 @@ module SupportDesk
         ask_again(@ticket, "segunda")
         @ticket.reload
 
-        outcome = @ticket.respond!("Respondo a las dos", by: @rose, turn: @ticket.assistant_turn)
+        outcome = @ticket.respond!("Respondo a las dos", by: @assistant, turn: @ticket.assistant_turn)
 
         assert_predicate outcome, :sent?
         assert_awaiting_requester @ticket
@@ -230,7 +230,7 @@ module SupportDesk
           ask_again(@ticket, "segunda")
         end
         @ticket.reload
-        draft = @ticket.draft!("propuesta", by: @rose, turn: @ticket.assistant_turn)
+        draft = @ticket.draft!("propuesta", by: @assistant, turn: @ticket.assistant_turn)
 
         message = draft.send!(by: @lucia, seen_turn: @ticket.reload.assistant_turn)
 
@@ -247,7 +247,7 @@ module SupportDesk
       ticket = ticket_for(@alice, topic: :order, message: "Otra consulta")
 
       assert_equal 1, turns.size
-      assert_equal [ ticket.id, "rose", "Otra consulta" ], turns.first.first(3)
+      assert_equal [ ticket.id, "assistant", "Otra consulta" ], turns.first.first(3)
       assert_equal ticket.reload.assistant_turn, turns.first.last
 
       ask_again(ticket, "y otra cosa")

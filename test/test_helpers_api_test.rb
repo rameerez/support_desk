@@ -156,13 +156,13 @@ class TestHelpersApiTest < ActiveSupport::TestCase
   # --- The assistant helpers ----------------------------------------------------
 
   test "the assistant helpers drive her the way a harness does" do
-    rose = configure_assistant!(autonomy: :draft)
+    assistant = configure_assistant!(autonomy: :draft)
     ticket = open_support_ticket(for: @alice, message: "No me llega")
 
-    assert_equal rose, support_assistant
-    assert_equal rose, support_assistant(:rose)
+    assert_equal assistant, support_assistant
+    assert_equal assistant, support_assistant(:assistant)
 
-    draft = draft_as(rose, ticket, "Una propuesta")
+    draft = draft_as(assistant, ticket, "Una propuesta")
 
     assert_pending_draft ticket, body: "propuesta"
     assert_pending_draft ticket, body: /propuesta/
@@ -171,23 +171,23 @@ class TestHelpersApiTest < ActiveSupport::TestCase
 
     refute_pending_draft ticket
 
-    outcome = respond_as(rose, ticket, "Otra propuesta")
+    outcome = respond_as(assistant, ticket, "Otra propuesta")
 
     assert_predicate outcome, :drafted?
   end
 
   test "the assistant assertions describe the states a person cares about" do
-    rose = configure_assistant!(autonomy: :reply)
+    assistant = configure_assistant!(autonomy: :reply)
     ticket = open_support_ticket(for: @alice, message: "No me llega")
 
     refute_needs_human ticket
     refute_assistant_spoke ticket
     assert_assistant_policy ticket, :reply, because: /autonomy/
 
-    respond_as rose, ticket, "Lo miramos"
+    respond_as assistant, ticket, "Lo miramos"
 
     assert_held_by_assistant ticket
-    assert_held_by_assistant ticket, rose
+    assert_held_by_assistant ticket, assistant
 
     ticket.escalate!(by: @lucia, reason: "para una persona")
 

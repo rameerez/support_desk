@@ -3,9 +3,9 @@
 module SupportDesk
   # The assistant: an AI agent, as a record.
   #
-  #   rose = SupportDesk.assistant(:rose)
-  #   rose.autonomy        # => :draft      (from configuration)
-  #   rose.deactivate!(by: lucia)           # the cross-process kill switch
+  #   assistant = SupportDesk.assistant(:assistant)
+  #   assistant.autonomy        # => :draft      (from configuration)
+  #   assistant.deactivate!(by: lucia)           # the cross-process kill switch
   #
   # Two things live here and nothing else: WHO she is (a row a message can
   # be authored by, an assignment can point at, and an audit log can name)
@@ -15,7 +15,7 @@ module SupportDesk
   # SupportDesk::AssistantPolicy.
   #
   # `active` is the one runtime switch, and it is a DATABASE column on
-  # purpose: `rose.deactivate!(by: owner)` stops her everywhere within one
+  # purpose: `assistant.deactivate!(by: owner)` stops her everywhere within one
   # transition, with no deploy, because `ensure_agent_record!` re-reads this
   # row before every write. Rows are never destroyed — a case she answered in
   # March must still be able to say who wrote it.
@@ -115,8 +115,8 @@ module SupportDesk
       def display_name = disclosed? ? I18n.t("support_desk.assistant.disclosed_name", name: name) : name
     end
 
-    #   rose.disclosure_as(:signature)   # => Disclosure for one message
-    #   rose.disclosure_as(nil)          # => her configured mode
+    #   assistant.disclosure_as(:signature)   # => Disclosure for one message
+    #   assistant.disclosure_as(nil)          # => her configured mode
     #
     # Raises ArgumentError for a mode that is none of DISCLOSURE_MODES.
     def disclosure_as(mode = nil)
@@ -136,8 +136,8 @@ module SupportDesk
     #
     # Chats asks the AUTHOR for a signature every time a message is rendered,
     # so before this the requester-facing line was whatever configuration said
-    # right now: taking her out of the initializer turned "— Rose · virtual
-    # assistant" into "— Rose" on messages nobody had touched, and a host
+    # right now: taking her out of the initializer turned "— Assistant · virtual
+    # assistant" into "— Assistant" on messages nobody had touched, and a host
     # reading an old transcript could no longer tell that a machine had
     # written it (R8).
     #

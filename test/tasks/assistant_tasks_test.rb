@@ -10,7 +10,7 @@ class AssistantTasksTest < ActiveSupport::TestCase
   setup do
     @alice = create_user(name: "Alice")
     @lucia = create_agent(name: "Lucía")
-    @rose = configure_assistant!(autonomy: :reply, responds_within: 60)
+    @assistant = configure_assistant!(autonomy: :reply, responds_within: 60)
     Rake::Task.clear
     Rake::Task.define_task(:environment)
     load File.expand_path("../../lib/tasks/support_desk.rake", __dir__)
@@ -24,7 +24,7 @@ class AssistantTasksTest < ActiveSupport::TestCase
 
   test "release_silent_assistants hands over the cases she sat on, and says how many" do
     ticket = ticket_for(@alice)
-    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
+    ticket.assign!(to: @assistant, by: @assistant, turn: ticket.assistant_turn)
     travel 2.minutes
 
     output = run_task("release_silent_assistants")
@@ -42,8 +42,8 @@ class AssistantTasksTest < ActiveSupport::TestCase
 
   test "reclaim_assistant_seats gives back a switched-off assistant's cases" do
     ticket = ticket_for(@alice)
-    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
-    @rose.deactivate!(by: @lucia)
+    ticket.assign!(to: @assistant, by: @assistant, turn: ticket.assistant_turn)
+    @assistant.deactivate!(by: @lucia)
 
     output = run_task("reclaim_assistant_seats")
 
@@ -76,18 +76,18 @@ class AssistantTasksTest < ActiveSupport::TestCase
 
   test "assistant_status reads the numbers and writes nothing" do
     ticket = ticket_for(@alice)
-    ticket.assign!(to: @rose, by: @rose, turn: ticket.assistant_turn)
+    ticket.assign!(to: @assistant, by: @assistant, turn: ticket.assistant_turn)
     other = ticket_for(@alice, topic: :order, message: "Otra")
     other.escalate!(by: @lucia, reason: "para una persona")
     with_assistant_config(autonomy: :draft) do
       ticket_for(@alice, topic: :account, message: "Y otra").tap do |third|
-        third.draft!("propuesta", by: @rose, turn: third.assistant_turn)
+        third.draft!("propuesta", by: @assistant, turn: third.assistant_turn)
       end
     end
 
     output = run_task("assistant_status")
 
-    assert_match(/rose \(active, reply\): 1 case\(s\) held/, output)
+    assert_match(/assistant \(active, reply\): 1 case\(s\) held/, output)
     assert_match(/1 case\(s\) need a person/, output)
     assert_match(/1 proposal\(s\) waiting/, output)
     assert_equal 3, SupportDesk::Ticket.count, "it changed nothing"

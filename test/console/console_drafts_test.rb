@@ -19,7 +19,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   setup do
     @lucia = create_agent(name: "Lucía")
     @alice = create_user(name: "Alice")
-    @rose = configure_assistant!
+    @assistant = configure_assistant!
     @ticket = ticket_for(@alice, message: "¿Dónde está mi pedido?")
 
     login_as @lucia
@@ -28,14 +28,14 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   # --- The card ------------------------------------------------------------------
 
   test "the case screen shows the proposal, its confidence and its sources" do
-    draft_as(@rose, @ticket, "Tu pedido sale mañana.", confidence: 0.82,
+    draft_as(@assistant, @ticket, "Tu pedido sale mañana.", confidence: 0.82,
              sources: [ { "title" => "Política de envíos", "url" => "https://example.com/envios" } ])
 
     get "/admin/support/#{@ticket.id}"
 
     assert_response :success
     assert_no_missing_translations
-    assert_select "h2", text: /Rose/
+    assert_select "h2", text: /Assistant/
     assert_select "section", text: /Tu pedido sale mañana\./
     assert_match "declared confidence 82 %", response.body
     assert_select "a[href=?][rel=?]", "https://example.com/envios", "noopener", text: "Política de envíos"
@@ -45,7 +45,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   test "a source with a url nothing should click is printed, never linked" do
     # The model validates these, and old rows and future models are not the
     # model's to promise. A citation is a link an agent clicks.
-    draft = draft_as(@rose, @ticket, "Mira esto")
+    draft = draft_as(@assistant, @ticket, "Mira esto")
     draft.update_column(:sources, [ { "title" => "Raro", "url" => "javascript:alert(1)" } ])
 
     get "/admin/support/#{@ticket.id}"
@@ -59,7 +59,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
     # A button that posts without saying WHICH proposal is refused before
     # the model is asked, and the refusal is a flash nobody reads: the
     # discard button shipped like that and looked exactly like a no-op.
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     get "/admin/support/#{@ticket.id}"
 
@@ -82,7 +82,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   # --- Sending -------------------------------------------------------------------
 
   test "Enviar sends the proposal verbatim, signed by the person who sent it" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/send_draft",
          params: { draft_id: draft.id.to_s, seen_turn: @ticket.assistant_turn }
@@ -94,7 +94,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
 
     assert_equal "Tu pedido sale mañana.", message.body
     assert_equal @lucia, message.author, "the person who sent it owns it"
-    assert_equal SupportDesk.actor_key(@rose), message.metadata.dig("support_desk", "drafted_by")
+    assert_equal SupportDesk.actor_key(@assistant), message.metadata.dig("support_desk", "drafted_by")
     assert_equal false, message.metadata.dig("support_desk", "edited")
     assert_predicate draft.reload, :sent?
     assert_equal @lucia, draft.reviewed_by
@@ -102,7 +102,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "an edit sends the person's words and keeps the machine's" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/send_draft",
          params: { draft_id: draft.id.to_s, seen_turn: @ticket.assistant_turn,
@@ -116,7 +116,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "an edit that empties the box is a refusal, not a send" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/send_draft",
          params: { draft_id: draft.id.to_s, seen_turn: @ticket.assistant_turn, body: "   " }
@@ -128,7 +128,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "Editar opens the composer with the proposal in it" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     get "/admin/support/#{@ticket.id}", params: { compose: "reply", draft: draft.id.to_s }
 
@@ -140,7 +140,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "a draft param naming something else leaves the composer alone" do
-    draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     get "/admin/support/#{@ticket.id}", params: { compose: "reply", draft: "999999" }
 
@@ -152,7 +152,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   # --- The turn ------------------------------------------------------------------
 
   test "a case that moved comes back as the same screen, with the text and the new turn" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
     stale_turn = @ticket.assistant_turn
     ask_again(@ticket, "Ya da igual, era otra cosa")
 
@@ -172,7 +172,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "the card says so when the case moved under it" do
-    draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
     ask_again(@ticket, "Ya da igual")
 
     get "/admin/support/#{@ticket.id}"
@@ -184,7 +184,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   # --- Refusals ------------------------------------------------------------------
 
   test "a proposal id that names nothing is a flash, not a 500" do
-    draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/send_draft",
          params: { draft_id: "999999", seen_turn: @ticket.assistant_turn }
@@ -193,7 +193,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "pressing Enviar twice says what happened to it" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
     params = { draft_id: draft.id.to_s, seen_turn: @ticket.assistant_turn }
 
     post "/admin/support/#{@ticket.id}/send_draft", params: params
@@ -211,7 +211,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "a proposal id that isn't text is a refusal, not a lookup" do
-    draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/send_draft",
          params: { draft_id: { evil: "1" }, seen_turn: @ticket.assistant_turn }
@@ -221,7 +221,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "a send with no turn on it is refused before the model is asked" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/send_draft", params: { draft_id: draft.id.to_s }
 
@@ -232,7 +232,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   # --- Discarding ----------------------------------------------------------------
 
   test "Descartar keeps the reason, and the case stays waiting" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/reject_draft",
          params: { draft_id: draft.id.to_s, reason: "no es eso, habla del pedido anterior" }
@@ -246,7 +246,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "a reason that isn't text is dropped rather than written down" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/reject_draft",
          params: { draft_id: draft.id.to_s, reason: { evil: "1" } }
@@ -264,11 +264,11 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
     # she holds it, and she has something waiting.
     draft = nil
     with_assistant_config(autonomy: :reply) do
-      @ticket.assign!(to: @rose, by: @lucia)
-      draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+      @ticket.assign!(to: @assistant, by: @lucia)
+      draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
     end
 
-    assert_held_by_assistant @ticket, @rose
+    assert_held_by_assistant @ticket, @assistant
 
     post "/admin/support/#{@ticket.id}/pause_assistant", params: { reason: "cliente enfadado" }
 
@@ -316,7 +316,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
       row = css_select("dd[title]").detect { |dd| dd.text.strip == "observe" }
 
       assert row, "the context card doesn't say what she may do here"
-      assert_equal "topic other caps rose at observe", row["title"]
+      assert_equal "topic other caps assistant at observe", row["title"]
     end
   end
 
@@ -336,7 +336,7 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
 
   test "a message she sent herself is marked as hers, with what she claimed about it" do
     with_assistant_config(autonomy: :reply) do
-      respond_as(@rose, @ticket, "Tu pedido sale mañana.", confidence: 0.9)
+      respond_as(@assistant, @ticket, "Tu pedido sale mañana.", confidence: 0.9)
     end
 
     get "/admin/support/#{@ticket.id}"
@@ -348,14 +348,14 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   end
 
   test "a message a person sent from her proposal is marked as theirs, from her" do
-    draft = draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft = draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
 
     post "/admin/support/#{@ticket.id}/send_draft",
          params: { draft_id: draft.id.to_s, seen_turn: @ticket.assistant_turn }
     follow_redirect!
 
     assert_response :success
-    assert_select "span", text: "Rose · virtual assistant's proposal"
+    assert_select "span", text: "Assistant · virtual assistant's proposal"
     # It is a PERSON's message: no robot on it.
     assert_select "span", text: "🤖", count: 0
   end
@@ -375,12 +375,12 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
 
       offered = css_select("select[name=agent_id] option").map { |option| option["value"] }.reject(&:blank?)
 
-      assert_equal [ SupportDesk.actor_key(pedro), SupportDesk.actor_key(@rose) ].sort, offered.sort
+      assert_equal [ SupportDesk.actor_key(pedro), SupportDesk.actor_key(@assistant) ].sort, offered.sort
       assert_empty offered.grep(/\A\d+\z/), "a bare id in the form is a coin flip on the server"
 
-      post "/admin/support/#{@ticket.id}/assign", params: { agent_id: SupportDesk.actor_key(@rose) }
+      post "/admin/support/#{@ticket.id}/assign", params: { agent_id: SupportDesk.actor_key(@assistant) }
 
-      assert_held_by_assistant @ticket, @rose
+      assert_held_by_assistant @ticket, @assistant
     end
   end
 
@@ -396,9 +396,9 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   test "a bare id two of the pool answer to is refused, not guessed" do
     # A person and a machine on the same number. It is contrived to arrange
     # and entirely ordinary in production: two tables, two sequences.
-    rose = move_assistant_to!(@lucia.id)
+    assistant = move_assistant_to!(@lucia.id)
 
-    assert_equal @lucia.id, rose.id, "the collision this test is about didn't happen"
+    assert_equal @lucia.id, assistant.id, "the collision this test is about didn't happen"
 
     with_assistant_config(autonomy: :reply) do
       post "/admin/support/#{@ticket.id}/assign", params: { agent_id: @lucia.id.to_s }
@@ -407,16 +407,16 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
       assert_unassigned @ticket, "an ambiguous id must never pick one of them"
 
       # The keys still say which is which, and they are what the form posts.
-      post "/admin/support/#{@ticket.id}/assign", params: { agent_id: SupportDesk.actor_key(rose) }
+      post "/admin/support/#{@ticket.id}/assign", params: { agent_id: SupportDesk.actor_key(assistant) }
 
-      assert_held_by_assistant @ticket, rose
+      assert_held_by_assistant @ticket, assistant
     end
   end
 
   # --- The queue -----------------------------------------------------------------
 
   test "the rows say which cases need a person and which have words waiting" do
-    draft_as(@rose, @ticket, "Tu pedido sale mañana.")
+    draft_as(@assistant, @ticket, "Tu pedido sale mañana.")
     flagged = ticket_for(create_user(name: "Bruno"), message: "Quiero hablar con alguien")
     flagged.escalate!(by: @lucia, reason: "fraude")
 
@@ -449,9 +449,9 @@ class ConsoleDraftsTest < ActionDispatch::IntegrationTest
   # and whether they happen to agree is not something a test should leave to
   # whichever adapter it is running on.
   def move_assistant_to!(id)
-    SupportDesk::Assistant.where(key: "rose").update_all(id: id)
+    SupportDesk::Assistant.where(key: "assistant").update_all(id: id)
     SupportDesk.reset_assistants!
-    @rose = SupportDesk.assistant(:rose)
+    @assistant = SupportDesk.assistant(:assistant)
   end
 
   # The decision is on the case's own timeline, not only on the draft row:

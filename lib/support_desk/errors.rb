@@ -72,7 +72,7 @@ module SupportDesk
 
     private
 
-    # "rose may not reply on T-AB12CD: topic payments caps rose at draft" —
+    # "assistant may not reply on T-AB12CD: topic payments caps assistant at draft" —
     # who, what, where, and the rule that decided it.
     def default_message
       return "an assistant may not #{@verb} here" if @policy.nil?

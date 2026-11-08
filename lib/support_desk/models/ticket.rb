@@ -1688,7 +1688,7 @@ module SupportDesk
     end
 
     def announce_assignment!(agent, first:)
-      # "Rose se ocupa de tu consulta" is a promise about a person. Her
+      # "Assistant se ocupa de tu consulta" is a promise about a person. Her
       # disclosure line is her announcement, and it is the only one.
       return if SupportDesk.ai_actor?(agent)
 

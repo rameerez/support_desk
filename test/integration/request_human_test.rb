@@ -14,7 +14,7 @@ class RequestHumanTest < ActionDispatch::IntegrationTest
     @alice = create_user(name: "Alice", onboarded: true)
     @mallory = create_user(name: "Mallory", onboarded: true)
     @lucia = create_agent(name: "Lucía")
-    @rose = configure_assistant!
+    @assistant = configure_assistant!
     @ticket = ticket_for(@alice, message: "¿Dónde está mi pedido?")
   end
 
@@ -80,21 +80,21 @@ class RequestHumanTest < ActionDispatch::IntegrationTest
 
   test "the list says who is on a case, and what changes when a person is asked for" do
     with_assistant_config(autonomy: :reply) do
-      @ticket.assign!(to: @rose, by: @lucia)
+      @ticket.assign!(to: @assistant, by: @lucia)
     end
 
     login_as @alice
     get "/messages/support"
 
     assert_response :success
-    assert_match "Handled by Rose · virtual assistant", response.body
+    assert_match "Handled by Assistant · virtual assistant", response.body
 
     @ticket.request_human!(by: @alice)
     get "/messages/support"
 
     assert_response :success
     assert_match "Somebody from the team will take it from here", response.body
-    assert_no_match(/Handled by Rose/, response.body)
+    assert_no_match(/Handled by Assistant/, response.body)
   end
 end
 

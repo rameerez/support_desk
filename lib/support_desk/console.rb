@@ -398,7 +398,7 @@ module SupportDesk
     end
 
     # One line for the timeline kinds the assistants added — "Lucía envió la
-    # propuesta de Rose" — from the event's own payload. Nil for everything
+    # propuesta de Assistant" — from the event's own payload. Nil for everything
     # else, so the partial falls back to the label-and-actor shape 0.2 had.
     #
     # It lives here rather than in the partial because the sentence is COPY:

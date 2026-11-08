@@ -13,7 +13,7 @@ module SupportDesk
     setup do
       @alice = create_user(name: "Alice")
       @lucia = create_agent(name: "Lucía")
-      @rose = configure_assistant!(autonomy: :reply)
+      @assistant = configure_assistant!(autonomy: :reply)
       @ticket = ticket_for(@alice, message: "No me llega el pedido")
     end
 
@@ -26,28 +26,28 @@ module SupportDesk
       # the public line — everything except the one signal a host's "a person
       # is needed here" notifier listens for.
       with_assistant_config(max_turns: 1) do
-        @ticket.respond!("Primera respuesta", by: @rose, turn: turn)
+        @ticket.respond!("Primera respuesta", by: @assistant, turn: turn)
         ask_again(@ticket, "sigo sin saberlo")
         @ticket.reload
         seen = []
         SupportDesk.on(:ticket_escalated) { |ticket, from:, reason:, by:| seen << [ ticket.id, reason, by ] }
 
-        outcome = @ticket.respond!("Última propuesta", by: @rose, turn: turn)
+        outcome = @ticket.respond!("Última propuesta", by: @assistant, turn: turn)
 
         assert_equal :max_turns, outcome.reason
         assert_needs_human @ticket, reason: "max_turns"
-        assert_equal [ [ @ticket.id, :max_turns, @rose ] ], seen
+        assert_equal [ [ @ticket.id, :max_turns, @assistant ] ], seen
       end
     end
 
     # --- She hands it over -------------------------------------------------------
 
     test "escalating releases her seat, flags the case and tells the customer" do
-      @ticket.assign!(to: @rose, by: @rose, turn: @ticket.reload.assistant_turn)
+      @ticket.assign!(to: @assistant, by: @assistant, turn: @ticket.reload.assistant_turn)
       seen = []
       SupportDesk.on(:ticket_escalated) { |ticket, from:, reason:, by:| seen << [ ticket.id, from, reason, by ] }
 
-      @ticket.escalate!(by: @rose, reason: "no sé de qué va", summary: "Pide una factura de 2019", turn: turn)
+      @ticket.escalate!(by: @assistant, reason: "no sé de qué va", summary: "Pide una factura de 2019", turn: turn)
 
       assert_needs_human @ticket, reason: "no sé de qué va"
       assert_unassigned @ticket
@@ -57,8 +57,8 @@ module SupportDesk
       event = assert_ticket_event(@ticket, :escalated)
 
       assert_equal "Pide una factura de 2019", event.summary
-      assert_equal SupportDesk.actor_key(@rose), event.payload["from"]
-      assert_equal [ [ @ticket.id, @rose, :"no sé de qué va", @rose ] ], seen
+      assert_equal SupportDesk.actor_key(@assistant), event.payload["from"]
+      assert_equal [ [ @ticket.id, @assistant, :"no sé de qué va", @assistant ] ], seen
 
       line = @ticket.conversation.messages.where(kind: "system").last.body
 
@@ -67,22 +67,22 @@ module SupportDesk
     end
 
     test "escalating twice writes once" do
-      @ticket.escalate!(by: @rose, reason: "no sé", turn: turn)
-      @ticket.escalate!(by: @rose, reason: "otra vez", turn: turn)
+      @ticket.escalate!(by: @assistant, reason: "no sé", turn: turn)
+      @ticket.escalate!(by: @assistant, reason: "otra vez", turn: turn)
 
       assert_equal 1, @ticket.events.of_kind(:escalated).count
       assert_equal "no sé", @ticket.reload.human_required_reason
     end
 
     test "escalating needs the turn, and a reason worth reading" do
-      assert_raises(ArgumentError) { @ticket.escalate!(by: @rose, reason: "x") }
-      assert_raises(ArgumentError) { @ticket.escalate!(by: @rose, reason: "  ", turn: turn) }
+      assert_raises(ArgumentError) { @ticket.escalate!(by: @assistant, reason: "x") }
+      assert_raises(ArgumentError) { @ticket.escalate!(by: @assistant, reason: "  ", turn: turn) }
     end
 
     test "escalating a case a person holds flags it and leaves their seat alone" do
       @ticket.assign!(to: @lucia, by: @lucia)
 
-      @ticket.escalate!(by: @rose, reason: "esto es para ti", turn: turn)
+      @ticket.escalate!(by: @assistant, reason: "esto es para ti", turn: turn)
 
       assert_needs_human @ticket
       assert_assigned_to @ticket, @lucia, "Lucía was already on it"
@@ -92,7 +92,7 @@ module SupportDesk
       @ticket.reply!("Ya está", by: @lucia)
       @ticket.close!(by: @lucia)
 
-      assert_raises(InvalidTransition) { @ticket.escalate!(by: @rose, reason: "x", turn: turn) }
+      assert_raises(InvalidTransition) { @ticket.escalate!(by: @assistant, reason: "x", turn: turn) }
     end
 
     test "a person and the system may escalate too" do
@@ -109,8 +109,8 @@ module SupportDesk
 
     test "a pending proposal survives the hand-off — somebody may still want to send it" do
       with_assistant_config(autonomy: :draft) do
-        draft = @ticket.draft!("propuesta", by: @rose, turn: turn)
-        @ticket.escalate!(by: @rose, reason: "mejor una persona", turn: turn)
+        draft = @ticket.draft!("propuesta", by: @assistant, turn: turn)
+        @ticket.escalate!(by: @assistant, reason: "mejor una persona", turn: turn)
 
         assert_predicate draft.reload, :pending?
       end
@@ -224,9 +224,9 @@ module SupportDesk
     test "a person answering a case she holds takes it over, under every reply policy" do
       SupportDesk::Configuration::DeskConfiguration::REPLY_POLICIES.each do |policy|
         ticket = ticket_for(@alice, topic: :order, message: "Consulta #{policy}")
-        ticket.respond!("Te contesto yo", by: @rose, turn: ticket.assistant_turn)
+        ticket.respond!("Te contesto yo", by: @assistant, turn: ticket.assistant_turn)
 
-        assert_held_by_assistant ticket, @rose
+        assert_held_by_assistant ticket, @assistant
         assert ticket.may_reply?(@lucia), "#{policy}: a person may always answer a machine's case"
 
         with_support_config(reply_policy: policy) do
@@ -242,7 +242,7 @@ module SupportDesk
     test "she is never allowed to take a case back off a person" do
       @ticket.assign!(to: @lucia, by: @lucia)
 
-      assert_raises(AssistantNotAllowed) { @ticket.reply!("dejadme a mí", by: @rose, turn: turn) }
+      assert_raises(AssistantNotAllowed) { @ticket.reply!("dejadme a mí", by: @assistant, turn: turn) }
       assert_assigned_to @ticket, @lucia
     end
 
@@ -253,9 +253,9 @@ module SupportDesk
       @ticket.update!(assistant_cap: "draft")
       @ticket.request_human!(by: @alice)
 
-      @ticket.assign!(to: @rose, by: @lucia)
+      @ticket.assign!(to: @assistant, by: @lucia)
 
-      assert_held_by_assistant @ticket, @rose
+      assert_held_by_assistant @ticket, @assistant
       refute_needs_human @ticket
       refute_predicate @ticket, :assistant_paused?
       assert_nil @ticket.assistant_cap
@@ -267,7 +267,7 @@ module SupportDesk
       turns = []
       SupportDesk.on(:assistant_turn) { |_ticket, _assistant, message, turn:| turns << [ message, turn ] }
 
-      @ticket.assign!(to: @rose, by: @lucia)
+      @ticket.assign!(to: @assistant, by: @lucia)
 
       assert_equal 1, turns.size
       assert_nil turns.first.first, "there is no new message — the case simply became hers again"
@@ -278,9 +278,9 @@ module SupportDesk
       @ticket.assign!(to: @lucia, by: @lucia)
       @ticket.request_human!(by: @alice)
 
-      @ticket.hand_off!(to: @rose, by: @lucia)
+      @ticket.hand_off!(to: @assistant, by: @lucia)
 
-      assert_held_by_assistant @ticket, @rose
+      assert_held_by_assistant @ticket, @assistant
       refute_needs_human @ticket
     end
 
@@ -288,7 +288,7 @@ module SupportDesk
       @ticket.request_human!(by: @alice)
 
       with_topic_assistant_cap("other", :draft) do
-        error = assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @rose, by: @lucia) }
+        error = assert_raises(AssistantNotAllowed) { @ticket.assign!(to: @assistant, by: @lucia) }
 
         assert_equal :take, error.verb
       end

@@ -6,7 +6,7 @@ class RegistrationRegressionTest < ActiveSupport::TestCase
   setup do
     @alice = create_user(name: "Alice")
     @human = create_agent(name: "Human")
-    @rose = configure_assistant!(autonomy: :resolve)
+    @assistant = configure_assistant!(autonomy: :resolve)
     @ticket = ticket_for(@alice, message: "Question")
   end
 
@@ -27,18 +27,18 @@ class RegistrationRegressionTest < ActiveSupport::TestCase
   end
 
   test "public release cannot bypass turn check with internal current sentinel" do
-    @ticket.assign!(to: @rose, by: @human)
+    @ticket.assign!(to: @assistant, by: @human)
     ask_again(@ticket, "Case changed")
     assert_raises(SupportDesk::StaleTurn, ArgumentError) do
-      @ticket.release!(by: @rose, turn: :current)
+      @ticket.release!(by: @assistant, turn: :current)
     end
   end
 
   test "switching disclosure mode preserves old message disclosure" do
-    message = @ticket.respond!("Answer", by: @rose, turn: @ticket.assistant_turn).message
+    message = @ticket.respond!("Answer", by: @assistant, turn: @ticket.assistant_turn).message
     before = Chats.message_signature_for(message)
-    SupportDesk.config.assistant(:rose).disclosure = :none
-    SupportDesk.assistant(:rose)
+    SupportDesk.config.assistant(:assistant).disclosure = :none
+    SupportDesk.assistant(:assistant)
     assert_equal before, Chats.message_signature_for(message.reload)
   end
 
@@ -56,7 +56,7 @@ class RegistrationRegressionTest < ActiveSupport::TestCase
   end
 
   test "an unseen earlier timestamp invalidates the turn without rewinding clocks" do
-    @ticket.respond!("First answer", by: @rose, turn: @ticket.assistant_turn)
+    @ticket.respond!("First answer", by: @assistant, turn: @ticket.assistant_turn)
     @ticket.reload
     clock = @ticket.last_requester_message_at
     seen = @ticket.assistant_turn
@@ -72,7 +72,7 @@ class RegistrationRegressionTest < ActiveSupport::TestCase
   end
 
   test "a late tied phrase requests a human exactly once" do
-    SupportDesk.config.assistant(:rose).hand_off_when = ->(_ticket, message) { message.body == "human please" }
+    SupportDesk.config.assistant(:assistant).hand_off_when = ->(_ticket, message) { message.body == "human please" }
     events = []
     SupportDesk.on(:human_requested) { |*args, **kwargs| events << kwargs }
     travel_to(1.minute.from_now.change(usec: 0)) do
@@ -111,13 +111,13 @@ class RegistrationRegressionTest < ActiveSupport::TestCase
   end
 
   test "public assistant reply and assignment reject the internal sentinel" do
-    assert_raises(SupportDesk::StaleTurn) { @ticket.reply!("late", by: @rose, turn: :current) }
-    assert_raises(SupportDesk::StaleTurn) { @ticket.assign!(to: @rose, by: @rose, turn: :current) }
+    assert_raises(SupportDesk::StaleTurn) { @ticket.reply!("late", by: @assistant, turn: :current) }
+    assert_raises(SupportDesk::StaleTurn) { @ticket.assign!(to: @assistant, by: @assistant, turn: :current) }
     assert @ticket.reload.unassigned?
   end
 
   test "human and human-approved draft signatures remain human" do
-    draft = @ticket.draft!("Proposal", by: @rose, turn: @ticket.assistant_turn)
+    draft = @ticket.draft!("Proposal", by: @assistant, turn: @ticket.assistant_turn)
     message = draft.send!(by: @human, seen_turn: @ticket.reload.assistant_turn)
     expected = I18n.t("chats.message.signature", name: Chats.display_name_for(@human))
     assert_equal expected, Chats.message_signature_for(message)
@@ -125,9 +125,9 @@ class RegistrationRegressionTest < ActiveSupport::TestCase
   end
 
   test "host custom signature hook is honored and legacy snapshots survive flag off" do
-    message = @ticket.respond!("Answer", by: @rose, turn: @ticket.assistant_turn).message
+    message = @ticket.respond!("Answer", by: @assistant, turn: @ticket.assistant_turn).message
     before = Chats.message_signature_for(message)
-    @rose.update_columns(settings: {}) # a 0.3.0 row without the 0.3.1 row snapshot
+    @assistant.update_columns(settings: {}) # a 0.3.0 row without the 0.3.1 row snapshot
     SupportDesk.reset!
     configure_support_desk!
     assert_equal before, Chats.message_signature_for(message.reload)

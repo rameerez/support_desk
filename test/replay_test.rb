@@ -8,7 +8,7 @@ class ReplaySignalsTest < ActiveSupport::TestCase
   setup do
     @alice = create_user(name: "Alice")
     @lucia = create_agent(name: "Lucía")
-    @rose = configure_assistant!(autonomy: :draft)
+    @assistant = configure_assistant!(autonomy: :draft)
     @ticket = ticket_for(@alice, message: "Hola")
   end
 
@@ -16,17 +16,17 @@ class ReplaySignalsTest < ActiveSupport::TestCase
     turn = @ticket.events.of_kind(:assistant_turn).sole
 
     assert_equal @ticket.assistant_turn, turn.payload["turn"]
-    assert_equal "rose", turn.payload["assistant"]
+    assert_equal "assistant", turn.payload["assistant"]
     assert_equal @ticket.last_requester_message_id.to_s, turn.payload["message"]
   end
 
   test "a proposal is written down, and the turn it left the case at" do
-    draft = @ticket.draft!("propuesta", by: @rose, turn: @ticket.assistant_turn)
+    draft = @ticket.draft!("propuesta", by: @assistant, turn: @ticket.assistant_turn)
     event = @ticket.events.of_kind(:draft_proposed).sole
 
     assert_equal draft.id.to_s, event.payload["draft"]
     assert_equal draft.proposed_turn, event.payload["turn"]
-    assert_equal @rose, event.actor
+    assert_equal @assistant, event.actor
   end
 
   test "handing the case back writes the turn under the same lock" do
@@ -35,7 +35,7 @@ class ReplaySignalsTest < ActiveSupport::TestCase
 
     with_assistant_config(autonomy: :reply) do
       assert_difference -> { @ticket.events.of_kind(:assistant_turn).count } do
-        @ticket.assign!(to: @rose, by: @lucia)
+        @ticket.assign!(to: @assistant, by: @lucia)
       end
     end
   end
@@ -49,7 +49,7 @@ class ReplaySignalsTest < ActiveSupport::TestCase
   end
 
   test "signals are not history: no timeline entry, nothing in the requester's export" do
-    @ticket.draft!("propuesta", by: @rose, turn: @ticket.assistant_turn)
+    @ticket.draft!("propuesta", by: @assistant, turn: @ticket.assistant_turn)
 
     assert_empty @ticket.timeline.entries.select { |entry| entry.kind.in?(%i[assistant_turn draft_proposed]) }
     assert_empty @ticket.export[:events].select { |event| event[:kind].in?(%w[assistant_turn draft_proposed]) }
