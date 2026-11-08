@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-08
+
+The assistant seat is where an external system drafts. No migration, and no
+change to behaviour or to any runtime API.
+
+### Removed
+
+- **The `support_desk:assistant` generator** and its templates (a turn job,
+  a service with an `answer` to fill in, and a job test). It scaffolded an
+  in-app brain that calls a model; the seat is the slot an external system
+  such as ReplyBrain drafts into. Files it already wrote in your app are
+  yours and keep working. To set up a seat now, paste the `config.assistant`
+  stanza from the README (or the commented one in the generated
+  initializer), schedule the two sweeps, and let the drafting system call
+  `ticket.respond!(text, by: SupportDesk.assistant(key), turn:)`; or write
+  your own harness on `:assistant_turn`, which is unchanged.
+
+### Changed
+
+- The README's Assistants section, the initializer template, the install
+  and upgrade messages, the code comments and the test helpers name the
+  seat neutrally (`:assistant`, "Assistant") instead of a persona.
+  `configure_assistant!` in the gem's own test helper defaults to
+  `:assistant`. Entries below keep the names they were written with.
+
 ## [0.7.0] - 2026-11-03
 
 ### Added
